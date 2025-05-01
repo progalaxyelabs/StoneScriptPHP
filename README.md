@@ -1,4 +1,4 @@
-# Sunbird API
+# StoneScriptPHP
 ## A minimalistic backend framework for building APIs using PHP and PostgreSQL
 
 ---------------------------------------------------------------
