@@ -53,16 +53,16 @@ this will create a `FnFunctionName.php` in `src/App/Database/Functions` folder
 This can be used to call the SQl function from PHP with proper arguments with reasonable typing that PHP allows. To see that in action, create an api route.
 
 
-### create a api route:
+### create an api route:
 
 ```shell
 
 # cd Framework/cli
-php generate-route.php route-name
+php generate-route.php update-trophies
 
 ```
 
-this will create a `RouteNameRoute.php` file in `Routes` folder
+this will create a `UpdateTrophiesRoute.php` file in `Routes` folder
 
 
 ### create url to class route mapping:
@@ -76,7 +76,7 @@ return [
     ...
     'POST' => [
          ...
-        '/update-trophies' => RouteNameRoute:class
+        '/update-trophies' => UpdateTrophiesRoute:class
         ...
     ]
     ...
@@ -87,7 +87,7 @@ return [
 
 ### implement the route class's process function:
 
-in `RouteNameRoute.php`, in `process` function, call the database function and return data
+in `UpdateTrophiesRoute.php`, in `process` function, call the database function and return data
 
 
 ex:
@@ -95,12 +95,9 @@ ex:
 
 ```php
 
-$data = FnUpdateCourseDetails::run(
-    $this->name, 
-    $this->email, 
-    $this->course_id, 
-    $this->batch_id, 
-    $this->section_id
+$data = FnUpdatetrophyDetails::run(
+    $user_trophy_id,
+    $count
 );
 
 return new ApiResponse('ok', '', [
