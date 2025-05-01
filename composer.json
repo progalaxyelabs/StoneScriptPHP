@@ -1,6 +1,6 @@
 {
-    "name": "sunbird/sunbird-api",
-    "version": "0.2.0",
+    "name": "progalaxyelabs/stone-script-php",
+    "description": "A minimalistic backend framework for building APIs using PHP and PostgreSQL",
     "type": "project",
     "license": "proprietary",
     "authors": [
@@ -10,6 +10,7 @@
         }
     ],
     "require": {
+        "php": ">=8.2",
         "firebase/php-jwt": "^6.10",
         "phpoffice/phpspreadsheet": "^2.0"
     }

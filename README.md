@@ -1,5 +1,5 @@
 # Sunbird API
-## A minimalistic backend framework using PHP and PostgreSQL
+## A minimalistic backend framework for building APIs using PHP and PostgreSQL
 
 ---------------------------------------------------------------
 
