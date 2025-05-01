@@ -1,0 +1,16 @@
+{
+    "name": "sunbird/sunbird-api",
+    "version": "0.2.0",
+    "type": "project",
+    "license": "proprietary",
+    "authors": [
+        {
+            "name": "Pradeep DSMK",
+            "email": "pradeepdsmk@gmail.com"
+        }
+    ],
+    "require": {
+        "firebase/php-jwt": "^6.10",
+        "phpoffice/phpspreadsheet": "^2.0"
+    }
+}

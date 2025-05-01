@@ -1,0 +1,9 @@
+.env
+
+/vendor/
+
+*.pem
+*.pub
+/uploads
+logs/*
+!logs/index.php

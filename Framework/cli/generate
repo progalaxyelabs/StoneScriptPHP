@@ -1,0 +1,3 @@
+<?php
+
+echo ($argv[1] ?? 'what??') . PHP_EOL;
