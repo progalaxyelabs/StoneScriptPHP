@@ -1,5 +1,6 @@
 <?php
 
+use App\Routes\GoogleOauthRoute;
 use App\Routes\HomeRoute;
 
 return [
@@ -7,5 +8,6 @@ return [
         '/' => HomeRoute::class,
     ],
     'POST' => [
+        '/auth/google' => GoogleOauthRoute::class
     ]
 ];
