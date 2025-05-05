@@ -2,7 +2,7 @@
     "name": "progalaxyelabs/stone-script-php",
     "description": "A minimalistic backend framework for building APIs using PHP and PostgreSQL",
     "type": "project",
-    "license": "proprietary",
+    "license": "MIT",
     "authors": [
         {
             "name": "Pradeep Kumar",
