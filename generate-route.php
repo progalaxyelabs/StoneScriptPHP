@@ -8,14 +8,14 @@ if ($argc !== 2) {
 // $method = $argv[1];
 $classname = implode(array_map(fn($str) => ucfirst($str), explode('-', $argv[1]))) . 'Route';
 $route_filename = $classname . '.php';
-$route_filepath = __DIR__ . DIRECTORY_SEPARATOR . 'Routes' . DIRECTORY_SEPARATOR. $route_filename;
+$route_filepath = join(DIRECTORY_SEPARATOR, [__DIR__, 'src', 'App', 'Routes', $route_filename]);
 $route_file_content = <<<EOD
 <?php
 
-namespace Routes;
+namespace App\Routes;
 
+use Framework\ApiResponse;
 use Framework\IRouteHandler;
-use Models\ApiResponse;
 
 class $classname implements IRouteHandler
 {
@@ -27,7 +27,7 @@ class $classname implements IRouteHandler
     public function process(): ApiResponse
     {
         // return new ApiResponse('ok', '', []);
-        throw new Exception('Not Implemented');
+        throw new \Exception('Not Implemented');
     }
 
 }

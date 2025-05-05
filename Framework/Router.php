@@ -21,7 +21,7 @@ abstract class RequestParser
     public function __construct()
     {
         $this->routes = require CONFIG_PATH . 'routes.php';
-        $this->allowed_origins =  require CONFIG_PATH . 'allowed_origins.php';
+        $this->allowed_origins =  require CONFIG_PATH . 'allowed-origins.php';
 
         $this->request_path = parse_url($_SERVER['REQUEST_URI'])['path'] ?? '';
         log_debug("request path is [$this->request_path]");
@@ -249,7 +249,7 @@ class Router
     //     global $timings;
 
     //     $routes = require ROOT_PATH . 'Config/routes.php';
-    //     $allowed_origins =  require ROOT_PATH . 'Config/allowed_origins.php';
+    //     $allowed_origins =  require ROOT_PATH . 'src/config/allowed-origins.php';
 
     //     if (strtolower($_SERVER['REQUEST_URI']) === '.env') {
     //         return e404();
