@@ -29,12 +29,13 @@ define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
 define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
 define('FRAMEWORK_PATH', ROOT_PATH . 'Framework' . DIRECTORY_SEPARATOR);
 
-
+include 'Logger.php';
 include 'functions.php';
-include FRAMEWORK_PATH . 'error_handler.php';
+include 'error_handler.php';
 
 
 spl_autoload_register(function ($class) {
+    // log_debug('spl_autolaod_register: ' . $class);
     if(str_starts_with($class, 'App\\')) {
         $path = SRC_PATH . str_replace('\\', DIRECTORY_SEPARATOR, $class) . '.php';    
     } else if(str_starts_with($class, 'Framework\\')) {
