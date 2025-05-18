@@ -8,11 +8,16 @@ if ($argc !== 2) {
 }
 
 $src_filepath = join(DIRECTORY_SEPARATOR, [
-    '..', 'postgresql', 'functions', str_replace('..', '.', $argv[1])
+    __DIR__,
+    'src',
+    'postgresql',
+    'functions',
+    str_replace('..', '.', $argv[1])
 ]);
 
+
 if (!file_exists($src_filepath)) {
-    echo 'file does not exist' . PHP_EOL;
+    echo "file does not exist [$src_filepath]" . PHP_EOL;
     die(0);
 }
 
@@ -100,43 +105,74 @@ list($typed_input_params, $input_params) = get_input_params($matches[4], $type_m
 list($output_params, $is_return_table) = get_output_params($matches[4], $matches[6], $type_map);
 
 $sql_fn_name = strtolower($matches[2]);
-$class_name = implode('', array_map(fn ($item) => ucfirst($item), explode('_', $sql_fn_name)));
+$class_name = implode('', array_map(fn($item) => ucfirst($item), explode('_', $sql_fn_name)));
 $model_class_name = $class_name . 'Model';
-$fn_class_name = 'Fn' . $class_name;
-
-$lines = [];
-$lines[] = '<?php';
-$lines[] = '';
-$lines[] = 'namespace Database\Functions;';
-$lines[] = '';
-$lines[] = 'use Framework\Database;';
-$lines[] = '';
-$lines[] = "class $model_class_name";
-$lines[] = '{';
-foreach ($output_params as $name => $type) {
-    $lines[] = "   public $type $$name;";
-}
-$lines[] = '}';
-$lines[] = '';
-$lines[] = "class $fn_class_name";
-$lines[] = '{';
+$fn_class_name = 'DbFn' . $class_name;
 
 $typed_input_params_str = join(', ', $typed_input_params);
 $input_params_str = join(', ', $input_params);
 
-$lines[] = '    /**';
-$lines[] = '     * @return ' . $model_class_name . ($is_return_table ? '[]' : '');
-$lines[] = '     */';
-$lines[] = "    public static function run($typed_input_params_str): " . ($is_return_table ? 'array' : $model_class_name);
-$lines[] = '    {';
-$lines[] = '        $function_name = ' . "'" . $sql_fn_name . "'" . ';';
-$lines[] = '        $rows = Database::fn($function_name, [' . $input_params_str . ']);';
-$lines[] = '        return Database::' . ($is_return_table ? 'result_as_table' : 'result_as_object') . '($function_name, $rows, ' . $model_class_name . '::class);';
-$lines[] = '    }';
-$lines[] = '}';
+$output_properties_section = "";
+if (!empty($output_params)) {
+    $property_lines = [];
+    foreach ($output_params as $name => $type) {
+        $property_lines[] = "public $type $$name;";
+    }
+    $output_properties_section = join("\n    ", $property_lines);
+}
 
-$dst_filepath = '..' . DIRECTORY_SEPARATOR . 'Database' . DIRECTORY_SEPARATOR . 'Functions' . DIRECTORY_SEPARATOR . $fn_class_name . '.php';
-$status = file_put_contents($dst_filepath, join("\n", $lines));
+$return_type_annotation = $model_class_name . ($is_return_table ? '[]' : '');
+$actual_return_type = $is_return_table ? 'array' : $model_class_name;
+$database_method = $is_return_table ? 'result_as_table' : 'result_as_object';
+
+$generated_code = <<<PHP
+<?php
+
+namespace App\Database\Functions;
+
+use Framework\Database;
+
+class {$model_class_name}
+{
+    {$output_properties_section}
+}
+
+class {$fn_class_name}
+{
+    /**
+     * @return {$return_type_annotation}
+     */
+    public static function run({$typed_input_params_str}): {$actual_return_type}
+    {
+        \$function_name = '{$sql_fn_name}';
+        \$rows = Database::fn(\$function_name, [{$input_params_str}]);
+        return Database::{$database_method}(\$function_name, \$rows, {$model_class_name}::class);
+    }
+}
+
+// function db_fn_create_project({$typed_input_params_str}): {$actual_return_type}
+// {
+//     \$function_name = '{$sql_fn_name}';
+//     \$rows = Database::fn(\$function_name, [{$input_params_str}]);
+//     return Database::{$database_method}(\$function_name, \$rows, {$model_class_name}::class);
+// }
+PHP;
+
+$database_folder = join(DIRECTORY_SEPARATOR, [
+    __DIR__,
+    'src',
+    'App',
+    'Database'
+]);
+$functions_folder = $database_folder . DIRECTORY_SEPARATOR . 'Functions';
+$dst_filepath = $functions_folder . DIRECTORY_SEPARATOR . $fn_class_name . '.php';
+if (!file_exists($database_folder)) {
+    mkdir($database_folder);
+}
+if (!file_exists($functions_folder)) {
+    mkdir($functions_folder);
+}
+$status = file_put_contents($dst_filepath, $generated_code);
 if ($status === false) {
     echo 'error writing to file ' . $dst_filepath . PHP_EOL;
     die(0);
