@@ -1,9 +1,10 @@
 <?php
 
+use Framework\Logger;
 use Framework\Router;
 
-require '../Framework/bootstrap.php';
-require '../vendor/autoload.php';
+require __DIR__ . '/../Framework/bootstrap.php';
+require __DIR__ . '/../vendor/autoload.php';
 
 enum RequestMethod : string {
     case get = 'GET';
@@ -40,8 +41,8 @@ if ($http_response_code === 200) {
 }
 
 if (DEBUG_MODE) {
-    // $body['log'] = Logger::get_instance()->get_all();
-    $body['files'] = get_included_files();
+    $body['log'] = Logger::get_instance()->get_all();
+    // $body['files'] = get_included_files();
     $process_time = (microtime(true) - INDEX_START_TIME);
     $route_parsing_time = isset($timings['route_parsing_complete']) ? ($timings['route_parsing_complete'] - $handle_route_start_time) : 0;
     $db_initialization_time = isset($timings['db_initialization_complete']) ? ($timings['db_initialization_complete'] - $timings['route_parsing_complete']) : 0;
@@ -67,6 +68,7 @@ if ($http_response_code === 200) {
 }
 
 header('Content-Type: application/json');
+// header("Content-Security-Policy: default-src 'self'");
 if (DEBUG_MODE === 1) {
     echo json_encode($body);
 } else {
