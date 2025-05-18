@@ -12,7 +12,7 @@ use DomainException;
 use InvalidArgumentException;
 use UnexpectedValueException;
 
-class MyTokens
+class JWTAuth
 {
     const PEM_FILE_PATH = ROOT_PATH .'stone-script-php.pem';
     const PUB_FILE_PATH = ROOT_PATH .'stone-script-php.pub';
