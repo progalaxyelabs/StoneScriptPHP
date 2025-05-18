@@ -60,7 +60,11 @@ abstract class RequestParser
 
         $input = $this->extract_input();
         if ($this->error) {
-            return e400();
+            if (DEBUG_MODE) {
+                return e400($this->error);
+            } else {
+                return e400();
+            }
         }
 
         $reflect = new ReflectionClass($instance);
@@ -108,12 +112,11 @@ abstract class RequestParser
         $this->add_cors_headers();
 
         if (!($response instanceof ApiResponse)) {
-            if(DEBUG_MODE) {
+            if (DEBUG_MODE) {
                 return res_not_ok(var_export($response, true));
             } else {
                 return res_not_ok('Expected ApiResponse, got array??');
             }
-            
         }
 
         return $response;
@@ -146,7 +149,13 @@ class PostRequestParser extends RequestParser
 {
     public function extract_input(): array
     {
-        $content_type = $_SERVER['CONTENT_TYPE'] ?? '';
+        if (!isset($_SERVER['CONTENT_TYPE'])) {
+            $this->error = 'missing content type. expected application/json.';
+            log_debug($this->error);
+            return [];
+        }
+
+        $content_type = $_SERVER['CONTENT_TYPE'];
 
         if ($content_type !== 'application/json') {
             $this->error = 'invalid content type. 
@@ -390,6 +399,7 @@ class Router
     public function process_route(): ApiResponse
     {
         // global $timings;
+        // log_debug(print_r($_SERVER, true));
 
         if (strtolower($_SERVER['REQUEST_URI']) === '.env') {
             return e404();
