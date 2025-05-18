@@ -80,7 +80,7 @@ function handle_file_command($options)
         die(0);
     }
     echo 'file ok' . PHP_EOL;
-    include '../Framework/bootstrap.php';    
+    include __DIR__ . '/../Framework/bootstrap.php';    
     $sql = file_get_contents($filepath);
     echo $sql . PHP_EOL;
     $status = Database::query($sql);
@@ -100,7 +100,7 @@ function handle_query_command($options) {
         die(0);
     }
 
-    include '../Framework/bootstrap.php';    
+    include __DIR__ . '/../Framework/bootstrap.php';    
     $status = Database::query($statement);
     echo 'Executed. ' . $status . PHP_EOL;
     die(0);
