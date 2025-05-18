@@ -10,9 +10,7 @@ use Throwable;
 class Logger
 {
     private static ?Logger $_instance = null;
-    private function __construct()
-    {
-    }
+    private function __construct() {}
 
     const ERROR_STRINGS = [
         E_ERROR => "E_ERROR",
@@ -26,7 +24,6 @@ class Logger
         E_USER_ERROR => "E_USER_ERROR",
         E_USER_WARNING => "E_USER_WARNING",
         E_USER_NOTICE => "E_USER_NOTICE",
-        E_STRICT => "E_STRICT",
         E_RECOVERABLE_ERROR => "E_RECOVERABLE_ERROR",
         E_DEPRECATED => "E_DEPRECATED",
         E_USER_DEPRECATED => "E_USER_DEPRECATED",
@@ -41,46 +38,61 @@ class Logger
         return Logger::$_instance;
     }
 
-    // private array $lines = [];
+    private array $lines = [];
 
     public function log_debug($message): void
     {
         if (DEBUG_MODE) {
+            $this->lines[] = $message;
             $this->write_to_file("DEBUG: $message");
         }
-        // $this->lines[] = $message;
     }
 
     public function log_error($message): void
     {
-        // $this->lines[] = 'ERROR ERROR : ' . $message;
-        $this->write_to_file("ERROR: $message");
+        $line = "ERROR: $message";
+        $this->write_to_file($line);
+        if (DEBUG_MODE) {
+            $this->lines[] = $line;
+        }
     }
 
     public function log_php_error(int $error_number, string $message, string $file, int $line_number): void
-    {        
+    {
         $level = self::ERROR_STRINGS[$error_number];
-        $this->write_to_file("$level: $message in file $file line $line_number");
+        $line = "PHP $level: $message in file $file line $line_number";
+        $this->write_to_file($line);
+        if (DEBUG_MODE) {
+            $this->lines[] = $line;
+        }
     }
 
     public function log_php_exception(Throwable $exception): void
     {
-        
+
         $level = 'FATAL EXCEPTION [' . $exception->getCode() . ']';
         $message = $exception->getMessage();
         $file = $exception->getFile();
         $line_number = $exception->getLine();
-        $this->write_to_file("$level: $message in file $file line $line_number");
+        $line = "$level: $message in file $file line $line_number";
+        $this->write_to_file($line);
+        if (DEBUG_MODE) {
+            $this->lines[] = $line;
+        }
     }
 
-    // public function get_all(): array
-    // {
-    //     $a = [];
-    //     foreach ($this->lines as $line) {
-    //         $a[] = $line;
-    //     }
-    //     return $a;
-    // }
+    public function get_all(): array
+    {
+        if (!DEBUG_MODE) {
+            return [];
+        }
+
+        $a = [];
+        foreach ($this->lines as $line) {
+            $a[] = $line;
+        }
+        return $a;
+    }
 
     private function write_to_file($line)
     {
