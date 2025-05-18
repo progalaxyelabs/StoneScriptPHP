@@ -14,6 +14,10 @@ use UnexpectedValueException;
 
 class MyTokens
 {
+    const PEM_FILE_PATH = ROOT_PATH .'stone-script-php.pem';
+    const PUB_FILE_PATH = ROOT_PATH .'stone-script-php.pub';
+    const KEY_TYPE = 'ed25519';
+    const JWT_ALGORITHM = 'RS256';
 
     public function __construct()
     {
@@ -34,7 +38,7 @@ class MyTokens
         return $claims;
     }
 
-    protected function tokenFromAuthorizationHeader($request)
+    protected function tokenFromAuthorizationHeader($request): string
     {
         $authorization_header = $request->getServer('HTTP_AUTHORIZATION');
         if (!$authorization_header) {
@@ -46,16 +50,16 @@ class MyTokens
         return $token;
     }
 
-    public function decodeToken($token, $allow_expiry = false)
+    public function decodeToken($token, $allow_expiry = false): ?MyTokenClaims
     {
-        $public_key = file_get_contents(ROOT_PATH . 'instituteappapikey.pub');
-        if (!$public_key) {
+        $public_key = file_get_contents(self::PUB_FILE_PATH);
+        if ($public_key === false) {
             log_error(__METHOD__ . ' - no public key file');
             return null;
         }
 
         try {
-            $decoded_token = JWT::decode($token, new Key($public_key, 'RS256'));
+            $decoded_token = JWT::decode($token, new Key($public_key, self::JWT_ALGORITHM));
             $claims = MyTokenClaims::fromDecodedToken($decoded_token);
             return $claims;
         } catch (InvalidArgumentException $e) {
@@ -94,17 +98,10 @@ class MyTokens
         // $ mv key.pem.pub key.pub
         // give read permissions for the key.pem file on some linux distros
         // $ chmod go+r key.pem
-        
-        $pem_file_path = ROOT_PATH . 'key.pem';
-        if(!file_exists($pem_file_path)) {
-            log_error('user signin - no private key file at ' . $pem_file_path);
-            return null;
-        }
-
-        $pass_phrase = '12345678';
+                
+        $pass_phrase = '';
         $private_key = openssl_pkey_get_private(
-            // 'file://' . $pem_file_path,
-            file_get_contents($pem_file_path),
+            file_get_contents(self::PEM_FILE_PATH),
             $pass_phrase
         );
         if (!$private_key) {
@@ -115,25 +112,26 @@ class MyTokens
         $now = new \DateTimeImmutable();
         $access_issued_at = $now;
         $access_expires_at = $access_issued_at->modify('+15 minutes');
+        include CONFIG_PATH . 'app.php';
         $access_payload = [
-            'iss' => 'instituteapp.in',
+            'iss' => APP_DOMAIN,
             'iat' => $access_issued_at->getTimestamp(),
             'exp' => $access_expires_at->getTimestamp(),
             'user_id' => $user_id
         ];
-        $access_token = JWT::encode($access_payload, $private_key, 'RS256');
+        $access_token = JWT::encode($access_payload, $private_key, self::JWT_ALGORITHM);
 
         $refresh_token = '';
         if ($generate_refresh_token) {
             $refresh_issued_at = $now;
             $refresh_expires_at = $refresh_issued_at->modify('+180 days');
             $refresh_payload = [
-                'iss' => 'instituteapp.in',
+                'iss' => APP_DOMAIN,
                 'iat' => $refresh_issued_at->getTimestamp(),
                 'exp' => $refresh_expires_at->getTimestamp(),
                 'user_id' => $user_id
             ];
-            $refresh_token = JWT::encode($refresh_payload, $private_key, 'RS256');
+            $refresh_token = JWT::encode($refresh_payload, $private_key, self::JWT_ALGORITHM);
         }
 
         return [$access_token, $refresh_token];
