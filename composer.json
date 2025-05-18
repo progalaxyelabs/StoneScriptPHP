@@ -3,6 +3,13 @@
     "description": "A minimalistic backend framework for building APIs using PHP and PostgreSQL",
     "type": "project",
     "license": "MIT",
+    "scripts": {
+        "post-create-project-cmd": [
+            "chmod +x generate_openssl_keypair.sh",
+            "./generate_openssl_keypair.sh",
+            "chmod -x generate_openssl_keypair.sh"
+        ]
+    },
     "require": {
         "php": ">=8.2",
         "firebase/php-jwt": "^6.11",
