@@ -3,12 +3,6 @@
     "description": "A minimalistic backend framework for building APIs using PHP and PostgreSQL",
     "type": "project",
     "license": "MIT",
-    "authors": [
-        {
-            "name": "Pradeep Kumar",
-            "email": "pradeepkumardesk@gmail.com"
-        }
-    ],
     "require": {
         "php": ">=8.2",
         "firebase/php-jwt": "^6.11",
