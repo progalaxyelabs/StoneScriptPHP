@@ -22,10 +22,12 @@ function res_not_ok($message) {
 }
 
 function res_error($message) {
+    log_error('res_error: ' . $message);
     return new ApiResponse('error', $message);
-    if(DEBUG_MODE) {
-        return new ApiResponse('error', $message);
-    } else {
-        return new ApiResponse('error', 'server error.');
-    }
+    
+    // if(DEBUG_MODE) {
+    //     return new ApiResponse('error', $message);
+    // } else {
+    //     return new ApiResponse('error', 'server error.');
+    // }
 }
