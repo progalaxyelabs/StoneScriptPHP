@@ -8,13 +8,6 @@ class MyZeptoMail
 {
     public static function send($recipient_email, $recipient_name, $email_subject, $email_body): bool
     {
-
-
-        // $zeptomail_bounce_address = getenv('ZEPTOMAIL_BOUNCE_ADDRESS') ?? '';
-        // $zeptomail_sender_email = getenv('ZEPTOMAIL_SENDER_EMAIL') ?? '';
-        // $zeptomail_sender_name = getenv('ZEPTOMAIL_SENDER_NAME') ?? '';
-        // $zeptomail_send_mail_token = getenv('ZEPTOMAIL_SEND_MAIL_TOKEN') ?? '';
-
         $zeptomail_bounce_address = Env::$ZEPTOMAIL_BOUNCE_ADDRESS;
         $zeptomail_sender_email = Env::$ZEPTOMAIL_SENDER_EMAIL;
         $zeptomail_sender_name = Env::$ZEPTOMAIL_SENDER_NAME;
