@@ -1,5 +1,6 @@
 <?php
 
+use App\Env;
 use Framework\Logger;
 use function Framework\e500;
 
@@ -10,21 +11,6 @@ define('APP_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR);
 define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
 define('FRAMEWORK_PATH', ROOT_PATH . 'Framework' . DIRECTORY_SEPARATOR);
 
-define('DEBUG_MODE', 0);
-
-date_default_timezone_set('UTC');
-
-if (DEBUG_MODE) {
-    error_reporting(E_ALL);
-    ini_set('display_errors', 1);
-}
-
-$timings = [];
-
-include 'Logger.php';
-include 'functions.php';
-include 'error_handler.php';
-include APP_PATH . 'Env.php';
 
 set_error_handler(function (int $error_number, string $message, string $file, int $line_number) {
     Logger::get_instance()->log_php_error($error_number, $message, $file, $line_number);
@@ -33,6 +19,11 @@ set_error_handler(function (int $error_number, string $message, string $file, in
 set_exception_handler(function (Throwable $exception) {
     Logger::get_instance()->log_php_exception($exception);
 });
+
+
+include 'Logger.php';
+include 'functions.php';
+include 'error_handler.php';
 
 spl_autoload_register(function ($class) {
     // log_debug('spl_autolaod_register: ' . $class);
@@ -57,3 +48,18 @@ spl_autoload_register(function ($class) {
         }
     }
 });
+
+include APP_PATH . 'Env.php';
+
+init_env();
+
+define('DEBUG_MODE', Env::$DEBUG_MODE);
+
+date_default_timezone_set(Env::$TIMEZONE);
+
+if (DEBUG_MODE) {
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+}
+
+$timings = [];

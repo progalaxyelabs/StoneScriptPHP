@@ -5,13 +5,17 @@
     "license": "MIT",
     "scripts": {
         "post-create-project-cmd": [
-            "chmod +x generate_openssl_keypair.sh",
-            "./generate_openssl_keypair.sh",
-            "chmod -x generate_openssl_keypair.sh"
+            "chmod +x generate-openssl-keypair.sh",
+            "./generate-openssl-keypair.sh",
+            "chmod -x generate-openssl-keypair.sh",
+            "@generate-dotenv"
         ],
         "serve": [
             "Composer\\Config::disableProcessTimeout",
             "php serve.php"
+        ],
+        "generate-dotenv": [
+            "php generate-dotenv.php"
         ]
     },
     "require": {

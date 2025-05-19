@@ -28,7 +28,7 @@ class Database
         $user = Env::$DATABASE_USER;
         $password = Env::$DATABASE_PASSWORD;
         $dbname = Env::$DATABASE_DBNAME;
-        $timeout = Env::$DATABASE_TIMEOUT;
+        // $timeout = Env::$DATABASE_TIMEOUT;
         $appname = Env::$DATABASE_APPNAME;
 
         $connection_string = join(' ', [
@@ -37,7 +37,7 @@ class Database
             "user=$user",
             "password=$password",
             "dbname=$dbname",
-            "connect_timeout=$timeout",
+            // "connect_timeout=$timeout",
             "options='--application_name=$appname'"
         ]);
 
