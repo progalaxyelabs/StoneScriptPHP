@@ -18,6 +18,11 @@ php serve.php
 By default, this will use the port 9100.
 You can check the server running by opening the browser and navigating to `http://localhost:9100`
 
+there is also a composer script available 
+```
+composer serve
+```
+
 
 ## Workflow
 

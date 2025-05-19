@@ -8,6 +8,10 @@
             "chmod +x generate_openssl_keypair.sh",
             "./generate_openssl_keypair.sh",
             "chmod -x generate_openssl_keypair.sh"
+        ],
+        "serve": [
+            "Composer\\Config::disableProcessTimeout",
+            "php serve.php"
         ]
     },
     "require": {
