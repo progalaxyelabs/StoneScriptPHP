@@ -17,8 +17,6 @@ enum RequestMethod : string {
     case other = '';
 }
 
-log_debug("--------------------------------------------------");
-
 $routing_start_time = microtime(true);
 
 ob_start();
@@ -48,7 +46,7 @@ if (DEBUG_MODE) {
     $db_initialization_time = isset($timings['db_initialization_complete']) ? ($timings['db_initialization_complete'] - $timings['route_parsing_complete']) : 0;
     $body['timings'] = [
         'request_time' => $_SERVER['REQUEST_TIME_FLOAT'],
-        'index_ start_time' => INDEX_START_TIME,
+        'index_start_time' => INDEX_START_TIME,
         'index_before_json_encode' => $process_time,
         'handover' => number_format(((INDEX_START_TIME - $_SERVER['REQUEST_TIME_FLOAT']) * 1000), 2) . "ms",
         'handle_route' => number_format(($handle_route_end_time - $handle_route_start_time) * 1000, 2) . "ms",

@@ -57,6 +57,9 @@ define('DEBUG_MODE', Env::$DEBUG_MODE);
 
 date_default_timezone_set(Env::$TIMEZONE);
 
+$method_and_url = $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'];
+log_debug("---------- {$method_and_url} ----------}");
+
 if (DEBUG_MODE) {
     error_reporting(E_ALL);
     ini_set('display_errors', 1);

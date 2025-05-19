@@ -23,7 +23,8 @@ function res_not_ok($message) {
 }
 
 function res_error($message) {
-    log_error('res_error: ' . $message);
+    $method_and_url = $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'];
+    log_error('res_error: ' . $method_and_url . ' - ' . $message);
     return new ApiResponse('error', $message);
     
     // if(DEBUG_MODE) {
@@ -42,24 +43,14 @@ function init_env()
         throw new \Exception($message);
     }
 
-    // $class = get_class();
-    $class = 'App\Env';
-
-    // $properties = array_filter(array_keys(get_class_vars($class)), function ($item) {
-    //     return ($item !== '_instance');
-    // });
-    $properties = array_keys(get_class_vars($class));
-
-    // log_debug('env properties are ' . var_export($properties, true));
-
-    // $class = get_class();
+    $env_properties = array_keys(get_class_vars(Env::class));
 
     $missing_keys = [];
 
-    $dotenv = parse_ini_file($env_file_path);
-    foreach ($properties as $key) {
-        if (array_key_exists($key, $dotenv)) {
-            Env::$$key = $dotenv[$key];
+    $dotenv_settings = parse_ini_file($env_file_path);
+    foreach ($env_properties as $key) {
+        if (array_key_exists($key, $dotenv_settings)) {
+            Env::$$key = $dotenv_settings[$key];
         } else {
             log_debug("missing setting in .env file [$key]");
             $missing_keys[] = $key;
