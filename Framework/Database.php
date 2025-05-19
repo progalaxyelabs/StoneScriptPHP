@@ -2,6 +2,7 @@
 
 namespace Framework;
 
+use App\Env;
 use DateTime;
 use Error;
 use Exception;
@@ -20,15 +21,15 @@ class Database
 
     private function __construct()
     {
-        $env = Env::get_instance();
+        // $env = Env::get_instance();
 
-        $host = $env->DATABASE_HOST;
-        $port = $env->DATABASE_PORT;
-        $user = $env->DATABASE_USER;
-        $password = $env->DATABASE_PASSWORD;
-        $dbname = $env->DATABASE_DBNAME;
-        $timeout = $env->DATABASE_TIMEOUT;
-        $appname = $env->DATABASE_APPNAME;
+        $host = Env::$DATABASE_HOST;
+        $port = Env::$DATABASE_PORT;
+        $user = Env::$DATABASE_USER;
+        $password = Env::$DATABASE_PASSWORD;
+        $dbname = Env::$DATABASE_DBNAME;
+        $timeout = Env::$DATABASE_TIMEOUT;
+        $appname = Env::$DATABASE_APPNAME;
 
         $connection_string = join(' ', [
             "host=$host",

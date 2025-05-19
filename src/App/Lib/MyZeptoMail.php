@@ -2,28 +2,27 @@
 
 namespace App\Lib;
 
-use Framework\Env;
+use App\Env;
 
 class MyZeptoMail
 {
     public static function send($recipient_email, $recipient_name, $email_subject, $email_body): bool
     {
 
-        $env = Env::get_instance();
 
         // $zeptomail_bounce_address = getenv('ZEPTOMAIL_BOUNCE_ADDRESS') ?? '';
         // $zeptomail_sender_email = getenv('ZEPTOMAIL_SENDER_EMAIL') ?? '';
         // $zeptomail_sender_name = getenv('ZEPTOMAIL_SENDER_NAME') ?? '';
         // $zeptomail_send_mail_token = getenv('ZEPTOMAIL_SEND_MAIL_TOKEN') ?? '';
 
-        $zeptomail_bounce_address = $env->ZEPTOMAIL_BOUNCE_ADDRESS;
-        $zeptomail_sender_email = $env->ZEPTOMAIL_SENDER_EMAIL;
-        $zeptomail_sender_name = $env->ZEPTOMAIL_SENDER_NAME;
-        $zeptomail_send_mail_token = $env->ZEPTOMAIL_SEND_MAIL_TOKEN;
+        $zeptomail_bounce_address = Env::$ZEPTOMAIL_BOUNCE_ADDRESS;
+        $zeptomail_sender_email = Env::$ZEPTOMAIL_SENDER_EMAIL;
+        $zeptomail_sender_name = Env::$ZEPTOMAIL_SENDER_NAME;
+        $zeptomail_send_mail_token = Env::$ZEPTOMAIL_SEND_MAIL_TOKEN;
 
         if (!$zeptomail_bounce_address || !$zeptomail_sender_email || !$zeptomail_sender_name || !$zeptomail_send_mail_token) {
             log_error(__METHOD__ . ' Settings for zeptomail not properly configured. 
-                                                Please configure bounce address, sender eamil, sender name, send mail token');
+                                    Please configure bounce address, sender eamil, sender name, send mail token');
             return false;
         }
 
