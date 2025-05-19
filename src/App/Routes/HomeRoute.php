@@ -3,7 +3,6 @@
 namespace App\Routes;
 
 use Framework\ApiResponse;
-use Framework\Database;
 use Framework\IRouteHandler;
 
 class HomeRoute implements IRouteHandler
@@ -14,7 +13,7 @@ class HomeRoute implements IRouteHandler
     }
 
     function process(): ApiResponse
-    {        
-        return res_ok([], 'visit home page' );
+    {
+        return res_ok([], 'visit home page');
     }
 }
