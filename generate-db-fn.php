@@ -1,9 +1,9 @@
 <?php
 
-// php generate-model.php filename.pssql
+// php generate-db-fn.php filename.pssql
 
 if ($argc !== 2) {
-    echo 'usage: php generate-model.php filename.pssql' . PHP_EOL;
+    echo 'usage: php generate-db-fn.php filename.pssql' . PHP_EOL;
     die(0);
 }
 
