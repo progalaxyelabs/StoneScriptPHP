@@ -3,6 +3,7 @@
 namespace App\Routes;
 
 use Framework\ApiResponse;
+use Framework\Database;
 use Framework\IRouteHandler;
 
 require CONFIG_PATH . 'google-oauth.php';
@@ -29,6 +30,8 @@ class GoogleOauthRoute implements IRouteHandler
                 $email_verified = isset($payload['email_verified']) ? $payload['email_verified'] : false;
                 $name = isset($payload['name']) ? $payload['name'] : null;
                 $picture = isset($payload['picture']) ? $payload['picture'] : null;
+
+                // $db = Database::get_insta
 
                 // --- IMPORTANT: Backend Authentication/Registration Logic ---
                 // 1. Check if user exists in your database using $google_id (preferred) or $email
@@ -70,12 +73,12 @@ class GoogleOauthRoute implements IRouteHandler
             } else {                
                 // Invalid Token (verification failed)
                 http_response_code(401); // Unauthorized
-                error_log("Google Sign-In Error: Invalid ID token received.");
+                log_error("Google Sign-In Error: Invalid ID token received.");
                 return new ApiResponse('not ok', 'Invalid ID token', []);
             }
         } catch (\Exception $e) {
             http_response_code(500);
-            error_log("Google Sign-In Exception: " . $e->getMessage());
+            log_error("Google Sign-In Exception: " . $e->getMessage());
             return new ApiResponse('not ok', 'Token verification failed', []);
         }        
     }

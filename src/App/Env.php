@@ -20,5 +20,7 @@ class Env
     public static int    $DEBUG_MODE = 0;
 
     public static string $TIMEZONE = 'UTC';
+
+    public static string $OAUTH_APP_DOMAIN = '';
 }
 

@@ -60,11 +60,11 @@ if (isset($_GET['code'])) {
 
 
             // --- Simplified Example: Store info directly in session (Not recommended for production without DB integration) ---
-            $_SESSION['user_id_google'] = $google_id; // Store Google's ID
-            $_SESSION['user_email'] = $email;
-            $_SESSION['user_name'] = $name;
-            $_SESSION['user_picture'] = $picture;
-            $_SESSION['logged_in'] = true;
+            // $_SESSION['user_id_google'] = $google_id; // Store Google's ID
+            // $_SESSION['user_email'] = $email;
+            // $_SESSION['user_name'] = $name;
+            // $_SESSION['user_picture'] = $picture;
+            // $_SESSION['logged_in'] = true;
 
 
             // Redirect to a protected area (e.g., dashboard)
@@ -73,19 +73,19 @@ if (isset($_GET['code'])) {
 
         } else {
             // Handle error during token exchange
-             error_log("Google OAuth Error: " . $token['error_description']);
+             log_error("Google OAuth Error: " . $token['error_description']);
              header('Location: login.php?error=google_token_error');
              exit();
         }
     } catch (Exception $e) {
         // Handle exceptions during the process
-        error_log("Google OAuth Exception: " . $e->getMessage());
+        log_error("Google OAuth Exception: " . $e->getMessage());
         header('Location: login.php?error=google_exception');
         exit();
     }
 } elseif (isset($_GET['error'])) {
      // Handle error case where user denied access or other Google error
-     error_log("Google OAuth Error (Callback): " . $_GET['error']);
+     log_error("Google OAuth Error (Callback): " . $_GET['error']);
      header('Location: login.php?error=google_denied');
      exit();
 } else {

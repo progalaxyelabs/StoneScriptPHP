@@ -2,6 +2,7 @@
 
 namespace App\Lib;
 
+use App\Env;
 use App\Models\MyTokenClaims;
 use \Firebase\JWT\JWT;
 use \Firebase\JWT\Key;
@@ -114,7 +115,7 @@ class JWTAuth
         $access_expires_at = $access_issued_at->modify('+15 minutes');
         include CONFIG_PATH . 'app.php';
         $access_payload = [
-            'iss' => APP_DOMAIN,
+            'iss' => Env::$OAUTH_APP_DOMAIN,
             'iat' => $access_issued_at->getTimestamp(),
             'exp' => $access_expires_at->getTimestamp(),
             'user_id' => $user_id
@@ -126,7 +127,7 @@ class JWTAuth
             $refresh_issued_at = $now;
             $refresh_expires_at = $refresh_issued_at->modify('+180 days');
             $refresh_payload = [
-                'iss' => APP_DOMAIN,
+                'iss' => Env::$OAUTH_APP_DOMAIN,
                 'iat' => $refresh_issued_at->getTimestamp(),
                 'exp' => $refresh_expires_at->getTimestamp(),
                 'user_id' => $user_id
