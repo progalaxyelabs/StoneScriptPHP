@@ -1,13 +1,15 @@
 <?php
 
-use App\Routes\GoogleOauthRoute;
 use App\Routes\HomeRoute;
+use App\Routes\OauthGoogleRefreshRoute;
+use App\Routes\OauthGoogleVerifyRoute;
 
 return [
     'GET' => [
         '/' => HomeRoute::class,
     ],
     'POST' => [
-        '/auth/google' => GoogleOauthRoute::class
+        '/oauth/google/verify' => OauthGoogleVerifyRoute::class,
+        '/oauth/google/refresh' => OauthGoogleRefreshRoute::class
     ]
 ];

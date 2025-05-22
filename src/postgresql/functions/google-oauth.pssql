@@ -1,0 +1,48 @@
+CREATE OR REPLACE FUNCTION google_oauth (
+    p_google_id VARCHAR(255),
+    p_email VARCHAR(255),
+    p_display_name VARCHAR(255),
+    p_photo_url TEXT
+)
+RETURNS TABLE (
+    user_id UUID,
+    display_name VARCHAR(255),
+    photo_url TEXT,
+    profile_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE
+)
+AS $$
+DECLARE
+    v_user_id UUID;
+BEGIN
+    -- Check if a user with the given google_id already exists
+    SELECT ubi.user_id
+    INTO v_user_id
+    FROM users_google_oauth ugo
+    JOIN users_basic_info ubi ON ugo.user_id = ubi.user_id
+    WHERE ugo.google_id = p_google_id;
+
+    IF v_user_id IS NULL THEN
+        -- User does not exist, create a new one
+        INSERT INTO users_basic_info (display_name, photo_url)
+        VALUES (p_display_name, p_photo_url)
+        RETURNING user_id INTO v_user_id;
+
+        INSERT INTO users_google_oauth (user_id, google_id)
+        VALUES (v_user_id, p_google_id);
+    END IF;
+
+    -- Return the user record
+    RETURN QUERY
+    SELECT
+        ubi.user_id,
+        ubi.display_name,
+        ubi.photo_url,
+        ubi.profile_url,
+        ubi.created_at,
+        ubi.updated_at
+    FROM users_basic_info ubi
+    WHERE ubi.user_id = v_user_id;
+END;
+$$ LANGUAGE plpgsql;
