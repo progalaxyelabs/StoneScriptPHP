@@ -1,9 +1,81 @@
-CREATE TABLE users(
-    user_id serial PRIMARY KEY,
-    name text NOT NULL,
-    photo text NOT NULL,
-    profile text NOT NULL,
-    created_on timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_updated_on timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+-- Table 1: users_basic_info
+-- Holds frequently accessed user information
+CREATE TABLE users_basic_info (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    display_name VARCHAR(255) NOT NULL,
+    photo_url TEXT,
+    profile_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Table 2: users_email_password
+-- Stores credentials for email/password users
+CREATE TABLE users_email_password (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES users_basic_info(user_id) ON DELETE CASCADE,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL, -- Store hashed passwords
+    email_verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table 3: users_google_oauth
+-- Stores Google OAuth specific information
+CREATE TABLE users_google_oauth (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES users_basic_info(user_id) ON DELETE CASCADE,
+    google_id VARCHAR(255) UNIQUE NOT NULL,
+    access_token TEXT, -- Consider encrypting if storing refresh tokens or sensitive access tokens
+    refresh_token TEXT,
+    scope TEXT,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table 4: users_microsoft_oauth
+-- Stores Microsoft OAuth specific information
+CREATE TABLE users_microsoft_oauth (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES users_basic_info(user_id) ON DELETE CASCADE,
+    microsoft_id VARCHAR(255) UNIQUE NOT NULL,
+    access_token TEXT,
+    refresh_token TEXT,
+    scope TEXT,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table 5: users_linkedin_oauth
+-- Stores LinkedIn OAuth specific information
+CREATE TABLE users_linkedin_oauth (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES users_basic_info(user_id) ON DELETE CASCADE,
+    linkedin_id VARCHAR(255) UNIQUE NOT NULL,
+    access_token TEXT,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table 6: users_meta_oauth
+-- Stores Meta (Facebook) OAuth specific information
+CREATE TABLE users_meta_oauth (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES users_basic_info(user_id) ON DELETE CASCADE,
+    meta_id VARCHAR(255) UNIQUE NOT NULL,
+    access_token TEXT,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Optional: Add indexes for frequently queried columns to improve performance
+CREATE INDEX idx_users_email_password_email ON users_email_password(email);
+CREATE INDEX idx_users_google_oauth_google_id ON users_google_oauth(google_id);
+CREATE INDEX idx_users_microsoft_oauth_microsoft_id ON users_microsoft_oauth(microsoft_id);
+CREATE INDEX idx_users_linkedin_oauth_linkedin_id ON users_linkedin_oauth(linkedin_id);
+CREATE INDEX idx_users_meta_oauth_meta_id ON users_meta_oauth(meta_id);
