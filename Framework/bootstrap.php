@@ -11,6 +11,44 @@ define('APP_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR);
 define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
 define('FRAMEWORK_PATH', ROOT_PATH . 'Framework' . DIRECTORY_SEPARATOR);
 
+include APP_PATH . 'Env.php';
+
+function init_env()
+{
+    $env_file_path = ROOT_PATH . '.env';
+    if (!file_exists($env_file_path)) {
+        $message = 'missing .env file';
+        throw new \Exception($message);
+    }
+
+    $env_properties = array_keys(get_class_vars(Env::class));
+
+    $missing_keys = [];
+
+    $dotenv_settings = parse_ini_file($env_file_path);
+    foreach ($env_properties as $key) {
+        if (array_key_exists($key, $dotenv_settings)) {
+            Env::$$key = $dotenv_settings[$key];
+        } else {
+            $missing_keys[] = $key;
+        }
+    }
+
+    $num_missing_keys = count($missing_keys);
+    if ($num_missing_keys > 0) {
+        throw new \Exception($num_missing_keys . ' Settings missing in .env file');
+    }
+}
+
+init_env();
+
+define('DEBUG_MODE', Env::$DEBUG_MODE);
+date_default_timezone_set(Env::$TIMEZONE);
+
+include 'Logger.php';
+include 'functions.php';
+include 'error_handler.php';
+
 
 set_error_handler(function (int $error_number, string $message, string $file, int $line_number) {
     Logger::get_instance()->log_php_error($error_number, $message, $file, $line_number);
@@ -19,11 +57,6 @@ set_error_handler(function (int $error_number, string $message, string $file, in
 set_exception_handler(function (Throwable $exception) {
     Logger::get_instance()->log_php_exception($exception);
 });
-
-
-include 'Logger.php';
-include 'functions.php';
-include 'error_handler.php';
 
 spl_autoload_register(function ($class) {
     // log_debug('spl_autolaod_register: ' . $class);
@@ -49,13 +82,6 @@ spl_autoload_register(function ($class) {
     }
 });
 
-include APP_PATH . 'Env.php';
-
-init_env();
-
-define('DEBUG_MODE', Env::$DEBUG_MODE);
-
-date_default_timezone_set(Env::$TIMEZONE);
 
 $method_and_url = $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'];
 log_debug("---------- {$method_and_url} ----------}");

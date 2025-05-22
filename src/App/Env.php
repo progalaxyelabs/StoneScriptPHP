@@ -21,6 +21,6 @@ class Env
 
     public static string $TIMEZONE = 'UTC';
 
-    public static string $OAUTH_APP_DOMAIN = '';
+    public static string $OAUTH_APP_DOMAIN = '.example.com';
 }
 
