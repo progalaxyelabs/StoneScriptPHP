@@ -24,7 +24,7 @@ if (!file_exists($src_filepath)) {
 $content = file_get_contents($src_filepath);
 // echo $content . PHP_EOL;
 
-$regex = '#^(create\s+or\s+replace\s+function\s+)([a-z0-9_]+)(\s*\()([a-z0-9_\s,]*)(\)\s*)(returns\s+table\s*\(\s*[a-z0-9_\s,]*\))?\s*(.*)$#is';
+$regex = '#^(create\s+or\s+replace\s+function\s+)([a-z0-9_]+)(\s*\(\s*)((?:([a-z0-9_\s,]*)|varchar\(\d+\))*)(\)\s*)(returns\s+table\s*\(\s*((?:([a-z0-9_\s,]*)|varchar\(\d+\))*)\))?\s*(.*)$#is';
 $matches = [];
 if (!preg_match($regex, $content, $matches)) {
     echo 'error parsing file' . PHP_EOL;
@@ -33,8 +33,8 @@ if (!preg_match($regex, $content, $matches)) {
 
 function get_input_params(string $str, array $type_map): array
 {
-    $params_str = strtolower(trim(preg_replace('#[\s]+#', ' ', $str)));
-    $lines = explode(', ', $params_str);
+    $params_str = strtolower(trim(preg_replace('#\s+#', ' ', $str)));
+    $lines = explode(',', $params_str);
     $typed_input_params = [];
     $input_params = [];
     foreach ($lines as $line) {
@@ -45,9 +45,15 @@ function get_input_params(string $str, array $type_map): array
         if (str_starts_with($trimmed_line, 'out ')) {
             continue;
         }
-        $parts = explode(' ', $trimmed_line);
-        $name = preg_replace('#^i_#', '', $parts[0]);
-        $type = $type_map[$parts[1]];
+        preg_match('#([a-z0-9_]+)\s(.*)#', $trimmed_line, $trimmed_line_parts);
+        $param_name = $trimmed_line_parts[1];
+        $param_type = $trimmed_line_parts[2];
+        $name = preg_replace('#^i_#', '', $param_name);
+        if(preg_match('#varchar\(\d+\)#', $param_type, $mm)) {
+            $type = $type_map['text'];
+        } else {
+            $type = $type_map[$param_type];    
+        }
         $typed_input_params[] = "$type $$name";
         $input_params[] = "$$name";
     }
@@ -68,9 +74,16 @@ function get_output_params(string $input_str, string $returns_str, array $type_m
         $lines = explode(', ', $params_str);
         foreach ($lines as $line) {
             $trimmed_line = trim($line);
-            $parts = explode(' ', $trimmed_line);
-            $name = preg_replace('#^o_#', '', $parts[0]);
-            $type = $type_map[$parts[1]];
+            preg_match('#([a-z0-9_]+)\s(.*)#', $trimmed_line, $trimmed_line_parts);
+            $param_name = $trimmed_line_parts[1];
+            $param_type = $trimmed_line_parts[2];
+        
+            $name = preg_replace('#^o_#', '', $param_name);
+            if(preg_match('#varchar\(\d+\)#', $param_type, $mm)) {
+                $type = $type_map['text'];
+            } else {
+                $type = $type_map[$param_type];    
+            }
             $output_params[$name] = $type;
         }
     } else {
@@ -98,11 +111,13 @@ $type_map = [
     'boolean' => 'bool',
     'bool' => 'bool',
     'timestamptz' => 'string',
-    'date' => 'string'
+    'date' => 'string',
+    'uuid' => 'string',
+    'timestamp with time zone' => 'string'
 ];
 
 list($typed_input_params, $input_params) = get_input_params($matches[4], $type_map);
-list($output_params, $is_return_table) = get_output_params($matches[4], $matches[6], $type_map);
+list($output_params, $is_return_table) = get_output_params($matches[4], $matches[8], $type_map);
 
 $sql_fn_name = strtolower($matches[2]);
 $class_name = implode('', array_map(fn($item) => ucfirst($item), explode('_', $sql_fn_name)));
