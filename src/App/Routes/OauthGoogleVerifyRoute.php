@@ -41,24 +41,23 @@ class OauthGoogleVerifyRoute implements IRouteHandler
             $user = DbFnGoogleOauth::run($google_id, $email, $name, $picture)[0];
             //      $_SESSION['logged_in_time'] = time();
 
-            list($access_token, $refresh_token) =  JWTAuth::create_tokens($user->user_id);
-            
-            $cookie_options = [
-                'expires' => time() + 60*60*24*30, 
-                'path' => '/oauth/google/refresh/', 
-                'domain' => Env::$OAUTH_APP_DOMAIN, // leading dot for compatibility or use subdomain
-                'secure' => true,     // or false
-                'httponly' => true,    // or false
-            ];
-            setcookie('refresh-token', $refresh_token, $cookie_options);
-            return new ApiResponse('ok', '', [
-                'user' => [ 
-                    'id' => $user->user_id,
-                    'name' => $name,
-                    'picture' => $picture,
-                ],
-                'access_token' => $access_token
-            ]);
+            $jwtAuth = JWTAuth::getInstance();
+
+            if ($ok = $jwtAuth->createTokens($user->user_id)) {
+
+                $jwtAuth->setRefreshTokenCookie();
+
+                return new ApiResponse('ok', '', [
+                    'user' => [
+                        'id' => $user->user_id,
+                        'name' => $name,
+                        'picture' => $picture,
+                    ],
+                    'access_token' => $jwtAuth->getAccessToken()
+                ]);
+            } else {
+                return new ApiResponse('not ok', 'token creation failed', []);
+            }
         } catch (\Exception $e) {
             http_response_code(500);
             log_error("Google Sign-In Exception: " . $e->getMessage());

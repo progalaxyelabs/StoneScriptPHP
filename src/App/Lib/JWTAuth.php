@@ -15,48 +15,61 @@ use UnexpectedValueException;
 
 class JWTAuth
 {
-    const PEM_FILE_PATH = ROOT_PATH .'stone-script-php.pem';
-    const PUB_FILE_PATH = ROOT_PATH .'stone-script-php.pub';
+    const PEM_FILE_PATH = ROOT_PATH . 'stone-script-php.pem';
+    const PUB_FILE_PATH = ROOT_PATH . 'stone-script-php.pub';
     const KEY_TYPE = 'ed25519';
     const JWT_ALGORITHM = 'RS256';
+    const REFRESH_TOKEN_COOKIE_NAME = 'Refresh-Token';
 
-    public function __construct()
+    private static ?JWTAuth $_instance = null;
+
+    private string $access_token = '';
+    private string $refresh_token = '';
+    private MyTokenClaims $claims;
+
+    private function __construct()
     {
+        $ok = $this->readAccessTokenFromAuthorizationHeader();
+        $this->claims = $ok ? $this->decodeToken($this->access_token) : null;
+        $this->readRefreshTokenFromCookie();
     }
 
-    public function claimsFromAuthorizationHeader($request)
+    public static function getInstance(): JWTAuth
     {
-        $token = $this->tokenFromAuthorizationHeader($request);
-        if (!$token) {
-            return null;
+        if (self::$_instance) {
+            return self::$_instance;
         }
 
-        $claims = $this->decodeToken($token);
-        if (!$claims) {
-            return null;
-        }
-
-        return $claims;
+        self::$_instance = new JWTAuth();
+        return self::$_instance;
     }
 
-    protected function tokenFromAuthorizationHeader($request): string
+    private function readAccessTokenFromAuthorizationHeader(): bool
     {
-        $authorization_header = $request->getServer('HTTP_AUTHORIZATION');
-        if (!$authorization_header) {
-            log_debug('identifyUserSignedIn - no http_authorization header');
+        if (!isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            log_debug('JWTAuth - no http_authorization header');
             return '';
         }
 
+        $authorization_header = htmlspecialchars($_SERVER['HTTP_AUTHORIZATION']);
+
         $token = substr($authorization_header, 7); // remove 'Bearer ' prefix
-        return $token;
+        $this->access_token = ($token === false) ? '' : $token;
+        return ($this->access_token !== '');
     }
 
-    public function decodeToken($token, $allow_expiry = false): ?MyTokenClaims
+    private function readRefreshTokenFromCookie(): bool
+    {
+        $this->refresh_token = htmlspecialchars($_COOKIE[self::REFRESH_TOKEN_COOKIE_NAME]);
+        return ($this->refresh_token !== '');
+    }
+
+    private function decodeToken(string $token): MyTokenClaims
     {
         $public_key = file_get_contents(self::PUB_FILE_PATH);
         if ($public_key === false) {
             log_error(__METHOD__ . ' - no public key file');
-            return null;
+            return new MyTokenClaims();
         }
 
         try {
@@ -73,20 +86,20 @@ class JWTAuth
             log_error(__METHOD__ . ' - before valid exception ' . $e->getMessage());
         } catch (ExpiredException $e) {
             log_error(__METHOD__ . ' - expired exception ' . $e->getMessage());
-            if ($allow_expiry) {
-                list($headerStr, $payloadStr, $signatureStr) = explode('.', $token);
-                $payload = json_decode(base64_decode($payloadStr));
-                $claims = MyTokenClaims::fromDecodedToken($payload);
-                return $claims;
-            }
+            // if ($allow_expiry) {
+            //     list($headerStr, $payloadStr, $signatureStr) = explode('.', $token);
+            //     $payload = json_decode(base64_decode($payloadStr));
+            //     $claims = MyTokenClaims::fromDecodedToken($payload);
+            //     return $claims;
+            // }
         } catch (UnexpectedValueException $e) {
             log_error(__METHOD__ . ' - unexpected value exception ' . $e->getMessage());
         }
 
-        return null;
+        return new MyTokenClaims();
     }
 
-    public static function create_tokens($user_id, $generate_refresh_token = true)
+    public function createTokens(int $user_id, bool $generate_refresh_token = true): bool
     {
         // generate public private key pair using the below commands 
         // so that the openssl_pkey_get_private to work properly
@@ -99,7 +112,7 @@ class JWTAuth
         // $ mv key.pem.pub key.pub
         // give read permissions for the key.pem file on some linux distros
         // $ chmod go+r key.pem
-                
+
         $pass_phrase = '';
         $private_key = openssl_pkey_get_private(
             file_get_contents(self::PEM_FILE_PATH),
@@ -107,7 +120,7 @@ class JWTAuth
         );
         if (!$private_key) {
             log_error('user signin - unable to read the private key file using the passphrase');
-            return null;
+            return false;
         }
 
         $now = new \DateTimeImmutable();
@@ -120,9 +133,9 @@ class JWTAuth
             'exp' => $access_expires_at->getTimestamp(),
             'user_id' => $user_id
         ];
-        $access_token = JWT::encode($access_payload, $private_key, self::JWT_ALGORITHM);
+        $this->access_token = JWT::encode($access_payload, $private_key, self::JWT_ALGORITHM);
 
-        $refresh_token = '';
+        $this->refresh_token = '';
         if ($generate_refresh_token) {
             $refresh_issued_at = $now;
             $refresh_expires_at = $refresh_issued_at->modify('+180 days');
@@ -132,9 +145,26 @@ class JWTAuth
                 'exp' => $refresh_expires_at->getTimestamp(),
                 'user_id' => $user_id
             ];
-            $refresh_token = JWT::encode($refresh_payload, $private_key, self::JWT_ALGORITHM);
+            $this->refresh_token = JWT::encode($refresh_payload, $private_key, self::JWT_ALGORITHM);
         }
 
-        return [$access_token, $refresh_token];
+        return true;
+    }
+
+    public function getAccessToken(): string
+    {
+        return $this->access_token;
+    }
+
+    public function setRefreshTokenCookie(): void
+    {
+        $cookie_options = [
+            'expires' => time() + 60 * 60 * 24 * 30,
+            'path' => '/auth/refresh/',
+            'domain' => Env::$OAUTH_APP_DOMAIN, // leading dot for compatibility or use subdomain
+            'secure' => true,     // or false
+            'httponly' => true,    // or false
+        ];
+        setcookie(self::REFRESH_TOKEN_COOKIE_NAME, $this->refresh_token, $cookie_options);
     }
 }
