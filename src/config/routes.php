@@ -1,8 +1,8 @@
 <?php
 
 use App\Routes\HomeRoute;
-use App\Routes\OauthGoogleRefreshRoute;
 use App\Routes\OauthGoogleVerifyRoute;
+use App\Routes\RenewAccessTokenRoute;
 
 return [
     'GET' => [
@@ -10,6 +10,6 @@ return [
     ],
     'POST' => [
         '/oauth/google/verify' => OauthGoogleVerifyRoute::class,
-        '/oauth/google/refresh' => OauthGoogleRefreshRoute::class
+        '/auth/refresh' => RenewAccessTokenRoute::class
     ]
 ];

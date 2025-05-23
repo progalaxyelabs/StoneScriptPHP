@@ -167,4 +167,9 @@ class JWTAuth
         ];
         setcookie(self::REFRESH_TOKEN_COOKIE_NAME, $this->refresh_token, $cookie_options);
     }
+
+    public function userIdFromRefreshToken(): int
+    {
+        return $this->decodeToken($this->refresh_token)->user_id;
+    }
 }

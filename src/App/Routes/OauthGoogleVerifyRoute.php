@@ -24,9 +24,7 @@ class OauthGoogleVerifyRoute implements IRouteHandler
             $payload = $google_client->verifyIdToken($this->credential);
             if (!$payload) {
                 // Invalid Token (verification failed)
-                http_response_code(401); // Unauthorized
-                log_error("Google Sign-In Error: Invalid ID token received.");
-                return new ApiResponse('not ok', 'Invalid ID token', []);
+                return res_not_authorized('Invalid ID token');
             }
 
             // Token is valid!
