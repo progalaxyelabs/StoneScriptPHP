@@ -103,6 +103,105 @@ $data = FnUpdatetrophyDetails::run(
 return new ApiResponse('ok', '', [
     'course' => $data
 ]);
-        
+
 ```
+
+## Roadmap - Upcoming Features
+
+### 1. Database Drift Detection (Priority: HIGH)
+
+**Feature:** `stones verify` command
+
+Automatically detect when your database schema doesn't match your source code files. This catches drift that happens when:
+- Someone manually modifies the database without creating a migration
+- Migrations were applied in some environments but not others
+- Database was modified outside the migration system
+
+**Usage:**
+```bash
+stones verify
+
+# Output:
+Verifying database schema...
+❌ Table 'users' missing column 'status' (present in tables/users.pssql)
+❌ Function 'get_user_stats' exists in DB but not in functions/
+✅ All other objects match
+
+Status: DRIFT DETECTED
+```
+
+**What it checks:**
+- Tables: Missing tables, extra tables, column differences (name, type, nullable, default)
+- Functions: Missing functions, extra functions, signature changes
+- Constraints: Foreign keys, unique constraints, check constraints
+
+**Implementation:**
+- Parses all `.pssql` files in `src/App/Database/postgresql/tables/` and `functions/`
+- Queries PostgreSQL system catalogs (`information_schema`)
+- Compares and reports differences
+- CI/CD friendly with proper exit codes (0 = clean, 1 = drift detected)
+
+### 2. Bash CLI Wrapper - "stones" Command
+
+**Feature:** Simple, frictionless CLI for all framework operations
+
+Zero-friction developer experience. Instead of typing long PHP commands, use simple bash commands.
+
+**Setup:**
+```bash
+./cli.sh  # Makes 'stones' command available
+```
+
+**Commands:**
+
+```bash
+# Generate migration from detected changes
+stones new migration
+
+# Apply pending migrations
+stones migrate
+
+# Rollback last migration
+stones rollback
+
+# Check for database drift
+stones verify
+
+# Show migration status
+stones status
+```
+
+**Developer Workflow:**
+
+1. Edit `tables/users.pssql` directly (add `status` column)
+2. Run `stones new migration` - auto-detects changes and generates timestamped migration file
+3. Review the generated `migrations/20250107_153045_auto.sql`
+4. Run `stones migrate` - applies the migration
+5. Done!
+
+**Key Features:**
+- **Auto-detection:** No need to manually specify what changed
+- **Timestamped migrations:** `migrations/YYYYMMDD_HHMMSS_auto.sql`
+- **Up/Down migrations:** Automatic rollback support
+- **Smart file naming:** Rename for clarity while preserving timestamp
+- **CI/CD friendly:** Proper exit codes and non-interactive mode
+
+**Philosophy:** Developers should type as little as possible. Edit files → generate migration → apply. Three simple steps.
+
+### Migration System Architecture
+
+**Source of Truth:** `tables/` and `functions/` folders contain the ideal state
+
+**Change Management:** `migrations/` folder contains all actual changes applied to the database
+
+**Tracking:** `schema_migrations` table tracks which migrations have been applied
+
+**The "diff" validator** ensures the database matches the source of truth and catches any manual changes or drift.
+
+This hybrid approach combines:
+- **Database-first development** (edit .pssql files directly)
+- **Version-controlled migrations** (explicit change management)
+- **Drift detection** (validates actual state matches expected state)
+
+Perfect for teams, multiple environments, and production deployments.
 
