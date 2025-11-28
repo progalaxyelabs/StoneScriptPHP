@@ -1,105 +1,111 @@
 # StoneScriptPHP
-## A minimalistic backend framework for building APIs using PHP and PostgreSQL
+
+A modern PHP backend framework for building APIs with PostgreSQL, inspired by Angular's developer experience.
 
 ---------------------------------------------------------------
 
-## Setup 
-To setup a PHP project for your backend api, use `composer create-project` command line
-```
-composer create-project progalaxyelabs/stone-script-php api
-```
-this will create a project in the `api` folder in your current folder and install the dependencies.
+## Quick Start
 
-## Run
-To run the php project, you can use the `serve.php` script from the project root
-```
-php serve.php
-```
-By default, this will use the port 9100.
-You can check the server running by opening the browser and navigating to `http://localhost:9100`
+```bash
+# Create new project (like 'ng new')
+composer create-project progalaxyelabs/stone-script-php my-api
 
-there is also a composer script available 
-```
-composer serve
+# Navigate to project
+cd my-api
+
+# Interactive setup (automatically runs after create-project)
+# Will prompt for database config, generate JWT keys, etc.
+
+# Start development server
+php stone serve
+
+# Your API is running at http://localhost:9100
 ```
 
+## Features
+
+- 🎯 **Angular-like CLI** - `php stone` commands for code generation
+- 📝 **PostgreSQL-first** - Built for PostgreSQL with migration system
+- 🔐 **JWT Authentication** - Built-in OAuth support (Google)
+- ✅ **Testing** - PHPUnit test suite included
+- 🚀 **Fast Development** - Code generators for routes, models, migrations
+- 📦 **Zero Config** - Works out of the box after setup
+
+## CLI Commands
+
+```bash
+php stone setup              # Interactive project setup
+php stone serve              # Start dev server (port 9100)
+php stone generate route <name>   # Generate route handler
+php stone generate model <file>   # Generate model from SQL function
+php stone migrate verify     # Check database drift
+php stone test               # Run PHPUnit tests
+php stone env                # Generate .env file
+```
+
+For detailed CLI usage, see [CLI-USAGE.md](CLI-USAGE.md)
 
 ## Workflow
 
-Create all the database tables in individual .pssql files in the  `src/App/Database/postgres/tables/` folder
+### 1. Define Database Schema
 
-Create all the database queries as SQL functions in individual .pssql files in the  `src/App/Database/postgres/functions/` folder
+Create all the database tables in individual `.pssql` files in the `src/App/Database/postgres/tables/` folder
 
-if there is and seed data, create those as SQl scripts (insert statements) as .pssql files in the `src/App/Database/postgres/seeds/` folder
+### 2. Create SQL Functions
 
+Create all the database queries as SQL functions in individual `.pssql` files in the `src/App/Database/postgres/functions/` folder
 
-### create sql functions:
+If there is seed data, create those as SQL scripts (insert statements) as `.pssql` files in the `src/App/Database/postgres/seeds/` folder
 
-In pgadmin4, develop postgresql functions. test them and once working, save them as individual files under `src/App/Database/postgres/functions/` folder. ex: `src\App\Database\postgresql/functions/function_name.pssql`
+In pgadmin4, develop PostgreSQL functions. Test them and once working, save them as individual files under `src/App/Database/postgres/functions/` folder.
 
+Example: `src/App/Database/postgresql/functions/function_name.pssql`
 
-### create php modal class for this sql function:
+### 3. Generate PHP Model Class
 
-you can use the cli script to generate a PHP class for this sql function that will help in identifying the function arguments and return values
+Use the CLI to generate a PHP class for each SQL function that will help in identifying the function arguments and return values:
 
-commands to run in terminal:
-
-
-```shell
-
-cd Framework/cli
-php generate-model.php function_name.pssql
-
+```bash
+php stone generate model function_name.pssql
 ```
 
-this will create a `FnFunctionName.php` in `src/App/Database/Functions` folder
+This will create a `FnFunctionName.php` in `src/App/Database/Functions` folder.
 
+This can be used to call the SQL function from PHP with proper arguments with reasonable typing that PHP allows.
 
-This can be used to call the SQl function from PHP with proper arguments with reasonable typing that PHP allows. To see that in action, create an api route.
+### 4. Create API Route
 
-
-### create an api route:
-
-```shell
-
-# cd Framework/cli
-php generate-route.php update-trophies
-
+```bash
+php stone generate route update-trophies
 ```
 
-this will create a `UpdateTrophiesRoute.php` file in `Routes` folder
+This will create a `UpdateTrophiesRoute.php` file in `Routes` folder.
 
+### 5. Create URL to Class Route Mapping
 
-### create url to class route mapping:
+In `src/App/Config/routes.php`, add a URL-to-class route mapping.
 
-in `src/App/Config/routes.php`, add a url-to-class route mapping
+Example: For adding a POST route, add the line in the `POST` section:
 
-ex: for adding a post route, add the line in the `POST` section
-
-```
+```php
 return [
     ...
     'POST' => [
          ...
-        '/update-trophies' => UpdateTrophiesRoute:class
+        '/update-trophies' => UpdateTrophiesRoute::class
         ...
     ]
     ...
 ];
-
-
 ```
 
-### implement the route class's process function:
+### 6. Implement the Route Class's Process Function
 
-in `UpdateTrophiesRoute.php`, in `process` function, call the database function and return data
+In `UpdateTrophiesRoute.php`, in the `process` function, call the database function and return data.
 
-
-ex:
-
+Example:
 
 ```php
-
 $data = FnUpdatetrophyDetails::run(
     $user_trophy_id,
     $count
@@ -108,6 +114,72 @@ $data = FnUpdatetrophyDetails::run(
 return new ApiResponse('ok', '', [
     'course' => $data
 ]);
-        
 ```
 
+### 7. Run Migrations
+
+```bash
+php stone migrate verify
+```
+
+This checks for database drift and ensures your database schema matches your source code.
+
+## OAuth Support
+
+StoneScriptPHP includes built-in Google OAuth support:
+
+- `Framework/Oauth/Google.php` - Google OAuth handler
+- Automatic JWT token generation
+- Secure keypair management
+
+## Testing
+
+Run the test suite:
+
+```bash
+php stone test
+
+# Or use composer
+composer test
+```
+
+## Requirements
+
+- PHP >= 8.2
+- PostgreSQL >= 13
+- Composer
+- Extensions: `pdo`, `pgsql`, `openssl`
+
+## Documentation
+
+- [CLI Usage Guide](CLI-USAGE.md)
+- [Migration System](docs/) (if available)
+- [Examples](examples/)
+
+## Development
+
+The framework uses PostgreSQL as its primary database and follows a function-first approach:
+
+1. Write SQL functions that encapsulate business logic
+2. Generate PHP models from these functions
+3. Create routes that call the models
+4. Map URLs to route handlers
+
+This approach keeps your business logic close to the data and leverages PostgreSQL's powerful procedural capabilities.
+
+## Composer Scripts
+
+```bash
+composer serve    # Start development server
+composer test     # Run PHPUnit tests
+composer migrate  # Run database migrations
+```
+
+## License
+
+MIT
+
+## Support
+
+- Issues: https://github.com/progalaxyelabs/StoneScriptPHP/issues
+- Source: https://github.com/progalaxyelabs/StoneScriptPHP

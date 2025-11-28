@@ -1,0 +1,56 @@
+<nav class="navbar navbar-expand-lg navbar-light bg-light px-3">
+    <!-- <div class="container-fluid"> -->
+    <a class="navbar-brand" routerLink="/">
+        <img src="/assets/webmeteor.png" alt="" class="d-inline-block align-text-top">
+        <span>{{title | uppercase}}</span>
+    </a>
+    <button class="navbar-toggler" type="button" (click)="isMenuCollapsed = !isMenuCollapsed"
+        aria-controls="navbarContent" [attr.aria-expanded]="!isMenuCollapsed" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="navbar-collapse bg-light px-3" [class.collapse]="isMenuCollapsed" >
+        <ul class="navbar-nav ms-auto">
+            <!-- <li class="nav-item" (click)="isMenuCollapsed = true">
+                <a class="nav-link" ariaCurrentWhenActive="page" routerLink="/ecomm1"
+                    routerlinkActive="active">ecomm1</a>
+            </li>
+            <li class="nav-item" (click)="isMenuCollapsed = true">
+                <a class="nav-link" ariaCurrentWhenActive="page" routerLink="/" routerlinkActive="active"
+                    routerLinkActiveOptions="{ exact: true }">Home</a>
+            </li>
+            <li class="nav-item" (click)="isMenuCollapsed = true">
+                <a class="nav-link btn btn-primary text-bg-primary" ariaCurrentWhenActive="page"
+                    routerLink="/website-wizard" routerlinkActive="active">New Website</a>
+            </li>
+            <li class="nav-item" (click)="isMenuCollapsed = true">
+                <button class="nav-link" ariaCurrentWhenActive="page" (click)="openWebsiteSelectionDialog($event)">Editor</button>
+            </li>
+            <li class="nav-item" (click)="isMenuCollapsed = true">
+                <a class="nav-link" ariaCurrentWhenActive="page" routerLink="/pricing"
+                    routerlinkActive="active">Pricing</a>
+            </li>
+            <li dropdown class="nav-item dropdown" #signinDropdown="bs-dropdown" (onShown)="onDropdownShown()">
+                <button dropdownToggle class="nav-link dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    Sign In
+                </button>
+                <div *dropdownMenu class="dropdown-menu dropdown-menu-right">
+                    <div id="signin-button-container"></div>
+                </div>                        
+            </li>
+            <li class="nav-item" (click)="isMenuCollapsed = true">
+                <button class="nav-link g_id_signout" type="button" (click)="signOut()">
+                    Sign Out
+                </button>
+            </li> -->
+            
+        </ul>
+    </div>
+    <!-- </div> -->
+</nav>
+<main>
+
+</main>
+<router-outlet></router-outlet>
+<footer>
+
+</footer>

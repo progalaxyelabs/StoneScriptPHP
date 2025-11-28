@@ -1,0 +1,143 @@
+<div class="wm-editor-container">
+    <nav class="navbar navbar-expand-lg bg-body-tertiary editor-nav">
+        <div class="container-fluid">
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent"
+                aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="#">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">Link</a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown"
+                            aria-expanded="false">
+                            Dropdown
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#">Action</a></li>
+                            <li><a class="dropdown-item" href="#">Another action</a></li>
+                            <li>
+                                <hr class="dropdown-divider">
+                            </li>
+                            <li><a class="dropdown-item" href="#">Something else here</a></li>
+                        </ul>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link disabled" aria-disabled="true">Disabled</a>
+                    </li>
+                </ul>
+                <form class="d-flex" role="search">
+                    <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search">
+                    <button class="btn btn-outline-success" type="submit">Search</button>
+                </form>
+                <div class="btn-group preview-device-type-options mx-3">
+                    <button class="btn btn-outline-dark" [class.active]="previewDeviceType === 'desktop'"
+                        (click)="setPreviewDeviceType('desktop')">
+                        <i class="bi bi-display"></i>
+                    </button>
+                    <button class="btn btn-outline-dark" [class.active]="previewDeviceType === 'ipad'"
+                        (click)="setPreviewDeviceType('ipad')">
+                        <i class="bi bi-tablet-landscape"></i>
+                    </button>
+                    <button class="btn btn-outline-dark" [class.active]="previewDeviceType === 'mobile'"
+                        (click)="setPreviewDeviceType('mobile')">
+                        <i class="bi bi-phone"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+    
+
+            <!-- <button
+                class="btn btn-outline-dark"
+                (click)="editorToolsOpen = !editorToolsOpen">
+                Edit
+            </button>
+
+            <button mat-button [matMenuTriggerFor]="menu">Add</button>
+            <mat-menu #menu="matMenu">
+                <button mat-menu-item (click)="addNavbar()">Nav</button>
+                <button mat-menu-item (click)="addSection()">Section</button>
+            </mat-menu>
+
+            <h2 class="text-center">Preview</h2> -->
+        <!-- <div class="col-xs-6 col-md-3 editor-side-menu-heading">
+            <button class="btn btn-warning btn-icon toggle-editor-tools-button"
+                (click)="editorToolsOpen = !editorToolsOpen">
+                <i class="bi" [class.bi-chevron-up]="editorToolsOpen" class="bi"
+                    [class.bi-chevron-down]="!editorToolsOpen"></i>
+            </button>
+            <h2 class="text-center">Editor</h2>
+        </div> -->
+    <div class="row editor-workbench">
+        <div
+            class="editor-preview-content col-xs-6"
+            [class.col-md-9]="editorToolsOpen"
+            [class.col-xs-12]="!editorToolsOpen">
+            <iframe
+                id="iframe1"
+                #iframe1
+                [ngClass]="previewDeviceType"></iframe>
+        </div>
+        @if (editorToolsOpen) {
+        <div class="editor-side-menu-content col-xs-6 col-md-3">
+            <div class="editor-top-menu mb-3">
+                <!-- <h5 class="editor-top-menu-title">Preview Device</h5>                 -->
+                <div class="editor-top-menu-options">
+                    <div class="actions-bar main-actions-bar">
+                        <button
+                            class="btn btn-outline-primary m-1"
+                            (click)="editorTools.activeTool = EditorTools.pages">
+                            All Pages
+                        </button>
+                        <button
+                            class="btn btn-outline-primary m-1"
+                            (click)="editorTools.activeTool = EditorTools.currentPage">
+                            Current Page
+                        </button>
+                        <button
+                            class="btn btn-outline-primary m-1"
+                            (click)="editorTools.activeTool = EditorTools.layouts">
+                            Layouts
+                        </button>
+                        <!-- <button class="btn btn-link">Side menu</button> -->
+                    </div>
+                </div>
+            </div>
+
+            
+
+            @if (editorTools.activeTool === EditorTools.pages) {
+            <app-pages class="side-menu-tree mb-3"></app-pages>
+            } @if (editorTools.activeTool === EditorTools.layouts) {
+            <app-layouts class="side-menu-toolbox mb-3"></app-layouts>
+            } @if (editorTools.activeTool === EditorTools.currentPage) {
+            <app-sections class="side-menu-tree mb-3"></app-sections>
+            } @if (editorTools.activeTool === EditorTools.editSection) {
+            <app-customize-section class="mb-3"></app-customize-section>
+            }
+        </div>
+        }
+    </div>
+</div>
+
+<template #headTemplate>
+    <meta charset="utf-8" />
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+        crossorigin="anonymous" />
+    <script
+        src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
+</template>

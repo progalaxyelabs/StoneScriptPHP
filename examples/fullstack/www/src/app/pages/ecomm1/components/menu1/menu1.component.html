@@ -1,0 +1,27 @@
+<div class="menu1">
+    <div class="logo"><img src="/assets/ecomm1/125x45.jpeg" /></div>
+
+    <ul class="center-menu">
+        <li class="category" *ngFor="let category of categories">
+            <span class="text">{{category.title}}</span>
+            <span class="dropdown-icon"><i class="bi bi-chevron-down"></i></span>
+
+            <div class="sub-categories">
+                <a *ngFor="let subCategory of category.subCategories" [routerLink]="subCategory.url">{{subCategory.title}}</a>
+            </div>
+        </li>
+    </ul>
+
+    <div class="right-menu">
+        <ul>
+            <li><button><i class="bi bi-info-circle-fill"></i></button></li>
+            <li><a routerLink="/ecomm1/wishlist"><i class="bi bi-info-circle-fill"></i></a></li>
+            <li><button><i class="bi bi-info-circle-fill"></i></button></li>
+            <li><button><i class="bi bi-info-circle-fill"></i></button></li>
+        </ul>
+    </div>
+
+    <div class="right-draw">
+
+    </div>
+</div>

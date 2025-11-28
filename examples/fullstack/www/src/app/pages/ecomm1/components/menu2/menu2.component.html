@@ -1,0 +1,10 @@
+<div class="menu2">
+    <div class="grid">
+        <div class="category" *ngFor="let category of categories">
+            <a [routerLink]="category.url">
+                <img [src]="category.image" />
+                <span>{{category.title}}</span>
+            </a>
+        </div>
+    </div>
+</div>

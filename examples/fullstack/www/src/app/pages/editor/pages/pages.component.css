@@ -1,0 +1,21 @@
+.website-page-wrap {
+    border: 0.25rem solid #aaa;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 1px 1px 5px rgba(0,0,0,0.5);
+
+    &:hover {
+        border-color: #333;
+    }
+
+    &.active,
+    &.active:hover {
+        border-color: blue;
+    }
+
+    cursor: default;
+}
+
+.website-page {
+    min-height: 1rem;
+}

@@ -1,0 +1,63 @@
+<h5>Layouts</h5>
+<!-- <div class="actions-bar">
+    <button class="btn btn-success m-1" title="Insert selected one into page" (click)="onOkClick()"
+        [disabled]="selectedTemplateIndex === -1">Add Selected to Page</button>
+    <button class="btn btn-primary m-1" title="Preview the selected layout" (click)="onPreviewClick()"
+        [disabled]="selectedTemplateIndex === -1">Preview Selected</button>
+    <button class="btn btn-danger m-1" title="Go back to page sections"
+        (click)="onCancelClick()">Cancel</button>
+</div> -->
+<div class="templates">
+    <div *ngFor="let template of templates; index as i;" class="btn btn-outline-primary p-3 template-wrap"
+        [class.active]="selectedTemplateIndex === i" (click)="selectedTemplateIndex = i">
+        <!-- <img [src]="template.imgUrl" loading="lazy" /> -->
+        <div class="template-preview">
+            <div [ngClass]="templateGridClass(i + 1)" [attr.data-number]="templateDataNumber(i + 1)">
+                <div *ngFor="let _ of templateGridCells(template); index as j" [ngClass]="templateGridCellClass(j+1)"></div>
+            </div>
+        </div>
+        <div class="bottom-bar">
+            <div class="file-number">{{templateDataNumber(i + 1)}}</div>
+            <div class="action-buttons">
+                <button class="btn-icon preview-layout" (click)="onSelectLayoutPreviewClick(i)">
+                    <i class="bi bi-eyeglasses"></i>
+                </button>
+                <button class="btn-icon add-layout" (click)="onSelectLayoutAddClick(i)">
+                    <i class="bi bi-plus"></i>
+                </button>                
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal modal-xl fade" [class.show]="previewModalOpen" id="layoutPreviewModal" [style.display]="previewModalOpen ? 'block' : 'none'" tabindex="-1" aria-labelledby="layoutPreviewModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="layoutPreviewModalLabel">Layout: {{templateDataNumber(selectedTemplateIndex + 1)}}</h1>
+                <button type="button" (click)="onPreviewModalCloseClick()" class="btn-close" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- <img class="layout-preview-image-in-modal" [src]="selectedTemplate.imgUrl" /> -->
+                <div class="template-preview">
+                    <div [ngClass]="templateGridClass(selectedTemplateIndex + 1)" [attr.data-number]="templateDataNumber(selectedTemplateIndex + 1)">
+                        <div *ngFor="let _ of templateGridCells(templates[selectedTemplateIndex]); index as j" [ngClass]="templateGridCellClass(j+1)"></div>
+                    </div>
+                </div>
+            </div>            
+        </div>
+    </div>
+</div>
+
+<template #coverTemplate>
+    <div class="cover-container d-flex w-100 h-100 p-3 mx-auto flex-column justify-content-center align-items-center">
+        <div class="px-3 text-center">
+            <h1>Cover your page.</h1>
+            <p class="lead">Cover is a one-page template for building simple and beautiful home pages. Download, edit
+                the text, and add your own fullscreen background photo to make it your own.</p>
+            <p class="lead">
+                <a href="#" class="btn btn-lg btn-secondary fw-bold border-success ">Learn more</a>
+            </p>
+        </div>
+    </div>
+</template>

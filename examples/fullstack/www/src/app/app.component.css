@@ -1,0 +1,36 @@
+.navbar-brand {
+    display: flex;
+    align-items: flex-end;
+
+    img {
+        width: 2.5rem;
+        height: 2.5rem;
+    }
+
+    span {
+        font-size: 1.5rem;
+        margin-left: 0.5rem;
+        letter-spacing: 1px;
+        font-weight: 500;
+    }
+}
+
+nav {
+    box-shadow: 2px 0px 10px rgba(0,0,0,0.5);
+    /* margin-bottom: 10px; */
+    height: 4rem;
+    z-index: 2;
+}
+
+@media (max-width: 991px) {
+    .navbar-collapse.show {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.5);
+    }
+}
+
+#signin-button-container {
+    padding: 0.5rem;
+}
+

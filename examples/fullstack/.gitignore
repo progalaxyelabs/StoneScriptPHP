@@ -1,0 +1,43 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+api/logs/
+
+# Docker
+docker-compose.override.yml
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node.js (alert service)
+alert/node_modules/
+alert/package-lock.json
+alert/npm-debug.log*
+
+# Angular (www)
+www/node_modules/
+www/dist/
+www/.angular/
+www/package-lock.json
+
+# PHP (api)
+api/vendor/
+api/composer.lock
+
+# Database
+*.sql
+*.sqlite
+postgres_data/

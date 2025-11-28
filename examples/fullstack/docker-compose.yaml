@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: webmeteor-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./api/database/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - webmeteor-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: webmeteor-api
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      API_URL: ${API_URL}
+      APP_ENV: ${APP_ENV:-production}
+    ports:
+      - "${API_PORT:-8080}:80"
+    volumes:
+      - ./api:/var/www/html
+      - api_logs:/var/www/html/logs
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - webmeteor-network
+    healthcheck:
+      test: ["CMD", "php", "-v"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  alert:
+    build:
+      context: ./alert
+      dockerfile: Dockerfile
+    container_name: webmeteor-alert
+    restart: unless-stopped
+    environment:
+      ALERT_PORT: 3001
+      WWW_URL: ${WWW_URL}
+      NODE_ENV: ${APP_ENV:-production}
+    ports:
+      - "${ALERT_PORT:-3001}:3001"
+    networks:
+      - webmeteor-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  www:
+    build:
+      context: ./www
+      dockerfile: Dockerfile
+    container_name: webmeteor-www
+    restart: unless-stopped
+    environment:
+      API_URL: ${API_URL}
+      ALERT_URL: ${ALERT_URL}
+    ports:
+      - "${WWW_PORT:-80}:80"
+    depends_on:
+      - api
+      - alert
+    networks:
+      - webmeteor-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  webmeteor-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  api_logs:
+    driver: local

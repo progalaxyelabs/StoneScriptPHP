@@ -1,0 +1,33 @@
+:host {
+  display: block; overflow-x: hidden;
+}
+
+.carousel-container {
+    /* touch-action: pan-x; */
+    overflow-x: hidden;
+}
+
+.carousel-1 {
+    touch-action: none;
+}
+
+
+.slides-container {
+    display: flex;
+    animation-timing-function: ease-out;
+    
+
+    .slide {
+        flex-shrink: 0;
+        padding: 0 1rem;
+
+        a {
+            display: block;
+
+            img {
+                min-width: 100%;
+                width: 100%;
+            }
+        }
+    }
+}

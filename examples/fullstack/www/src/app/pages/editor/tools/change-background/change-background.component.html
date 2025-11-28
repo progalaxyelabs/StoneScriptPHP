@@ -1,0 +1,63 @@
+<div class="d-grid gap-2">
+    <div class="">
+        <label for="backgroundTypeSelect" class="mb-1">Background</label>
+        <select name="backgroundTypeSelect" id="backgroundTypeSelect" class="form-select mb-3"
+            aria-label="Select Background"
+            [ngModel]="backgroundType"
+            (ngModelChange)="onBackgroundTypeChange($event)">
+            <option value="none" selected>None</option>
+            <option value="singlecolor">Single Color</option>
+            <option value="colorgradient">Color Gradient</option>
+            <option value="image">Image</option>
+        </select>
+        <div class="mb-3" *ngIf="selectedBackgroundType === 'singlecolor'">
+            <label for="backgroundSingleColorValue" class="mb-1">Color</label>
+            <input type="color" class="form-control color-picker-control"
+                [(ngModel)]="backgroundSingleColorValue" id="backgroundSingleColorValue" />
+        </div>
+
+        <div class="mb-3" *ngIf="selectedBackgroundType === 'colorgradient'">
+            <div class="row">
+                <div class="col-6">
+                    <label for="backgroundColorGradient1Value" class="mb-1">Color 1</label>
+                    <input type="color" class="form-control color-picker-control"
+                        [(ngModel)]="backgroundColorGradient1Value"
+                        (change)="onBackgroundColorGradientValueChange($event)"
+                        id="backgroundColorGradient1Value" />
+                </div>
+                <div class="col-6">
+                    <label for="backgroundColorGradient2Value" class="mb-1">Color 2</label>
+                    <input type="color" class="form-control color-picker-control"
+                        [(ngModel)]="backgroundColorGradient2Value"
+                        (change)="onBackgroundColorGradientValueChange($event)"
+                        id="backgroundColorGradient2Value" />
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-12">
+                    <label class="mb-1">Direction</label>
+                </div>
+                <div class="col-4">
+                    <div class="background-preview-square"
+                        [class.selected]="colorgradientStyle === 'right'"
+                        (click)="colorgradientStyle = 'right'" [style.background]="gradientBackground1">
+                    </div>
+                </div>
+                <div class="col-4">
+                    <div class="background-preview-square"
+                        [class.selected]="colorgradientStyle === 'bottom'"
+                        (click)="colorgradientStyle = 'bottom'"
+                        [style.background]="gradientBackground2"></div>
+                </div>
+                <div class="col-4">
+                    <div class="background-preview-square"
+                        [class.selected]="colorgradientStyle === 'right bottom'"
+                        (click)="colorgradientStyle = 'right bottom'"
+                        [style.background]="gradientBackground3"></div>
+                </div>
+            </div>
+        </div>
+        <button class="btn btn-primary" (click)="onApplyBackgroundClick($event)">Apply</button>
+    </div>
+
+</div>

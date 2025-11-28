@@ -1,0 +1,14 @@
+footer {
+    min-height: 10rem;
+    background-color: purple;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+
+    a {
+        color: yellow !important;
+        text-decoration: none;
+    }
+}
