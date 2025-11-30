@@ -1,25 +1,35 @@
 {
-    "name": "progalaxyelabs/stone-script-php",
-    "description": "A modern PHP backend framework for building APIs with PostgreSQL (inspired by Angular)",
-    "type": "project",
+    "name": "progalaxyelabs/stonescriptphp",
+    "description": "Modern PHP framework with contract-based routing and auto-generated TypeScript clients",
+    "type": "library",
     "license": "MIT",
-    "keywords": ["framework", "api", "php", "postgresql", "backend", "rest"],
-    "homepage": "https://github.com/progalaxyelabs/StoneScriptPHP",
+    "keywords": [
+        "framework",
+        "php",
+        "typescript",
+        "api",
+        "rest",
+        "code-generation",
+        "postgresql"
+    ],
+    "homepage": "https://stonescriptphp.org",
     "support": {
         "issues": "https://github.com/progalaxyelabs/StoneScriptPHP/issues",
         "source": "https://github.com/progalaxyelabs/StoneScriptPHP",
-        "docs": "https://github.com/progalaxyelabs/StoneScriptPHP/wiki"
+        "docs": "https://stonescriptphp.org/docs"
     },
     "authors": [
         {
-            "name": "ProgalaxyElabs",
-            "email": "pradeepkumardesk@gmail.com"
+            "name": "StoneScriptPHP Team",
+            "email": "team@progalaxyelabs.com",
+            "homepage": "https://stonescriptphp.org"
         }
     ],
     "require": {
-        "php": ">=8.2",
+        "php": "^8.2",
         "ext-pdo": "*",
-        "ext-pgsql": "*",
+        "ext-pdo_pgsql": "*",
+        "ext-json": "*",
         "firebase/php-jwt": "^6.11",
         "phpoffice/phpspreadsheet": "^4.2",
         "google/apiclient": "^2.0"
