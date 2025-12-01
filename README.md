@@ -1,6 +1,13 @@
 # StoneScriptPHP
 
+[![PHP Tests](https://github.com/progalaxyelabs/StoneScriptPHP/actions/workflows/php-test.yml/badge.svg)](https://github.com/progalaxyelabs/StoneScriptPHP/actions/workflows/php-test.yml)
+[![Packagist Version](https://img.shields.io/packagist/v/progalaxyelabs/stonescriptphp)](https://packagist.org/packages/progalaxyelabs/stonescriptphp)
+[![License](https://img.shields.io/github/license/progalaxyelabs/StoneScriptPHP)](LICENSE)
+[![PHP Version](https://img.shields.io/packagist/php-v/progalaxyelabs/stonescriptphp)](composer.json)
+
 A modern PHP backend framework for building APIs with PostgreSQL, inspired by Angular's developer experience.
+
+**Note:** While this package is published under `progalaxyelabs/stonescriptphp`, the official website and documentation are at https://stonescriptphp.org. A future migration to the `@stonescriptphp` namespace is planned.
 
 ---------------------------------------------------------------
 
@@ -8,7 +15,7 @@ A modern PHP backend framework for building APIs with PostgreSQL, inspired by An
 
 ```bash
 # Create new project (like 'ng new')
-composer create-project progalaxyelabs/stone-script-php my-api
+composer create-project progalaxyelabs/stonescriptphp my-api
 
 # Navigate to project
 cd my-api
@@ -153,7 +160,7 @@ composer test
 ## Documentation
 
 - [CLI Usage Guide](CLI-USAGE.md)
-- [Migration System](docs/) (if available)
+- [Online Documentation](https://stonescriptphp.org/docs)
 - [Examples](examples/)
 
 ## Development
@@ -181,5 +188,7 @@ MIT
 
 ## Support
 
+- Website: https://stonescriptphp.org
+- Documentation: https://stonescriptphp.org/docs
 - Issues: https://github.com/progalaxyelabs/StoneScriptPHP/issues
 - Source: https://github.com/progalaxyelabs/StoneScriptPHP
