@@ -30,13 +30,15 @@
         "ext-pdo": "*",
         "ext-pdo_pgsql": "*",
         "ext-json": "*",
+        "ext-redis": "*",
         "firebase/php-jwt": "^6.11",
-        "phpoffice/phpspreadsheet": "^4.2",
+        "phpoffice/phpspreadsheet": "^5.0",
         "google/apiclient": "^2.0"
     },
     "require-dev": {
         "phpunit/phpunit": "^11.0"
     },
+    "bin": ["stone"],
     "autoload": {
         "psr-4": {
             "Framework\\": "Framework/",
@@ -55,6 +57,9 @@
         "post-create-project-cmd": [
             "@setup-interactive"
         ],
+        "post-install-cmd": [
+            "php -r \"if (!file_exists('stone') && !file_exists('.env')) { echo '\\n✅ StoneScriptPHP installed! Initialize your project with:\\n   vendor/bin/stone init\\n\\n'; }\""
+        ],
         "setup-interactive": [
             "php stone setup"
         ],
@@ -69,6 +74,13 @@
         "sort-packages": true,
         "optimize-autoloader": true,
         "preferred-install": "dist"
+    },
+    "archive": {
+        "exclude": [
+            "/integration-tests",
+            "/.github",
+            "/tests"
+        ]
     },
     "minimum-stability": "stable",
     "prefer-stable": true
