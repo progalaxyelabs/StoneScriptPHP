@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/logo.svg" width="200" alt="StoneScriptPHP Logo">
+</p>
+
 # StoneScriptPHP
 
 [![PHP Tests](https://github.com/progalaxyelabs/StoneScriptPHP/actions/workflows/php-test.yml/badge.svg)](https://github.com/progalaxyelabs/StoneScriptPHP/actions/workflows/php-test.yml)
