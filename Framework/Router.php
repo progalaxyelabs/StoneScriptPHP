@@ -7,6 +7,7 @@ use Exception;
 use ReflectionClass;
 use ReflectionProperty;
 use RequestMethod;
+use Framework\Validator;
 
 
 abstract class RequestParser
@@ -64,6 +65,22 @@ abstract class RequestParser
                 return e400($this->error);
             } else {
                 return e400();
+            }
+        }
+
+        // Run validation if rules are defined
+        $validation_rules = $instance->validation_rules();
+        if (!empty($validation_rules)) {
+            $validator = new Validator($input, $validation_rules);
+            if (!$validator->validate()) {
+                $errors = $validator->errors();
+                log_debug('Validation failed: ' . json_encode($errors));
+                http_response_code(400);
+                if (DEBUG_MODE) {
+                    return new ApiResponse('error', 'Validation failed', $errors);
+                } else {
+                    return new ApiResponse('error', 'Validation failed');
+                }
             }
         }
 

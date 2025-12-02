@@ -3,6 +3,7 @@
 use App\Env;
 use Framework\ApiResponse;
 use Framework\Logger;
+use Framework\CacheManager;
 
 function log_debug(string $message)
 {
@@ -63,5 +64,42 @@ function init_env()
     }
 }
 
+function cache(): \Framework\Cache
+{
+    return CacheManager::instance();
+}
 
+function cache_invalidator(): \Framework\CacheInvalidator
+{
+    return CacheManager::invalidator();
+}
 
+function cache_remember(string $key, callable $callback, ?int $ttl = null): mixed
+{
+    return cache()->remember($key, $callback, $ttl);
+}
+
+function cache_tags(array $tags): \Framework\CacheTaggedStore
+{
+    return cache()->tags($tags);
+}
+
+function cache_get(string $key, mixed $default = null): mixed
+{
+    return cache()->get($key, $default);
+}
+
+function cache_set(string $key, mixed $value, ?int $ttl = null): bool
+{
+    return cache()->set($key, $value, $ttl);
+}
+
+function cache_forget(string $key): bool
+{
+    return cache()->forget($key);
+}
+
+function cache_flush(): bool
+{
+    return cache()->flush();
+}

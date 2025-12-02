@@ -7,3 +7,9 @@
 /uploads
 logs/*
 !logs/index.php
+
+# Integration test artifacts
+/integration-tests/docker-data/
+/integration-tests/postgres-data/
+/integration-tests/logs/
+/integration-tests/Dockerfile.test

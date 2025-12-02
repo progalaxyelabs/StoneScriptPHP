@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: saas-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-saas_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: saas-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: saas-api
+    ports:
+      - "${API_PORT:-9100}:9100"
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-saas_db}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      APP_NAME: ${APP_NAME:-Your SaaS}
+      APP_URL: ${APP_URL:-http://localhost:9100}
+    volumes:
+      - ./api:/var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: saas-admin
+    ports:
+      - "${WWW_PORT:-4200}:4200"
+    environment:
+      API_URL: ${API_URL:-http://localhost:9100}
+    volumes:
+      - ./admin:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: saas-worker
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-saas_db}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+    volumes:
+      - ./worker:/app
+      - /app/node_modules
+    depends_on:
+      - redis
+      - db
+
+volumes:
+  postgres_data:
+  redis_data:

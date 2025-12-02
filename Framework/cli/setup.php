@@ -10,9 +10,90 @@ class Setup {
     public function run(): void
     {
         $this->printBanner();
+
+        // Template selection for fresh projects
+        if ($this->isEmptyProject()) {
+            $this->showTemplateSelection();
+        }
+
         $this->generateEnv();
         $this->generateKeys();
         $this->showNextSteps();
+    }
+
+    private function isEmptyProject(): bool
+    {
+        $coreFiles = ['src/App/Routes', 'src/App/Database'];
+        foreach ($coreFiles as $file) {
+            if (is_dir($file) && count(scandir($file)) > 2) {
+                return false; // Already has code
+            }
+        }
+        return true;
+    }
+
+    private function showTemplateSelection(): void
+    {
+        echo "\n📦 Choose a starter template:\n\n";
+        echo "  1) Basic API - Simple REST API with PostgreSQL\n";
+        echo "  2) Fullstack - Angular + API + Real-time notifications\n";
+        echo "  3) Microservice - Lightweight service template\n";
+        echo "  4) SaaS Boilerplate - Multi-tenant with subscriptions\n";
+        echo "  5) Skip (minimal setup)\n\n";
+
+        $choice = readline("Enter choice (1-5): ");
+
+        $templates = [
+            '1' => 'basic-api',
+            '2' => 'fullstack-angular',
+            '3' => 'microservice',
+            '4' => 'saas-boilerplate'
+        ];
+
+        if (isset($templates[$choice])) {
+            $this->scaffoldFromTemplate($templates[$choice]);
+        }
+    }
+
+    private function scaffoldFromTemplate(string $template): void
+    {
+        $vendorPath = __DIR__ . '/../../starters/' . $template;
+
+        if (!is_dir($vendorPath)) {
+            echo "❌ Template not found\n";
+            return;
+        }
+
+        echo "\n📝 Scaffolding from $template template...\n";
+
+        // Copy files (excluding .git, .gitignore stays)
+        $this->recursiveCopy($vendorPath, getcwd(), ['.git', '.gitkeep']);
+
+        echo "✅ Template scaffolded successfully!\n";
+        echo "📁 Files created from template\n\n";
+    }
+
+    private function recursiveCopy(string $src, string $dst, array $exclude = []): void
+    {
+        $dir = opendir($src);
+        @mkdir($dst, 0755, true);
+
+        while (($file = readdir($dir)) !== false) {
+            if ($file == '.' || $file == '..' || in_array($file, $exclude)) {
+                continue;
+            }
+
+            $srcPath = $src . '/' . $file;
+            $dstPath = $dst . '/' . $file;
+
+            if (is_dir($srcPath)) {
+                $this->recursiveCopy($srcPath, $dstPath, $exclude);
+            } else {
+                copy($srcPath, $dstPath);
+            }
+        }
+
+        closedir($dir);
     }
 
     private function printBanner(): void

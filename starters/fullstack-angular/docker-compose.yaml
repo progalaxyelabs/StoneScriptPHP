@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: fullstack-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-fullstack_app}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./api/src/postgresql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: fullstack-api
+    ports:
+      - "${API_PORT:-9100}:9100"
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-fullstack_app}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      JWT_EXPIRY: ${JWT_EXPIRY:-3600}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
+    volumes:
+      - ./api:/var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+
+  www:
+    build:
+      context: ./www
+      dockerfile: Dockerfile
+    container_name: fullstack-www
+    ports:
+      - "${WWW_PORT:-4200}:4200"
+    environment:
+      API_URL: ${API_URL:-http://localhost:9100}
+      SOCKET_URL: ${SOCKET_URL:-http://localhost:3001}
+    volumes:
+      - ./www:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+  alert:
+    build:
+      context: ./alert
+      dockerfile: Dockerfile
+    container_name: fullstack-alert
+    ports:
+      - "${ALERT_PORT:-3001}:3001"
+    environment:
+      PORT: 3001
+      CORS_ORIGIN: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
+    volumes:
+      - ./alert:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:

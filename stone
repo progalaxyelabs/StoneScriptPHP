@@ -7,10 +7,23 @@
  * Usage: php stone <command> [options]
  */
 
-define('ROOT_PATH', __DIR__);
-define('FRAMEWORK_PATH', ROOT_PATH . '/Framework');
+// Detect installation mode
+$isVendorMode = strpos(__DIR__, 'vendor/progalaxyelabs/stonescriptphp') !== false;
 
-require_once ROOT_PATH . '/vendor/autoload.php';
+if ($isVendorMode) {
+    // Installed via composer require - running from vendor/bin/stone
+    $vendorDir = dirname(dirname(__DIR__));
+    define('ROOT_PATH', dirname($vendorDir));
+    define('FRAMEWORK_PATH', __DIR__ . '/Framework');
+    define('IS_VENDOR_MODE', true);
+} else {
+    // Installed via composer create-project - running from project root
+    define('ROOT_PATH', __DIR__);
+    define('FRAMEWORK_PATH', ROOT_PATH . '/Framework');
+    define('IS_VENDOR_MODE', false);
+}
+
+require_once ($isVendorMode ? $vendorDir : ROOT_PATH) . '/vendor/autoload.php';
 
 // CLI Colors
 class Color {
@@ -28,6 +41,14 @@ class Color {
 
 // Available commands
 $commands = [
+    'new' => [
+        'description' => 'Create new StoneScriptPHP project (like "ng new" for Angular)',
+        'file' => 'cli/new.php',
+    ],
+    'init' => [
+        'description' => 'Initialize StoneScriptPHP in existing project (after composer require)',
+        'file' => 'cli/init.php',
+    ],
     'setup' => [
         'description' => 'Interactive project setup (run after composer create-project)',
         'file' => 'cli/setup.php',
@@ -52,6 +73,10 @@ $commands = [
         'description' => 'Generate .env file',
         'file' => 'cli/generate-env.php',
     ],
+    'cli-server' => [
+        'description' => 'Start HTTP API server for code generation',
+        'file' => 'cli/cli-server.php',
+    ],
 ];
 
 // Parse command
@@ -68,6 +93,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     }
     echo "\n";
     echo "Examples:\n";
+    echo "  php stone new my-api             # Create new project\n";
     echo "  php stone setup                  # Interactive setup\n";
     echo "  php stone serve                  # Start dev server\n";
     echo "  php stone generate route login   # Generate login route\n";

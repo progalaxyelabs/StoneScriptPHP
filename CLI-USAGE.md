@@ -1,16 +1,93 @@
 # CLI Script Management System
 
-This project uses a centralized CLI script management system. All CLI scripts are located in `Framework/cli/` and are executed through a main dispatcher script at the project root.
+This project uses a centralized CLI script management system. All CLI scripts are located in `Framework/cli/` and are executed through a main dispatcher script.
+
+## Installation Modes
+
+StoneScriptPHP CLI works in two modes:
+
+### Create-Project Mode
+When installed via `composer create-project`:
+```bash
+php stone <command> [arguments...]
+```
+
+### Require Mode
+When installed via `composer require`:
+```bash
+vendor/bin/stone <command> [arguments...]
+# Or use the wrapper created by `stone init`:
+./stone <command> [arguments...]
+```
+
+**All examples below use `php stone`, but substitute with `vendor/bin/stone` or `./stone` if you're using require mode.**
 
 ## Usage
 
-From the project root, use the `generate` script to run any CLI command:
+From the project root, use the `stone` script to run any CLI command:
 
 ```bash
-php generate <command> [arguments...]
+php stone <command> [arguments...]
 ```
 
 ## Available Commands
+
+### Project Initializer (Init)
+Initialize StoneScriptPHP in an existing project (after `composer require`):
+
+```bash
+vendor/bin/stone init [template]
+```
+
+**Templates:**
+- `basic-api` - Simple REST API with PostgreSQL
+- `microservice` - Lightweight service template
+- `saas-boilerplate` - Multi-tenant with subscriptions
+- No argument: Interactive template selection
+
+**Examples:**
+```bash
+composer require progalaxyelabs/stonescriptphp
+vendor/bin/stone init                    # Interactive template selection
+vendor/bin/stone init basic-api          # Use basic-api template
+vendor/bin/stone init skip               # Minimal setup, no template
+```
+
+This command:
+- Scaffolds project structure from selected template
+- Creates src/App/Routes, Models, Database directories
+- Generates .env configuration file
+- Generates JWT keypair
+- Creates `./stone` wrapper script for convenience
+
+### Project Generator (New)
+Create a new StoneScriptPHP project from scratch:
+
+```bash
+php stone new <project-name> [options]
+```
+
+**Options:**
+- `--template=TYPE` - Project template type (api, microservice, saas-boilerplate)
+- `--skip-setup` - Skip interactive setup wizard
+- `--git` - Initialize git repository
+- `--skip-install` - Skip composer install
+
+**Examples:**
+```bash
+php stone new my-api                           # Create new API project
+php stone new my-api --template=api --git      # Create with git init
+php stone new my-service --template=microservice  # Create microservice project
+php stone new my-saas --template=saas-boilerplate # Create SaaS project
+```
+
+This command creates a complete project structure with:
+- Framework core files
+- Project scaffolding (Routes, DTOs, Models, etc.)
+- Configuration files (.env.example, .gitignore, phpunit.xml)
+- composer.json with dependencies
+- Optional git initialization
+- Optional interactive setup for database and JWT keys
 
 ### Route Generator
 Generate a new route handler class:

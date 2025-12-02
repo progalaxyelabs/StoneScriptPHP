@@ -1,0 +1,69 @@
+name: Publish to Packagist
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  release:
+    types: [published]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo, pdo_pgsql, json
+          tools: composer:v2
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction --no-dev
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      - name: Verify version in composer.json
+        run: |
+          COMPOSER_VERSION=$(php -r "echo json_decode(file_get_contents('composer.json'))->version ?? 'not-set';")
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          echo "composer.json version: $COMPOSER_VERSION"
+          echo "Tag version: $TAG_VERSION"
+          if [ "$COMPOSER_VERSION" != "not-set" ] && [ "$COMPOSER_VERSION" != "$TAG_VERSION" ]; then
+            echo "Warning: Version mismatch between tag ($TAG_VERSION) and composer.json ($COMPOSER_VERSION)"
+            exit 1
+          fi
+
+  trigger-packagist:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Packagist update
+        run: |
+          echo "Packagist will auto-update via webhook when tag is pushed to GitHub"
+          echo "Repository: github.com/progalaxyelabs/StoneScriptPHP"
+          echo "Package: stonescriptphp/stonescriptphp"
+          echo "Tag: ${GITHUB_REF#refs/tags/}"
+          echo ""
+          echo "Ensure the following webhook is configured in GitHub repository settings:"
+          echo "URL: https://packagist.org/api/github?username=stonescriptphp"
+          echo "Content type: application/json"
+          echo "Events: Just the push event"
+
+      - name: Verify Packagist webhook (optional)
+        if: github.event_name == 'release'
+        run: |
+          echo "To manually trigger Packagist update, visit:"
+          echo "https://packagist.org/packages/stonescriptphp/stonescriptphp"
+          echo "and click the 'Update' button if webhook fails"
