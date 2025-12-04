@@ -145,7 +145,35 @@ This will create a `FnFunctionName.php` in `src/App/Database/Functions` folder.
 
 This can be used to call the SQL function from PHP with proper arguments with reasonable typing that PHP allows.
 
-### 4. Create API Route
+### 4. Create Service Class (Recommended)
+
+For better code organization and testability, create a Service class to contain your business logic:
+
+```php
+// src/App/Services/TrophyService.php
+namespace App\Services;
+
+use Database\Functions\FnUpdatetrophyDetails;
+
+class TrophyService
+{
+    /**
+     * Update trophy details
+     * Pure business logic - no HTTP, no auth
+     */
+    public function updateTrophyDetails(int $user_trophy_id, int $count): object
+    {
+        return FnUpdatetrophyDetails::run($user_trophy_id, $count);
+    }
+}
+```
+
+**Why Service Layer?**
+- **Testability**: Business logic can be tested without HTTP/auth concerns
+- **Reusability**: Same logic can be used from multiple routes
+- **Separation of Concerns**: Routes handle HTTP (validation, auth, cookies), Services handle business logic
+
+### 5. Create API Route
 
 ```bash
 php stone generate route update-trophies
@@ -153,7 +181,7 @@ php stone generate route update-trophies
 
 This will create a `UpdateTrophiesRoute.php` file in `Routes` folder.
 
-### 5. Create URL to Class Route Mapping
+### 6. Create URL to Class Route Mapping
 
 In `src/App/Config/routes.php`, add a URL-to-class route mapping.
 
@@ -171,24 +199,69 @@ return [
 ];
 ```
 
-### 6. Implement the Route Class's Process Function
+### 7. Implement the Route Class's Process Function
 
-In `UpdateTrophiesRoute.php`, in the `process` function, call the database function and return data.
+In `UpdateTrophiesRoute.php`, in the `process` function, delegate to the service layer:
 
-Example:
+**With Service Layer (Recommended):**
 
 ```php
-$data = FnUpdatetrophyDetails::run(
-    $user_trophy_id,
-    $count
-);
+class UpdateTrophiesRoute implements IRouteHandler
+{
+    private TrophyService $trophyService;
 
-return new ApiResponse('ok', '', [
-    'course' => $data
-]);
+    public function __construct()
+    {
+        $this->trophyService = new TrophyService();
+    }
+
+    public function validation_rules(): array
+    {
+        return [
+            'user_trophy_id' => 'required|integer',
+            'count' => 'required|integer',
+        ];
+    }
+
+    public function process(): ApiResponse
+    {
+        // Extract and validate input
+        $input = request_body();
+
+        // Authenticate user (if needed)
+        $user_id = auth_user_id(); // Returns null if not authenticated
+
+        // Call service (pure business logic)
+        $data = $this->trophyService->updateTrophyDetails(
+            $input['user_trophy_id'],
+            $input['count']
+        );
+
+        // Handle HTTP response (could add cookies, headers, etc. here)
+        return res_ok(['course' => $data]);
+    }
+}
 ```
 
-### 7. Run Migrations
+**Without Service Layer (Simple cases):**
+
+For very simple routes with no business logic, you can call database functions directly:
+
+```php
+public function process(): ApiResponse
+{
+    $input = request_body();
+
+    $data = FnUpdatetrophyDetails::run(
+        $input['user_trophy_id'],
+        $input['count']
+    );
+
+    return res_ok(['course' => $data]);
+}
+```
+
+### 8. Run Migrations
 
 ```bash
 php stone migrate verify
