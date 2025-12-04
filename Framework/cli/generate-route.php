@@ -296,11 +296,9 @@ if (preg_match($pattern, $routesContent, $matches)) {
     // Method array exists, add to it
     $existingRoutes = $matches[2];
 
-    // Check if there are existing routes and if the last non-whitespace character is not a comma
-    $trimmedRoutes = rtrim($existingRoutes);
-    if (!empty($trimmedRoutes) && substr($trimmedRoutes, -1) !== ',') {
-        // Add comma after the last route entry
-        $existingRoutes = $trimmedRoutes . ",\n";
+    // Ensure existing routes end with a newline for proper formatting
+    if (!empty($existingRoutes) && !str_ends_with($existingRoutes, "\n")) {
+        $existingRoutes .= "\n";
     }
 
     $routesContent = preg_replace(
