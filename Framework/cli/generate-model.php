@@ -42,6 +42,12 @@ if (!file_exists($src_filepath)) {
 }
 
 $content = file_get_contents($src_filepath);
+
+// Strip SQL comments (-- style) from the beginning of the file
+// This allows functions to have documentation comments
+$content = preg_replace('/^(--.*\n)+/', '', $content);
+$content = trim($content);
+
 // echo $content . PHP_EOL;
 
 $regex = '#^(create\s+or\s+replace\s+function\s+)([a-z0-9_]+)(\s*\()([a-z0-9_\s,]*)(\)\s*)(returns\s+table\s*\(\s*[a-z0-9_\s,]*\))?\s*(.*)$#is';
