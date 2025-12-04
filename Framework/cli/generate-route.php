@@ -292,14 +292,23 @@ $routeEntry = "        '$path' => \\App\\Routes\\$routeClassName::class,\n";
 // Find the method array and add the route
 $pattern = "/('$method'\s*=>\s*\[)([^\]]*?)(\s*\])/s";
 
-if (preg_match($pattern, $routesContent)) {
+if (preg_match($pattern, $routesContent, $matches)) {
     // Method array exists, add to it
+    $existingRoutes = $matches[2];
+
+    // Check if there are existing routes and if the last non-whitespace character is not a comma
+    $trimmedRoutes = rtrim($existingRoutes);
+    if (!empty($trimmedRoutes) && substr($trimmedRoutes, -1) !== ',') {
+        // Add comma after the last route entry
+        $existingRoutes = $trimmedRoutes . ",\n";
+    }
+
     $routesContent = preg_replace(
         $pattern,
-        "$1$2$routeEntry$3",
+        "$1$existingRoutes$routeEntry$3",
         $routesContent
     );
-} else {
+} else{
     // Method array doesn't exist, create it
     // Find the closing of the return array
     $routesContent = preg_replace(
