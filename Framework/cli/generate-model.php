@@ -50,7 +50,11 @@ $content = trim($content);
 
 // echo $content . PHP_EOL;
 
-$regex = '#^(create\s+or\s+replace\s+function\s+)([a-z0-9_]+)(\s*\()([a-z0-9_\s,]*)(\)\s*)(returns\s+table\s*\(\s*[a-z0-9_\s,]*\))?\s*(.*)$#is';
+// Updated regex to handle:
+// - Multi-line parameters (newlines)
+// - DEFAULT values in parameters (e.g., "DEFAULT 'IN'")
+// - More flexible matching for parameter types and values
+$regex = '#^(create\s+or\s+replace\s+function\s+)([a-z0-9_]+)(\s*\()(.*?)(\)\s*)(returns\s+table\s*\(.*?\))?\s*(.*)$#is';
 $matches = [];
 if (!preg_match($regex, $content, $matches)) {
     echo 'error parsing file' . PHP_EOL;
@@ -71,9 +75,13 @@ function get_input_params(string $str, array $type_map): array
         if (str_starts_with($trimmed_line, 'out ')) {
             continue;
         }
-        $parts = explode(' ', $trimmed_line);
+
+        // Remove DEFAULT clause before parsing (e.g., "p_name text default 'value'" -> "p_name text")
+        $trimmed_line = preg_replace('/\s+default\s+.*$/i', '', $trimmed_line);
+
+        $parts = explode(' ', trim($trimmed_line));
         $name = preg_replace('#^i_#', '', $parts[0]);
-        $type = $type_map[$parts[1]];
+        $type = $type_map[$parts[1]] ?? 'mixed';
         $typed_input_params[] = "$type $$name";
         $input_params[] = "$$name";
     }
