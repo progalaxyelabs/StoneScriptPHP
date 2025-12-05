@@ -1,5 +1,7 @@
 # StoneScriptPHP Release History
 
+**[← Back to README](../README.md)** | **[📑 Documentation Index](INDEX.md)** | **[📋 Current Roadmap](../RELEASE.md)**
+
 **Last Updated:** December 5, 2025
 
 ---
@@ -43,3 +45,16 @@
 ---
 
 **Note:** Each release section is limited to 10 lines maximum as per development guidelines.
+
+---
+
+## Related Documentation
+
+- **[← Back to README](../README.md)** - Main project overview
+- **[📑 Documentation Index](INDEX.md)** - Complete documentation navigation
+- **[📋 Current Roadmap](../RELEASE.md)** - Next release plans
+- **[🏗️ High Level Design](../HLD.md)** - System architecture
+
+---
+
+**[StoneScriptPHP](https://stonescriptphp.org)** - Modern PHP framework for building APIs

@@ -9,7 +9,7 @@
 
 ### Getting Started
 - [**Getting Started Guide**](getting-started.md) - Complete tutorial from installation to deployment
-- [**CLI Usage**](../CLI-USAGE.md) - Command reference for the Stone CLI tool
+- [**CLI Usage**](CLI-USAGE.md) - Command reference for the Stone CLI tool
 - [**Environment Configuration**](environment-configuration.md) - Type-safe environment setup
 
 ### Core Concepts

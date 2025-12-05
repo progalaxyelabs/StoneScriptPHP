@@ -11,19 +11,15 @@
 [![VS Code Extension](https://img.shields.io/visual-studio-marketplace/v/progalaxyelabs.stonescriptphp-snippets?label=VS%20Code%20Snippets)](https://marketplace.visualstudio.com/items?itemName=progalaxyelabs.stonescriptphp-snippets)
 [![Extension Installs](https://img.shields.io/visual-studio-marketplace/i/progalaxyelabs.stonescriptphp-snippets)](https://marketplace.visualstudio.com/items?itemName=progalaxyelabs.stonescriptphp-snippets)
 
-A modern PHP backend framework for building APIs with PostgreSQL, inspired by Angular's developer experience.
+A modern PHP backend framework for building APIs with PostgreSQL, inspired by Angular routing, MCP-style CLI commands, and Laravel's elegance for a streamlined developer experience.
 
-**Note:** While this package is published under `progalaxyelabs/stonescriptphp`, the official website and documentation are at https://stonescriptphp.org. A future migration to the `@stonescriptphp` namespace is planned.
+Built for developers who value clean architecture and rapid API development, StoneScriptPHP combines PostgreSQL's power with an intuitive CLI workflow. Visit [stonescriptphp.org](https://stonescriptphp.org) for comprehensive guides and tutorials.
 
 ---------------------------------------------------------------
 
 ## Installation
 
-StoneScriptPHP supports two installation modes:
-
-### Option 1: New Project (Recommended)
-
-Create a standalone project with everything included:
+Create a new StoneScriptPHP project:
 
 ```bash
 composer create-project progalaxyelabs/stonescriptphp my-api
@@ -44,71 +40,51 @@ php stone serve
 # Your API is running at http://localhost:9100
 ```
 
-### Option 2: Add to Existing Project
-
-Add StoneScriptPHP as a dependency to an existing project:
-
-```bash
-composer require progalaxyelabs/stonescriptphp
-vendor/bin/stone init
-```
-
-The init wizard will:
-1. Let you choose a starter template or create minimal structure
-2. Create project directories (src/App/Routes, Models, Database, etc.)
-3. Generate .env configuration
-4. Generate JWT keypair
-5. Create a `./stone` wrapper for convenience
-
-Then start the server:
-
-```bash
-vendor/bin/stone serve
-# Or use the wrapper: ./stone serve
-```
-
 **New to StoneScriptPHP?** Check out the [Getting Started Guide](docs/getting-started.md) for a complete walkthrough.
 
-## Upgrade Path
+## Upgrading
 
-Update the framework without affecting your code:
+Update the framework to the latest version:
 
 ```bash
 composer update progalaxyelabs/stonescriptphp
-# Your code in src/ stays intact
-# Only framework files in vendor/ updatedo
 ```
 
-Both installation modes keep the framework in `vendor/`, allowing seamless composer-based upgrades. The template-based scaffolding ensures you get a clean git history from day one, with no template pollution.
+The framework is installed in `vendor/` and your application code in `src/` remains completely untouched during upgrades. The upgrade process:
+- ✅ Updates only framework files in `vendor/`
+- ✅ Preserves all your application code in `src/`
+- ✅ Maintains database migrations history
+- ✅ Keeps configuration files (.env, routes.php) unchanged
+
+**Coming in v1.3.0:** `php stone upgrade` - An intelligent upgrade command that selectively updates framework files with conflict resolution.
 
 ## Features
 
 ### Core Framework
-- 🎯 **Angular-like CLI** - `php stone` commands for code generation
-- 📝 **PostgreSQL-first** - Built for PostgreSQL with migration system
-- 🚀 **Fast Development** - Code generators for routes, models, migrations
-- 📦 **Zero Config** - Works out of the box after setup
+- **Angular-like CLI** - `php stone` commands for code generation
+- **PostgreSQL-first** - Built for PostgreSQL with migration system
+- **Fast Development** - Code generators for routes, models, migrations
+- **Guided Setup** - Interactive wizard for project initialization
 
 ### Security & Auth
-- 🔐 **JWT Authentication** - RSA & HMAC support, built-in OAuth (Google)
-- 🛡️ **RBAC** - Role-Based Access Control with permissions
-- 🔒 **Security Middleware** - CORS, rate limiting, security headers
+- **JWT Authentication** - RSA & HMAC support, built-in OAuth (Google)
+- **RBAC** - Role-Based Access Control with permissions
+- **Security Middleware** - CORS, rate limiting, security headers
 
 ### Performance & Monitoring
-- ⚡ **Redis Caching** - Cache tags, TTL, automatic invalidation
-- 📊 **Production Logging** - PSR-3 compatible, console + file output, colorized
-- 🚨 **Exception Handling** - Global exception handler with structured errors
-- ✅ **Validation Layer** - Powerful request validation with 12+ built-in rules
+- **Redis Caching** - Optional Redis integration with cache tags, TTL, automatic invalidation
+- **Production Logging** - PSR-3 compatible, console + file output, colorized
+- **Exception Handling** - Global exception handler with structured errors
+- **Validation Layer** - Powerful request validation with 12+ built-in rules
 
 ### Developer Experience
-- 🎨 **Color-Coded Logs** - Beautiful ANSI-colored console output
-- 📝 **Comprehensive Docs** - 20+ documentation files (600+ pages)
-- ✅ **Testing** - PHPUnit test suite included
-- 🔧 **VS Code Extension** - Snippets and IntelliSense
+- **Color-Coded Logs** - Beautiful ANSI-colored console output
+- **Comprehensive Docs** - 20+ documentation files (600+ pages)
+- **Testing** - PHPUnit test suite included
+- **VS Code Extension** - Snippets and IntelliSense
 
 ## CLI Commands
 
-### Create-Project Mode
 ```bash
 php stone setup              # Interactive project setup
 php stone serve              # Start dev server (port 9100)
@@ -119,17 +95,7 @@ php stone test               # Run PHPUnit tests
 php stone env                # Generate .env file
 ```
 
-### Require Mode
-```bash
-vendor/bin/stone init        # Initialize project (first time)
-vendor/bin/stone serve       # Start dev server
-vendor/bin/stone generate route <name>   # Generate route handler
-# Or use the wrapper after init:
-./stone serve
-./stone generate route <name>
-```
-
-For detailed CLI usage, see [CLI-USAGE.md](CLI-USAGE.md)
+For detailed CLI usage, see [CLI Usage Guide](docs/CLI-USAGE.md)
 
 ## Workflow
 
@@ -304,11 +270,15 @@ composer test
 
 ## Requirements
 
+### Required
 - PHP >= 8.2
 - PostgreSQL >= 13
-- Redis (optional, for caching)
 - Composer
-- Extensions: `pdo`, `pgsql`, `redis`, `openssl`
+- PHP Extensions: `pdo`, `pdo_pgsql`, `json`, `openssl`
+
+### Optional
+- Redis server (for caching support)
+- PHP Extension: `redis` (for Redis caching)
 
 ## Documentation
 

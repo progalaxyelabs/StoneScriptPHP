@@ -1,5 +1,7 @@
 # Release 1.3.0 Roadmap
 
+**[← Back to README](README.md)** | **[📑 Documentation Index](docs/INDEX.md)** | **[📋 Release History](docs/releases.md)**
+
 **Target Date:** December 15, 2025
 **Status:** Planning
 
@@ -22,3 +24,16 @@
 - File-based rate limiting not suitable for distributed systems
 
 **For complete release history, see [docs/releases.md](docs/releases.md)**
+
+---
+
+## Related Documentation
+
+- **[← Back to README](README.md)** - Main project overview
+- **[📑 Documentation Index](docs/INDEX.md)** - Complete documentation navigation
+- **[📋 Release History](docs/releases.md)** - All past releases
+- **[🏗️ High Level Design](HLD.md)** - System architecture
+
+---
+
+**[StoneScriptPHP](https://stonescriptphp.org)** - Modern PHP framework for building APIs
