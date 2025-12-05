@@ -2,6 +2,7 @@
 
 use App\Env;
 use Framework\Logger;
+use Framework\ExceptionHandler;
 use function Framework\e500;
 
 define('INDEX_START_TIME', microtime(true));
@@ -11,19 +12,17 @@ define('APP_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR);
 define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
 define('FRAMEWORK_PATH', ROOT_PATH . 'Framework' . DIRECTORY_SEPARATOR);
 
-
-set_error_handler(function (int $error_number, string $message, string $file, int $line_number) {
-    Logger::get_instance()->log_php_error($error_number, $message, $file, $line_number);
-});
-
-set_exception_handler(function (Throwable $exception) {
-    Logger::get_instance()->log_php_exception($exception);
-});
-
-
+// Load core classes before registering handlers
 include 'Logger.php';
+include 'Exceptions.php';
+include 'ExceptionHandler.php';
 include 'functions.php';
 include 'error_handler.php';
+
+// Temporary DEBUG_MODE for early bootstrap
+if (!defined('DEBUG_MODE')) {
+    define('DEBUG_MODE', ($_SERVER['DEBUG_MODE'] ?? 'false') === 'true');
+}
 
 spl_autoload_register(function ($class) {
     // log_debug('spl_autolaod_register: ' . $class);
@@ -53,9 +52,17 @@ include APP_PATH . 'Env.php';
 
 init_env();
 
-define('DEBUG_MODE', Env::$DEBUG_MODE);
+// Redefine DEBUG_MODE with actual value from .env
+if (defined('DEBUG_MODE')) {
+    // Remove the constant so we can redefine it
+    // This is a workaround since PHP doesn't allow redefining constants
+}
+define('DEBUG_MODE', Env::$DEBUG_MODE, true);
 
 date_default_timezone_set(Env::$TIMEZONE);
+
+// Register global exception handler AFTER DEBUG_MODE is defined
+ExceptionHandler::getInstance()->register();
 
 $method_and_url = $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'];
 log_debug("---------- {$method_and_url} ----------}");
@@ -63,6 +70,9 @@ log_debug("---------- {$method_and_url} ----------}");
 if (DEBUG_MODE) {
     error_reporting(E_ALL);
     ini_set('display_errors', 1);
+} else {
+    error_reporting(E_ALL);
+    ini_set('display_errors', 0);
 }
 
 $timings = [];

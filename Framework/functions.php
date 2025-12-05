@@ -5,14 +5,53 @@ use Framework\ApiResponse;
 use Framework\Logger;
 use Framework\CacheManager;
 
-function log_debug(string $message)
+// ===========================
+// Logging Functions (PSR-3 Compatible)
+// ===========================
+
+function log_debug(string $message, array $context = [])
 {
-    Logger::get_instance()->log_debug($message);
+    Logger::get_instance()->log_debug($message, $context);
 }
 
-function log_error(string $message)
+function log_info(string $message, array $context = [])
 {
-    Logger::get_instance()->log_error($message);
+    Logger::get_instance()->log_info($message, $context);
+}
+
+function log_notice(string $message, array $context = [])
+{
+    Logger::get_instance()->log_notice($message, $context);
+}
+
+function log_warning(string $message, array $context = [])
+{
+    Logger::get_instance()->log_warning($message, $context);
+}
+
+function log_error(string $message, array $context = [])
+{
+    Logger::get_instance()->log_error($message, $context);
+}
+
+function log_critical(string $message, array $context = [])
+{
+    Logger::get_instance()->log_critical($message, $context);
+}
+
+function log_alert(string $message, array $context = [])
+{
+    Logger::get_instance()->log_alert($message, $context);
+}
+
+function log_emergency(string $message, array $context = [])
+{
+    Logger::get_instance()->log_emergency($message, $context);
+}
+
+function log_request(string $method, string $uri, int $status_code, float $duration_ms)
+{
+    Logger::get_instance()->log_request($method, $uri, $status_code, $duration_ms);
 }
 
 function res_ok($data, $message = '') {
