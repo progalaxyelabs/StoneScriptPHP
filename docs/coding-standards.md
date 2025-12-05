@@ -718,6 +718,75 @@ function process(): ApiResponse
 
 ---
 
+## Release Management
+
+### Release Documentation Policy
+
+StoneScriptPHP follows a **two-file release documentation system**:
+
+#### 1. Root RELEASE.md (Current/Next Release)
+**Location:** `/RELEASE.md`
+**Purpose:** Roadmap for the next release
+**Rules:**
+- ✅ Maximum **20 lines** total
+- ✅ Contains **only the upcoming release** (e.g., v1.3.0)
+- ✅ Lists planned features with status (✅ done, ⏳ in progress)
+- ✅ Known issues with workarounds
+- ✅ Link to `docs/releases.md` for history
+
+**Example:**
+```markdown
+# Release 1.3.0 Roadmap
+
+**Target Date:** December 15, 2025
+**Status:** Planning
+
+## Planned Features
+1. ✅ Fix 34 failing unit tests
+2. ⏳ Redis rate limiting
+3. ⏳ Health endpoint
+...
+```
+
+#### 2. docs/releases.md (Complete History)
+**Location:** `/docs/releases.md`
+**Purpose:** Historical changelog of all releases
+**Rules:**
+- ✅ Maximum **10 lines per release** (excluding headers)
+- ✅ One section per release, newest first
+- ✅ Bullet points only, no verbose explanations
+- ✅ Focus on user-facing changes
+
+**Example:**
+```markdown
+## Release 1.2.0
+**Release Date:** December 7, 2025
+
+- ✅ Enhanced logging with PSR-3 compatibility
+- ✅ Global exception handler
+- ✅ Structured JSON logging
+...
+```
+
+### Release Workflow
+
+1. **During Development:**
+   - Update `RELEASE.md` with planned features
+   - Mark items as ✅ when completed
+
+2. **Upon Release:**
+   - Move release summary from `RELEASE.md` to `docs/releases.md`
+   - Condense to max 10 lines for historical record
+   - Update `RELEASE.md` with next version roadmap
+
+3. **Version Numbering:**
+   - Follow [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`
+   - Major: Breaking changes
+   - Minor: New features, backward compatible
+   - Patch: Bug fixes, backward compatible
+
+---
+
 ## Summary
 
 Following these coding standards ensures:
@@ -732,3 +801,4 @@ For more information, see:
 - [API Design Guidelines](api-design-guidelines.md)
 - [Security Best Practices](security-best-practices.md)
 - [Performance Guidelines](performance-guidelines.md)
+- [Release History](releases.md)

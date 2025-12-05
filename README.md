@@ -76,21 +76,35 @@ Update the framework without affecting your code:
 ```bash
 composer update progalaxyelabs/stonescriptphp
 # Your code in src/ stays intact
-# Only framework files in vendor/ update
+# Only framework files in vendor/ updatedo
 ```
 
 Both installation modes keep the framework in `vendor/`, allowing seamless composer-based upgrades. The template-based scaffolding ensures you get a clean git history from day one, with no template pollution.
 
 ## Features
 
+### Core Framework
 - 🎯 **Angular-like CLI** - `php stone` commands for code generation
 - 📝 **PostgreSQL-first** - Built for PostgreSQL with migration system
-- 🔐 **JWT Authentication** - Built-in OAuth support (Google)
-- ⚡ **Redis Caching** - Built-in Redis integration with cache tags, TTL, and automatic invalidation
-- ✅ **Validation Layer** - Powerful request validation with built-in and custom rules
-- ✅ **Testing** - PHPUnit test suite included
 - 🚀 **Fast Development** - Code generators for routes, models, migrations
 - 📦 **Zero Config** - Works out of the box after setup
+
+### Security & Auth
+- 🔐 **JWT Authentication** - RSA & HMAC support, built-in OAuth (Google)
+- 🛡️ **RBAC** - Role-Based Access Control with permissions
+- 🔒 **Security Middleware** - CORS, rate limiting, security headers
+
+### Performance & Monitoring
+- ⚡ **Redis Caching** - Cache tags, TTL, automatic invalidation
+- 📊 **Production Logging** - PSR-3 compatible, console + file output, colorized
+- 🚨 **Exception Handling** - Global exception handler with structured errors
+- ✅ **Validation Layer** - Powerful request validation with 12+ built-in rules
+
+### Developer Experience
+- 🎨 **Color-Coded Logs** - Beautiful ANSI-colored console output
+- 📝 **Comprehensive Docs** - 20+ documentation files (600+ pages)
+- ✅ **Testing** - PHPUnit test suite included
+- 🔧 **VS Code Extension** - Snippets and IntelliSense
 
 ## CLI Commands
 
@@ -298,13 +312,34 @@ composer test
 
 ## Documentation
 
+### 📖 Main Documentation
+- **[📑 Documentation Index](docs/INDEX.md)** - Complete documentation with website-style navigation
+- **[🏗️ High Level Design (HLD)](HLD.md)** - System architecture and design patterns
+- **[📋 Release Notes](RELEASE.md)** - Version history and changelog
+
+### 🚀 Getting Started
 - [Getting Started Guide](docs/getting-started.md) - Complete tutorial from installation to deployment
+- [CLI Usage Guide](CLI-USAGE.md) - Command reference for `php stone`
+- [Environment Configuration](docs/environment-configuration.md) - Type-safe environment setup
+
+### 🔧 Core Features
 - [API Reference](docs/api-reference.md) - Complete API documentation with examples
-- [CLI Usage Guide](CLI-USAGE.md) - Command reference
-- [Redis Caching Guide](docs/CACHING.md) - Redis integration, cache tags, and automatic invalidation
+- [Logging & Exceptions](docs/logging-and-exceptions.md) - **NEW** Production-ready logging system
 - [Request Validation](docs/validation.md) - Validation rules and usage guide
 - [Middleware Guide](docs/MIDDLEWARE.md) - Middleware system and custom middleware
-- [Environment Configuration](docs/environment-configuration.md) - Type-safe environment setup
+
+### 🔐 Security
+- [Authentication](docs/authentication.md) - JWT and OAuth implementation
+- [RBAC (Access Control)](docs/RBAC.md) - Role-Based Access Control
+- [Security Best Practices](docs/security-best-practices.md) - Comprehensive security guide
+
+### ⚡ Performance
+- [Redis Caching Guide](docs/CACHING.md) - Cache tags and automatic invalidation
+- [Performance Guidelines](docs/performance-guidelines.md) - Optimization strategies
+
+### 📚 Additional Resources
+- [API Design Guidelines](docs/api-design-guidelines.md) - REST API design patterns
+- [Coding Standards](docs/coding-standards.md) - PHP coding conventions
 - [Online Documentation](https://stonescriptphp.org/docs)
 - [Examples](examples/)
 
