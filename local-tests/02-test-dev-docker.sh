@@ -190,14 +190,17 @@ APP_NAME=StoneScriptPHP
 APP_ENV=development
 APP_PORT=9100
 
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=test_db
-DB_USER=test_user
-DB_PASS=test_pass
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_DBNAME=test_db
+DATABASE_USER=test_user
+DATABASE_PASSWORD=test_pass
 
-JWT_SECRET=test_secret_key
-JWT_ALGORITHM=HS256
+JWT_PRIVATE_KEY_PATH=./keys/jwt-private.pem
+JWT_PUBLIC_KEY_PATH=./keys/jwt-public.pem
+JWT_EXPIRY=3600
+
+ALLOWED_ORIGINS=http://localhost:3000
 ENVFILE
 
 EXPOSE 80

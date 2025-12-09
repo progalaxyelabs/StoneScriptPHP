@@ -212,14 +212,14 @@ APP_NAME=StoneScriptPHP
 APP_ENV=production
 APP_DEBUG=false
 
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=prod_db
-DB_USER=prod_user
-DB_PASS=prod_pass
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_DBNAME=prod_db
+DATABASE_USER=prod_user
+DATABASE_PASSWORD=prod_pass
 
-JWT_SECRET=production_secret_key
-JWT_ALGORITHM=HS256
+JWT_PRIVATE_KEY_PATH=production_secret_key
+# JWT_ALGORITHM=HS256
 ENVFILE
 
 # Set permissions

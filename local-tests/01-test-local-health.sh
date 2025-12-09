@@ -148,25 +148,22 @@ else
     exit 1
 fi
 
-# Create minimal .env file for testing (no DB required for health check)
-echo -e "\n${YELLOW}⚙️  Creating minimal .env file...${NC}"
-cat > .env <<EOF
-APP_NAME=StoneScriptPHP
-APP_ENV=development
-APP_PORT=$TEST_PORT
+# Generate .env file using stone command
+echo -e "\n${YELLOW}⚙️  Generating .env file...${NC}"
+php stone generate env --force > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}  ✓ .env file generated${NC}"
 
-# Database (not required for health check)
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=test_db
-DB_USER=test_user
-DB_PASS=test_pass
-
-# JWT
-JWT_SECRET=test_secret_key_for_health_check_only
-JWT_ALGORITHM=HS256
-EOF
-echo -e "${GREEN}  ✓ .env file created${NC}"
+    # Update with test-specific values
+    sed -i 's/^APP_PORT=.*/APP_PORT='$TEST_PORT'/' .env
+    sed -i 's/^DATABASE_DBNAME=.*/DATABASE_DBNAME=test_health_db/' .env
+    sed -i 's/^DATABASE_USER=.*/DATABASE_USER=test_user/' .env
+    sed -i 's/^DATABASE_PASSWORD=.*/DATABASE_PASSWORD=test_pass/' .env
+    echo -e "${GREEN}  ✓ .env configured for test${NC}"
+else
+    echo -e "${RED}  ✗ Failed to generate .env${NC}"
+    exit 1
+fi
 
 # Step 5: Start the server using php stone serve
 echo -e "\n${YELLOW}🚀 Step 5: Starting PHP development server...${NC}"
