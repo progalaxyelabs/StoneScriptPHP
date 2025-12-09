@@ -58,6 +58,18 @@ The framework is installed in `vendor/` and your application code in `src/` rema
 
 **Coming in v1.3.0:** `php stone upgrade` - An intelligent upgrade command that selectively updates framework files with conflict resolution.
 
+## Versioning Strategy
+
+StoneScriptPHP follows [Semantic Versioning](https://semver.org/):
+
+- **Patch versions (2.0.x)**: Bug fixes, security patches, minor improvements. Safe to update anytime.
+- **Minor versions (2.x.0)**: New features, backward-compatible changes. Update when you need new functionality.
+- **Major versions (x.0.0)**: Breaking changes, major architectural updates. Review migration guide before updating.
+
+The framework and server are versioned together during major releases but may have different patch versions as bugs are fixed independently. The server's `composer.json` uses `^2.0` to automatically receive framework patch updates while staying on the same major version.
+
+**Current stable:** v2.0.x - Production-ready with ongoing bug fixes
+
 ## Features
 
 ### Core Framework
