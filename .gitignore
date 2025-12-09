@@ -36,6 +36,12 @@ logs/*
 /integration-tests/logs/
 /integration-tests/Dockerfile.test
 
+# Local test artifacts
+/local-tests/test-workspace/
+/local-tests/*.log
+/local-tests/docker-data/
+/local-tests/postgres-data/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -33,7 +33,7 @@ class Env
      *
      * @return array Schema definition
      */
-    public static function getSchema(): array
+    public function getSchema(): array
     {
         return [
             'DEBUG_MODE' => [
@@ -125,7 +125,7 @@ class Env
             throw new Exception($message);
         }
 
-        $schema = static::getSchema();
+        $schema = $this->getSchema();
         $missing_keys = [];
         $type_errors = [];
 

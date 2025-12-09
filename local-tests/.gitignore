@@ -1,0 +1,9 @@
+# Test artifacts - these are generated during test runs
+test-workspace/
+*.log
+docker-data/
+postgres-data/
+
+# Keep the actual test scripts
+!*.sh
+!*.md
