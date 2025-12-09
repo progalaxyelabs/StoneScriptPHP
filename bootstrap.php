@@ -1,72 +1,59 @@
 <?php
 
-use App\Env;
-use Framework\Logger;
+/**
+ * StoneScriptPHP Framework Bootstrap
+ *
+ * This file is loaded via composer autoload.files when the framework is installed.
+ * It initializes the framework environment.
+ */
+
+use Framework\Env;
 use Framework\ExceptionHandler;
-use function Framework\e500;
 
-define('INDEX_START_TIME', microtime(true));
-define('ROOT_PATH', realpath('..' . DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR);
-define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
-define('APP_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR);
-define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
-define('FRAMEWORK_PATH', ROOT_PATH . 'Framework' . DIRECTORY_SEPARATOR);
+// These constants should be defined by the application before loading composer autoloader
+// If not defined, provide defaults (though this is not recommended)
+if (!defined('INDEX_START_TIME')) {
+    define('INDEX_START_TIME', microtime(true));
+}
 
-// Load core classes before registering handlers
-include 'Logger.php';
-include 'Exceptions.php';
-include 'ExceptionHandler.php';
-include 'functions.php';
-include 'error_handler.php';
+if (!defined('ROOT_PATH')) {
+    // Try to detect the application root (4 levels up from vendor/progalaxyelabs/stonescriptphp)
+    define('ROOT_PATH', realpath(__DIR__ . '/../../../..') . DIRECTORY_SEPARATOR);
+}
 
-// Temporary DEBUG_MODE for early bootstrap
+if (!defined('SRC_PATH')) {
+    define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
+}
+
+if (!defined('CONFIG_PATH')) {
+    define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
+}
+
+// Temporary DEBUG_MODE for early bootstrap (before .env loads)
 if (!defined('DEBUG_MODE')) {
     define('DEBUG_MODE', ($_SERVER['DEBUG_MODE'] ?? 'false') === 'true');
 }
 
-spl_autoload_register(function ($class) {
-    // log_debug('spl_autolaod_register: ' . $class);
-    if (str_starts_with($class, 'App\\')) {
-        $path = SRC_PATH . str_replace('\\', DIRECTORY_SEPARATOR, $class) . '.php';
-    } else if (str_starts_with($class, 'Framework\\')) {
-        $path = ROOT_PATH . str_replace('\\', DIRECTORY_SEPARATOR, $class) . '.php';
-    } else {
-        log_error('spl_autolaod_register: Unknown class ' . $class);
-        return;
-    }
+// Note: functions.php is already loaded via composer autoload.files
+// Note: All Framework classes are autoloaded via PSR-4
 
-    if (DEBUG_MODE) {
-        include $path;
-    } else {
-        try {
-            include $path;
-        } catch (Error $e) {
-            // e500($e->getMessage());
-            log_error($e->getMessage());
-            e500('Failed to load file');
-        }
-    }
-});
-
-include APP_PATH . 'Env.php';
-
-init_env();
+// Initialize environment from .env file
+Env::get_instance();
 
 // Redefine DEBUG_MODE with actual value from .env
 if (defined('DEBUG_MODE')) {
-    // Remove the constant so we can redefine it
-    // This is a workaround since PHP doesn't allow redefining constants
+    // PHP doesn't allow redefining constants, but we use a workaround in Env::get_instance()
+    // The constant is redefined there with the allow_redefinition flag
 }
 define('DEBUG_MODE', Env::$DEBUG_MODE, true);
 
+// Set timezone from environment
 date_default_timezone_set(Env::$TIMEZONE);
 
 // Register global exception handler AFTER DEBUG_MODE is defined
 ExceptionHandler::getInstance()->register();
 
-$method_and_url = $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'];
-log_debug("---------- {$method_and_url} ----------}");
-
+// Configure error reporting based on DEBUG_MODE
 if (DEBUG_MODE) {
     error_reporting(E_ALL);
     ini_set('display_errors', 1);
@@ -75,4 +62,9 @@ if (DEBUG_MODE) {
     ini_set('display_errors', 0);
 }
 
+// Log the request
+$method_and_url = ($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' . ($_SERVER['REQUEST_URI'] ?? '');
+log_debug("---------- {$method_and_url} ----------");
+
+// Initialize timings array for performance tracking
 $timings = [];

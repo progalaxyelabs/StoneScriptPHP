@@ -45,7 +45,8 @@
             "Framework\\": ""
         },
         "files": [
-            "functions.php"
+            "functions.php",
+            "bootstrap.php"
         ]
     },
     "autoload-dev": {
