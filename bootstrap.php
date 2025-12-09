@@ -44,12 +44,10 @@ if (file_exists($envFile)) {
     // Initialize environment from .env file
     $env = Env::get_instance();
 
-    // Redefine DEBUG_MODE with actual value from .env
-    if (defined('DEBUG_MODE')) {
-        // PHP doesn't allow redefining constants, but we use a workaround in Env::get_instance()
-        // The constant is redefined there with the allow_redefinition flag
+    // Define DEBUG_MODE with actual value from .env (if not already defined)
+    if (!defined('DEBUG_MODE')) {
+        define('DEBUG_MODE', $env->DEBUG_MODE);
     }
-    define('DEBUG_MODE', $env->DEBUG_MODE, true);
 
     // Set timezone from environment
     date_default_timezone_set($env->TIMEZONE);
