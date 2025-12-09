@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Lib;
+namespace Framework\Lib\Auth;
 
-use App\Models\MyTokenClaims;
+use Framework\Lib\User\MyTokenClaims;
 use \Firebase\JWT\JWT;
 use \Firebase\JWT\Key;
 use \Firebase\JWT\SignatureInvalidException;

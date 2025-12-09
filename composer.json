@@ -40,14 +40,12 @@
     "suggest": {
         "ext-redis": "Required for Redis caching support"
     },
-    "bin": ["stone"],
     "autoload": {
         "psr-4": {
-            "Framework\\": "Framework/",
-            "App\\": "src/App/"
+            "Framework\\": ""
         },
         "files": [
-            "Framework/functions.php"
+            "functions.php"
         ]
     },
     "autoload-dev": {
@@ -56,21 +54,7 @@
         }
     },
     "scripts": {
-        "post-create-project-cmd": [
-            "@setup-interactive"
-        ],
-        "post-install-cmd": [
-            "php -r \"if (!file_exists('stone') && !file_exists('.env')) { echo '\\n✅ StoneScriptPHP installed! Initialize your project with:\\n   vendor/bin/stone init\\n\\n'; }\""
-        ],
-        "setup-interactive": [
-            "php stone setup"
-        ],
-        "serve": [
-            "Composer\\Config::disableProcessTimeout",
-            "php stone serve"
-        ],
-        "test": "phpunit",
-        "migrate": "php stone migrate"
+        "test": "phpunit"
     },
     "config": {
         "sort-packages": true,
@@ -81,7 +65,25 @@
         "exclude": [
             "/integration-tests",
             "/.github",
-            "/tests"
+            "/tests",
+            "/docs",
+            "/examples",
+            "/.git",
+            "/.env",
+            "/.env.*",
+            "*.pem",
+            "*.pub",
+            "*.key",
+            "*.log",
+            "/logs",
+            "/uploads",
+            "/.idea",
+            "/.vscode",
+            "/.phpunit.cache",
+            "/vendor",
+            "/node_modules",
+            "GITHUB-PACKAGIST-RELEASE.md",
+            "PHASE-*.md"
         ]
     },
     "minimum-stability": "stable",

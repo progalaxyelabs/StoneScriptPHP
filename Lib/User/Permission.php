@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Models;
+namespace Framework\Lib\User;
 
 class Permission
 {

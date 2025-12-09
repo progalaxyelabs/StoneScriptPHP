@@ -1,15 +1,45 @@
+# Environment & Credentials
 .env
-
-/vendor/
-
+.env.*
+!.env.example
 *.pem
 *.pub
-/uploads
+*.key
+*-jwt.pem
+*-jwt.pub
+
+# Dependencies
+/vendor/
+/node_modules/
+composer.lock
+
+# IDE
+/.idea/
+/.vscode/
+/.phpunit.cache/
+*.swp
+*.swo
+*~
+
+# Logs
 logs/*
-!logs/index.php
+!logs/.gitkeep
+*.log
+
+# Uploads
+/uploads/
+/storage/
 
 # Integration test artifacts
 /integration-tests/docker-data/
 /integration-tests/postgres-data/
 /integration-tests/logs/
 /integration-tests/Dockerfile.test
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+/dist/
+/build/

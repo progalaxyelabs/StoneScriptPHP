@@ -1,0 +1,23 @@
+-- OAuth Users Table
+-- Stores users who authenticate via OAuth providers (Google, LinkedIn, Apple, etc.)
+
+CREATE TABLE IF NOT EXISTS oauth_users (
+    user_id SERIAL PRIMARY KEY,
+    provider VARCHAR(50) NOT NULL, -- 'google', 'linkedin', 'apple', etc.
+    provider_user_id VARCHAR(255) NOT NULL, -- Unique ID from OAuth provider
+    email VARCHAR(255),
+    email_verified BOOLEAN DEFAULT false,
+    name VARCHAR(255),
+    picture TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT unique_provider_user UNIQUE(provider, provider_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_users_email ON oauth_users(email);
+CREATE INDEX IF NOT EXISTS idx_oauth_users_provider ON oauth_users(provider, provider_user_id);
+
+COMMENT ON TABLE oauth_users IS 'Stores OAuth authenticated users from various providers';
+COMMENT ON COLUMN oauth_users.provider IS 'OAuth provider name: google, linkedin, apple, github, etc.';
+COMMENT ON COLUMN oauth_users.provider_user_id IS 'Unique user ID from the OAuth provider (e.g., Google sub)';

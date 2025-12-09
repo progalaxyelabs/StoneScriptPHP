@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Lib;
+namespace Framework\Lib\Email;
 
-use App\Env;
+use Framework\Env;
 
 class MyZeptoMail
 {

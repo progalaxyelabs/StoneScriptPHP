@@ -1,0 +1,68 @@
+CREATE OR REPLACE FUNCTION upsert_oauth_user(
+    i_provider TEXT,
+    i_provider_user_id TEXT,
+    i_email TEXT,
+    i_email_verified BOOLEAN,
+    i_name TEXT,
+    i_picture TEXT
+)
+RETURNS TABLE (
+    o_user_id INT,
+    o_provider TEXT,
+    o_provider_user_id TEXT,
+    o_email TEXT,
+    o_email_verified BOOLEAN,
+    o_name TEXT,
+    o_picture TEXT,
+    o_created_at TIMESTAMPTZ,
+    o_updated_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_user_id INT;
+BEGIN
+    -- Insert or update user
+    INSERT INTO oauth_users (
+        provider,
+        provider_user_id,
+        email,
+        email_verified,
+        name,
+        picture,
+        updated_at
+    )
+    VALUES (
+        i_provider,
+        i_provider_user_id,
+        i_email,
+        i_email_verified,
+        i_name,
+        i_picture,
+        NOW()
+    )
+    ON CONFLICT (provider, provider_user_id)
+    DO UPDATE SET
+        email = EXCLUDED.email,
+        email_verified = EXCLUDED.email_verified,
+        name = EXCLUDED.name,
+        picture = EXCLUDED.picture,
+        updated_at = NOW()
+    RETURNING user_id INTO v_user_id;
+
+    -- Return the user record
+    RETURN QUERY
+    SELECT
+        user_id,
+        provider,
+        provider_user_id,
+        email,
+        email_verified,
+        name,
+        picture,
+        created_at,
+        updated_at
+    FROM oauth_users
+    WHERE user_id = v_user_id;
+END;
+$$;

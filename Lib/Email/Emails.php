@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Lib;
+namespace Framework\Lib\Email;
 
 class Emails
 {
