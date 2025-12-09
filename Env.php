@@ -9,6 +9,9 @@ class Env
     private static ?Env $_instance = null;
 
     // Environment variable values
+    public $DEBUG_MODE;
+    public $TIMEZONE;
+
     public $DATABASE_HOST;
     public $DATABASE_PORT;
     public $DATABASE_USER;
@@ -33,6 +36,18 @@ class Env
     public static function getSchema(): array
     {
         return [
+            'DEBUG_MODE' => [
+                'type' => 'bool',
+                'required' => false,
+                'default' => false,
+                'description' => 'Enable debug mode for detailed error reporting'
+            ],
+            'TIMEZONE' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => 'UTC',
+                'description' => 'Default timezone for the application'
+            ],
             'DATABASE_HOST' => [
                 'type' => 'string',
                 'required' => true,
@@ -102,15 +117,15 @@ class Env
         ];
     }
 
-    private function __construct()
+    protected function __construct()
     {
         $env_file_path = ROOT_PATH . DIRECTORY_SEPARATOR . '.env';
         if (!file_exists($env_file_path)) {
-            $message = 'missing .env file. Run: php Framework/cli/generate-env.php';
+            $message = 'missing .env file. Run: php stone setup';
             throw new Exception($message);
         }
 
-        $schema = self::getSchema();
+        $schema = static::getSchema();
         $missing_keys = [];
         $type_errors = [];
 
@@ -193,7 +208,12 @@ class Env
     public static function get_instance(): Env
     {
         if (!self::$_instance) {
-            self::$_instance = new Env();
+            // Check if App\Env exists and use it, otherwise use Framework\Env
+            if (class_exists('App\\Env')) {
+                self::$_instance = new \App\Env();
+            } else {
+                self::$_instance = new static();
+            }
         }
 
         return self::$_instance;
