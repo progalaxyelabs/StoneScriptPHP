@@ -33,11 +33,12 @@ echo ""
 cleanup() {
     echo -e "\n${YELLOW}🧹 Cleaning up...${NC}"
 
-    # Kill the PHP server if running
+    # Kill any server running on TEST_PORT
+    SERVER_PID=$(lsof -ti:$TEST_PORT 2>/dev/null || echo "")
     if [ ! -z "$SERVER_PID" ]; then
-        echo "  Stopping PHP server (PID: $SERVER_PID)..."
+        echo "  Stopping PHP server on port $TEST_PORT (PID: $SERVER_PID)..."
         kill $SERVER_PID 2>/dev/null || true
-        wait $SERVER_PID 2>/dev/null || true
+        sleep 1
     fi
 
     # Remove test directory
@@ -168,21 +169,27 @@ fi
 # Step 5: Start the server using php stone serve
 echo -e "\n${YELLOW}🚀 Step 5: Starting PHP development server...${NC}"
 php stone serve > /tmp/stone-server.log 2>&1 &
-SERVER_PID=$!
-echo "  Server PID: $SERVER_PID"
+STONE_PID=$!
 
-# Wait for server to start
+# Wait for server to start and check if port is listening
 echo "  Waiting for server to start..."
-sleep 3
+MAX_WAIT=10
+COUNTER=0
+while [ $COUNTER -lt $MAX_WAIT ]; do
+    if lsof -i:$TEST_PORT -t >/dev/null 2>&1; then
+        echo -e "${GREEN}  ✓ Server started successfully on port $TEST_PORT${NC}"
+        break
+    fi
+    sleep 1
+    COUNTER=$((COUNTER + 1))
+done
 
-# Check if server is running
-if ! ps -p $SERVER_PID > /dev/null; then
-    echo -e "${RED}  ✗ Server failed to start${NC}"
+if [ $COUNTER -eq $MAX_WAIT ]; then
+    echo -e "${RED}  ✗ Server failed to start after ${MAX_WAIT}s${NC}"
     echo "  Server log:"
     cat /tmp/stone-server.log
     exit 1
 fi
-echo -e "${GREEN}  ✓ Server started successfully${NC}"
 
 # Step 6: Make a curl request to health/home route
 echo -e "\n${YELLOW}🔍 Step 6: Testing health endpoint...${NC}"
@@ -225,7 +232,11 @@ fi
 echo -e "\n${YELLOW}📊 Additional Verification:${NC}"
 echo "  • Framework version: $(grep -o '"version": "[^"]*"' vendor/progalaxyelabs/stonescriptphp/composer.json | head -1 || echo 'dev')"
 echo "  • PHP version: $(php -v | head -n1)"
-echo "  • Server uptime: $(ps -p $SERVER_PID -o etime= | tr -d ' ')"
+ACTUAL_PID=$(lsof -ti:$TEST_PORT 2>/dev/null || echo "")
+if [ ! -z "$ACTUAL_PID" ]; then
+    echo "  • Server PID: $ACTUAL_PID"
+    echo "  • Server uptime: $(ps -p $ACTUAL_PID -o etime= 2>/dev/null | tr -d ' ' || echo 'N/A')"
+fi
 
 # Test passed
 echo -e "\n${GREEN}========================================${NC}"
