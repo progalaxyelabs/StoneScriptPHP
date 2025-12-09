@@ -184,24 +184,14 @@ stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 SUPERVISOR
 
-# Create minimal .env
-RUN cat > .env <<'ENVFILE'
-APP_NAME=StoneScriptPHP
-APP_ENV=development
-APP_PORT=9100
-
-DATABASE_HOST=localhost
-DATABASE_PORT=5432
-DATABASE_DBNAME=test_db
-DATABASE_USER=test_user
-DATABASE_PASSWORD=test_pass
-
-JWT_PRIVATE_KEY_PATH=./keys/jwt-private.pem
-JWT_PUBLIC_KEY_PATH=./keys/jwt-public.pem
-JWT_EXPIRY=3600
-
-ALLOWED_ORIGINS=http://localhost:3000
-ENVFILE
+# Generate .env file using CLI and update values
+RUN php stone generate env --force && \
+    sed -i 's/^APP_ENV=.*/APP_ENV=development/' .env && \
+    sed -i 's/^APP_PORT=.*/APP_PORT=9100/' .env && \
+    sed -i 's/^DATABASE_HOST=.*/DATABASE_HOST=localhost/' .env && \
+    sed -i 's/^DATABASE_DBNAME=.*/DATABASE_DBNAME=test_db/' .env && \
+    sed -i 's/^DATABASE_USER=.*/DATABASE_USER=test_user/' .env && \
+    sed -i 's/^DATABASE_PASSWORD=.*/DATABASE_PASSWORD=test_pass/' .env
 
 EXPOSE 80
 

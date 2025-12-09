@@ -74,7 +74,7 @@ fi
 echo -e "${YELLOW}📋 Test Plan:${NC}"
 echo ""
 if [ "$RUN_ALL" = true ]; then
-    echo "  Running all 5 test cases:"
+    echo "  Running all 6 test cases:"
 else
     echo "  Running selected test cases: ${SELECTED_TESTS[@]}"
 fi
@@ -103,6 +103,12 @@ echo "  5️⃣  TODO App Full Integration"
 echo "     • Complete CRUD application"
 echo "     • Real-world use case"
 echo "     • End-to-end testing"
+echo ""
+echo "  6️⃣  CLI CRUD Generation"
+echo "     • Uses php stone CLI commands"
+echo "     • Generates models and routes"
+echo "     • Books CRUD application"
+echo "     • Validates CLI workflow"
 echo ""
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
@@ -156,6 +162,13 @@ fi
 # Test 5: TODO App
 if should_run_test "5"; then
     run_test "5" "TODO App Integration" "05-test-todo-app.sh"
+    echo ""
+    sleep 2
+fi
+
+# Test 6: CLI CRUD Generation
+if should_run_test "6"; then
+    run_test "6" "CLI CRUD Generation" "06-test-cli-crud-generation.sh"
     echo ""
 fi
 

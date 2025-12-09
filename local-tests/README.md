@@ -80,6 +80,28 @@ Complete CRUD application test:
 - Tests on port 9155
 - **Duration:** ~3-4 minutes
 
+### Test 6: CLI CRUD Generation
+**Script:** `06-test-cli-crud-generation.sh`
+
+Tests the complete CLI workflow for generating a CRUD app:
+- Uses actual `php stone` CLI commands:
+  - `php stone generate model <function>.pssql`
+  - `php stone generate route <name>`
+- Creates Books CRUD application with:
+  - Database table with seed data (3 books)
+  - 5 PostgreSQL functions (list, get, create, update, delete)
+  - 5 PHP model classes (generated via CLI)
+  - 5 route handlers (generated via CLI)
+  - Configured REST API routes
+- Tests CRUD operations:
+  - ✅ List Books (with seed data)
+  - ✅ Create Book
+  - ✅ Get Book by ID
+  - ✅ Verify persistence
+- Validates the developer workflow
+- Tests on port 9156
+- **Duration:** ~3-4 minutes
+
 ## Usage
 
 ### Run All Tests
@@ -107,6 +129,9 @@ chmod +x *.sh
 
 # Test 5: TODO app
 ./05-test-todo-app.sh
+
+# Test 6: CLI CRUD generation
+./06-test-cli-crud-generation.sh
 ```
 
 ### Run Selected Tests

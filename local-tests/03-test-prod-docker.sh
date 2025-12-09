@@ -206,21 +206,13 @@ RUN cat > /var/www/html/public/.htaccess <<'HTACCESS'
 </IfModule>
 HTACCESS
 
-# Create minimal .env
-RUN cat > .env <<'ENVFILE'
-APP_NAME=StoneScriptPHP
-APP_ENV=production
-APP_DEBUG=false
-
-DATABASE_HOST=localhost
-DATABASE_PORT=5432
-DATABASE_DBNAME=prod_db
-DATABASE_USER=prod_user
-DATABASE_PASSWORD=prod_pass
-
-JWT_PRIVATE_KEY_PATH=production_secret_key
-# JWT_ALGORITHM=HS256
-ENVFILE
+# Generate .env file using CLI and update values
+RUN php stone generate env --force && \
+    sed -i 's/^APP_ENV=.*/APP_ENV=production/' .env && \
+    sed -i 's/^DATABASE_HOST=.*/DATABASE_HOST=localhost/' .env && \
+    sed -i 's/^DATABASE_DBNAME=.*/DATABASE_DBNAME=prod_db/' .env && \
+    sed -i 's/^DATABASE_USER=.*/DATABASE_USER=prod_user/' .env && \
+    sed -i 's/^DATABASE_PASSWORD=.*/DATABASE_PASSWORD=prod_pass/' .env
 
 # Set permissions
 RUN chown -R www-data:www-data /var/www/html

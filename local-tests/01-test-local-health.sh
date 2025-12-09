@@ -154,11 +154,11 @@ php stone generate env --force > /dev/null 2>&1
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}  ✓ .env file generated${NC}"
 
-    # Update with test-specific values
+    # Update with test-specific values (uncomment and set required fields)
     sed -i 's/^APP_PORT=.*/APP_PORT='$TEST_PORT'/' .env
-    sed -i 's/^DATABASE_DBNAME=.*/DATABASE_DBNAME=test_health_db/' .env
-    sed -i 's/^DATABASE_USER=.*/DATABASE_USER=test_user/' .env
-    sed -i 's/^DATABASE_PASSWORD=.*/DATABASE_PASSWORD=test_pass/' .env
+    sed -i 's/^; DATABASE_DBNAME=.*/DATABASE_DBNAME=test_health_db/' .env
+    sed -i 's/^; DATABASE_USER=.*/DATABASE_USER=test_user/' .env
+    sed -i 's/^; DATABASE_PASSWORD=.*/DATABASE_PASSWORD=test_pass/' .env
     echo -e "${GREEN}  ✓ .env configured for test${NC}"
 else
     echo -e "${RED}  ✗ Failed to generate .env${NC}"

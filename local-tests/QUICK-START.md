@@ -41,6 +41,12 @@ Tests PostgreSQL connectivity.
 ```
 Complete CRUD integration test.
 
+### Test 6: CLI CRUD Generation (~4 minutes)
+```bash
+./06-test-cli-crud-generation.sh
+```
+Tests CLI workflow with `php stone generate` commands.
+
 ## Run Selected Tests
 
 ```bash
