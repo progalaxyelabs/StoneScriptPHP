@@ -42,17 +42,17 @@ if (!defined('DEBUG_MODE')) {
 $envFile = ROOT_PATH . '.env';
 if (file_exists($envFile)) {
     // Initialize environment from .env file
-    Env::get_instance();
+    $env = Env::get_instance();
 
     // Redefine DEBUG_MODE with actual value from .env
     if (defined('DEBUG_MODE')) {
         // PHP doesn't allow redefining constants, but we use a workaround in Env::get_instance()
         // The constant is redefined there with the allow_redefinition flag
     }
-    define('DEBUG_MODE', Env::$DEBUG_MODE, true);
+    define('DEBUG_MODE', $env->DEBUG_MODE, true);
 
     // Set timezone from environment
-    date_default_timezone_set(Env::$TIMEZONE);
+    date_default_timezone_set($env->TIMEZONE);
 
     // Register global exception handler AFTER DEBUG_MODE is defined
     ExceptionHandler::getInstance()->register();
