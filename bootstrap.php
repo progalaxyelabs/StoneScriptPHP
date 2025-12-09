@@ -37,34 +37,39 @@ if (!defined('DEBUG_MODE')) {
 // Note: functions.php is already loaded via composer autoload.files
 // Note: All Framework classes are autoloaded via PSR-4
 
-// Initialize environment from .env file
-Env::get_instance();
+// Check if .env file exists before initializing
+// During setup (composer create-project), .env doesn't exist yet
+$envFile = ROOT_PATH . '.env';
+if (file_exists($envFile)) {
+    // Initialize environment from .env file
+    Env::get_instance();
 
-// Redefine DEBUG_MODE with actual value from .env
-if (defined('DEBUG_MODE')) {
-    // PHP doesn't allow redefining constants, but we use a workaround in Env::get_instance()
-    // The constant is redefined there with the allow_redefinition flag
+    // Redefine DEBUG_MODE with actual value from .env
+    if (defined('DEBUG_MODE')) {
+        // PHP doesn't allow redefining constants, but we use a workaround in Env::get_instance()
+        // The constant is redefined there with the allow_redefinition flag
+    }
+    define('DEBUG_MODE', Env::$DEBUG_MODE, true);
+
+    // Set timezone from environment
+    date_default_timezone_set(Env::$TIMEZONE);
+
+    // Register global exception handler AFTER DEBUG_MODE is defined
+    ExceptionHandler::getInstance()->register();
+
+    // Configure error reporting based on DEBUG_MODE
+    if (DEBUG_MODE) {
+        error_reporting(E_ALL);
+        ini_set('display_errors', 1);
+    } else {
+        error_reporting(E_ALL);
+        ini_set('display_errors', 0);
+    }
+
+    // Log the request
+    $method_and_url = ($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' . ($_SERVER['REQUEST_URI'] ?? '');
+    log_debug("---------- {$method_and_url} ----------");
+
+    // Initialize timings array for performance tracking
+    $timings = [];
 }
-define('DEBUG_MODE', Env::$DEBUG_MODE, true);
-
-// Set timezone from environment
-date_default_timezone_set(Env::$TIMEZONE);
-
-// Register global exception handler AFTER DEBUG_MODE is defined
-ExceptionHandler::getInstance()->register();
-
-// Configure error reporting based on DEBUG_MODE
-if (DEBUG_MODE) {
-    error_reporting(E_ALL);
-    ini_set('display_errors', 1);
-} else {
-    error_reporting(E_ALL);
-    ini_set('display_errors', 0);
-}
-
-// Log the request
-$method_and_url = ($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' . ($_SERVER['REQUEST_URI'] ?? '');
-log_debug("---------- {$method_and_url} ----------");
-
-// Initialize timings array for performance tracking
-$timings = [];
