@@ -261,6 +261,114 @@ php stone migrate verify
 
 This checks for database drift and ensures your database schema matches your source code.
 
+## Accessing Environment Variables
+
+StoneScriptPHP uses a type-safe Env class to access environment variables from `.env`:
+
+### Framework Variables
+
+The framework provides these core variables out of the box:
+
+```php
+use Framework\Env;
+
+$env = Env::get_instance();
+
+// Debug & System
+$env->DEBUG_MODE;      // bool - Enable detailed error reporting
+$env->TIMEZONE;        // string - Application timezone (default: 'UTC')
+
+// Database
+$env->DATABASE_HOST;     // string - Database host
+$env->DATABASE_PORT;     // int - Database port
+$env->DATABASE_USER;     // string - Database username
+$env->DATABASE_PASSWORD; // string - Database password
+$env->DATABASE_DBNAME;   // string - Database name
+$env->DATABASE_TIMEOUT;  // int - Connection timeout
+$env->DATABASE_APPNAME;  // string - Application name for connections
+
+// Email (ZeptoMail)
+$env->ZEPTOMAIL_BOUNCE_ADDRESS;  // string
+$env->ZEPTOMAIL_SENDER_EMAIL;    // string
+$env->ZEPTOMAIL_SENDER_NAME;     // string
+$env->ZEPTOMAIL_SEND_MAIL_TOKEN; // string
+```
+
+### Application-Specific Variables
+
+Applications can extend `Framework\Env` to add their own variables. The server template includes:
+
+```php
+use Framework\Env;
+
+$env = Env::get_instance();  // Returns App\Env instance if it exists
+
+// Application variables (from App\Env)
+$env->APP_NAME;              // string - Application name
+$env->APP_ENV;               // string - Environment (development, production)
+$env->APP_PORT;              // int - Default server port
+
+// JWT Configuration
+$env->JWT_PRIVATE_KEY_PATH;  // string - Path to JWT private key
+$env->JWT_PUBLIC_KEY_PATH;   // string - Path to JWT public key
+$env->JWT_EXPIRY;            // int - Token expiry in seconds
+
+// CORS
+$env->ALLOWED_ORIGINS;       // string - Comma-separated origins
+
+// OAuth
+$env->GOOGLE_CLIENT_ID;      // string - Google OAuth client ID
+```
+
+### Extending Env for Your Application
+
+Create or modify `src/App/Env.php`:
+
+```php
+<?php
+namespace App;
+
+use Framework\Env as FrameworkEnv;
+
+class Env extends FrameworkEnv
+{
+    // Add your custom properties
+    public $STRIPE_API_KEY;
+    public $SLACK_WEBHOOK_URL;
+
+    /**
+     * Override getSchema to add your variables
+     */
+    public function getSchema(): array
+    {
+        $parentSchema = parent::getSchema();
+
+        $appSchema = [
+            'STRIPE_API_KEY' => [
+                'type' => 'string',
+                'required' => true,
+                'default' => null,
+                'description' => 'Stripe API key'
+            ],
+            'SLACK_WEBHOOK_URL' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => null,
+                'description' => 'Slack webhook for notifications'
+            ],
+        ];
+
+        return array_merge($parentSchema, $appSchema);
+    }
+}
+```
+
+The framework automatically detects `App\Env` and uses it instead of `Framework\Env`.
+
+**Supported types:** `string`, `int`, `bool`, `float`
+
+For more details, see [Environment Configuration](docs/environment-configuration.md).
+
 ## OAuth Support
 
 StoneScriptPHP includes built-in Google OAuth support:
@@ -306,6 +414,7 @@ composer test
 
 ### 🔧 Core Features
 - [API Reference](docs/api-reference.md) - Complete API documentation with examples
+- [Environment Configuration](docs/environment-configuration.md) - Type-safe environment setup
 - [Logging & Exceptions](docs/logging-and-exceptions.md) - **NEW** Production-ready logging system
 - [Request Validation](docs/validation.md) - Validation rules and usage guide
 - [Middleware Guide](docs/MIDDLEWARE.md) - Middleware system and custom middleware
