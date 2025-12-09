@@ -2,7 +2,6 @@
 
 namespace Framework;
 
-use App\Env;
 use DateTime;
 use Error;
 use Exception;
