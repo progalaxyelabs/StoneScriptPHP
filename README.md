@@ -18,9 +18,10 @@ php stone serve
 **Why use stonescriptphp-server?**
 - Includes complete project structure
 - Pre-configured routes and examples
-- CLI tools ready to use
+- `stone` CLI entry point ready to use
 - Environment setup automated
 - This framework (stonescriptphp) is automatically installed as a dependency
+- CLI tools auto-update with `composer update`
 
 ---
 
@@ -65,10 +66,10 @@ Built for developers who value clean architecture and rapid API development, Sto
 
 ### Core Framework
 
-* **Angular-like CLI** - `php stone` commands for code generation
+* **CLI Tools** - Code generators in `cli/` directory (used via `php stone` from server package)
 * **PostgreSQL-first** - Built for PostgreSQL with migration system
 * **Fast Development** - Code generators for routes, models, migrations
-* **Guided Setup** - Interactive wizard for project initialization
+* **Auto-updates** - CLI tools update automatically with `composer update`
 
 ### Security & Auth
 
@@ -181,17 +182,22 @@ class GetUsersRoute implements IRouteHandler
 php stone migrate verify
 ```
 
-## CLI Commands
+## CLI Tools (v2.0.13+)
+
+**Location:** `cli/` directory in this package
+**Usage:** Via `php stone` command from [stonescriptphp-server](https://github.com/progalaxyelabs/StoneScriptPHP-Server)
+
+The framework now bundles all CLI code generators. When you run `composer update`, the CLI tools automatically update along with the framework.
 
 ```bash
-php stone setup              # Interactive project setup
-php stone serve              # Start dev server (port 9100)
-php stone generate route <n> # Generate route handler
-php stone generate model <f> # Generate model from SQL function
-php stone migrate verify     # Check database drift
-php stone test               # Run PHPUnit tests
-php stone env                # Generate .env file
+# Run from stonescriptphp-server project:
+php stone generate route <name>         # Generate route handler
+php stone generate model <file.pgsql>   # Generate model from SQL function
+php stone generate auth:google          # Generate OAuth authentication
+php stone migrate verify                # Check database drift
 ```
+
+See [stonescriptphp-server](https://github.com/progalaxyelabs/StoneScriptPHP-Server) for complete CLI documentation.
 
 ## Architecture Philosophy
 
