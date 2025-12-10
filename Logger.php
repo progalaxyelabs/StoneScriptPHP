@@ -225,8 +225,8 @@ class Logger
 
         // Write to STDERR for errors, STDOUT for others
         $stream = in_array($level, [self::ERROR, self::CRITICAL, self::ALERT, self::EMERGENCY])
-            ? STDERR
-            : STDOUT;
+            ? \STDERR
+            : \STDOUT;
 
         fwrite($stream, $output . PHP_EOL);
     }
