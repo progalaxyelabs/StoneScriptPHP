@@ -16,50 +16,89 @@ class Database
     private static ?Database $_instance = null;
     // private $log;
 
-    private \PgSql\Connection|false $connection;
+    private \PgSql\Connection|false|null $connection = null;
+    private bool $connection_attempted = false;
+    private ?string $connection_error = null;
 
     private function __construct()
     {
-        $env = Env::get_instance();
+        // Constructor no longer eagerly connects
+        // Connection will be established lazily when first needed
+    }
 
-        $host = $env->DATABASE_HOST;
-        $port = $env->DATABASE_PORT;
-        $user = $env->DATABASE_USER;
-        $password = $env->DATABASE_PASSWORD;
-        $dbname = $env->DATABASE_DBNAME;
-        // $timeout = $env->DATABASE_TIMEOUT;
-        $appname = $env->DATABASE_APPNAME;
+    private function connect(): void
+    {
+        if ($this->connection_attempted) {
+            return; // Already attempted connection (success or failure)
+        }
 
-        $connection_string = join(' ', [
-            "host=$host",
-            "port=$port",
-            "user=$user",
-            "password=$password",
-            "dbname=$dbname",
-            // "connect_timeout=$timeout",
-            "options='--application_name=$appname'"
-        ]);
+        $this->connection_attempted = true;
 
-        $env_start = microtime(true);
-        $this->connection = pg_connect($connection_string);
-        $env_init = microtime(true) - $env_start;
-        log_debug(' env init took ' . ($env_init * 1000) . 'ms');
+        try {
+            $env = Env::get_instance();
+
+            $host = $env->DATABASE_HOST;
+            $port = $env->DATABASE_PORT;
+            $user = $env->DATABASE_USER;
+            $password = $env->DATABASE_PASSWORD;
+            $dbname = $env->DATABASE_DBNAME;
+            // $timeout = $env->DATABASE_TIMEOUT;
+            $appname = $env->DATABASE_APPNAME;
+
+            $connection_string = join(' ', [
+                "host=$host",
+                "port=$port",
+                "user=$user",
+                "password=$password",
+                "dbname=$dbname",
+                // "connect_timeout=$timeout",
+                "options='--application_name=$appname'"
+            ]);
+
+            $env_start = microtime(true);
+            $this->connection = @pg_connect($connection_string);
+            $env_init = microtime(true) - $env_start;
+
+            if ($this->connection === false) {
+                $this->connection_error = 'Failed to connect to PostgreSQL database';
+                log_debug('Database connection failed: ' . $this->connection_error);
+            } else {
+                log_debug(' Database connection established in ' . ($env_init * 1000) . 'ms');
+            }
+        } catch (\Throwable $e) {
+            $this->connection = false;
+            $this->connection_error = $e->getMessage();
+            log_debug('Database connection exception: ' . $this->connection_error);
+        }
+    }
+
+    private function get_connection(): \PgSql\Connection|false
+    {
+        if (!$this->connection_attempted) {
+            $this->connect();
+        }
+
+        if ($this->connection === false || $this->connection === null) {
+            throw new \Exception(
+                'Database connection not available. ' .
+                ($this->connection_error ? 'Error: ' . $this->connection_error : 'Connection not established.')
+            );
+        }
+
+        return $this->connection;
     }
 
     private static function get_instance(): Database
     {
         $start_time = microtime(true);
 
-
         if (!self::$_instance) {
             self::$_instance = new Database();
         }
 
-
         $elapsed_time = microtime(true) - $start_time;
 
         log_debug(__METHOD__ . " Timing: took $elapsed_time");
-
 
         return self::$_instance;
     }
@@ -76,7 +115,7 @@ class Database
 
     private static function _fn(string $function_name, array $params): array
     {
-        $connection = self::get_instance()->connection;
+        $connection = self::get_instance()->get_connection();
         $dynamic_params_str = '';
         $dynamic_params_array = [];
 
@@ -116,7 +155,7 @@ class Database
 
     public static function internal_query($sql): array
     {
-        $connection = self::get_instance()->connection;
+        $connection = self::get_instance()->get_connection();
 
         $result = pg_query($connection, $sql);
         if ($result === false) {
@@ -169,7 +208,7 @@ class Database
 
     public static function query($sql): string
     {
-        $connection = self::get_instance()->connection;
+        $connection = self::get_instance()->get_connection();
 
         $result = pg_query($connection, $sql);
         if ($result === false) {
@@ -299,7 +338,7 @@ class Database
 
     public static function copy_from(array $rows, string $tablename, string $delimiter): bool
     {
-        $connection = self::get_instance()->connection;
+        $connection = self::get_instance()->get_connection();
         $result = pg_copy_from($connection, $tablename, $rows, $delimiter);
         return $result;
     }

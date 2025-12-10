@@ -1,6 +1,6 @@
 {
     "name": "progalaxyelabs/stonescriptphp",
-    "description": "Modern PHP backend framework for building APIs with PostgreSQL. Features: Angular-like CLI, PostgreSQL-first architecture, JWT authentication with OAuth support, request validation, code generators for routes and models, production-ready logging and exception handling, RBAC, optional Redis caching.",
+    "description": "Core Framework Library - Use progalaxyelabs/stonescriptphp-server to create new projects. Modern PHP backend framework for building APIs with PostgreSQL. Installed automatically as a dependency when you create projects with stonescriptphp-server.",
     "type": "library",
     "license": "MIT",
     "keywords": [
