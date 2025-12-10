@@ -35,11 +35,11 @@ echo ""
 cleanup() {
     echo -e "\n${YELLOW}🧹 Cleaning up...${NC}"
 
-    # Stop docker-compose
-    if [ -f "$TEST_DIR/docker-compose.yml" ]; then
+    # Stop docker compose
+    if [ -f "$TEST_DIR/docker compose.yml" ]; then
         cd "$TEST_DIR"
-        echo "  Stopping docker-compose services..."
-        docker-compose down -v 2>/dev/null || true
+        echo "  Stopping docker compose services..."
+        docker compose down -v 2>/dev/null || true
     fi
 
     # Remove test directory
@@ -298,11 +298,11 @@ EOF
 
 echo -e "${GREEN}  ✓ Dockerfiles created${NC}"
 
-# Step 7: Create docker-compose.yml
-echo -e "\n${YELLOW}🐳 Step 7: Creating docker-compose.yml...${NC}"
+# Step 7: Create docker compose.yml
+echo -e "\n${YELLOW}🐳 Step 7: Creating docker compose.yml...${NC}"
 cd "$TEST_DIR"
 
-cat > docker-compose.yml <<EOF
+cat > docker compose.yml <<EOF
 version: '3.8'
 
 services:
@@ -375,26 +375,26 @@ networks:
     driver: bridge
 EOF
 
-echo -e "${GREEN}  ✓ docker-compose.yml created${NC}"
+echo -e "${GREEN}  ✓ docker compose.yml created${NC}"
 
-# Step 8: Start docker-compose
-echo -e "\n${YELLOW}🚀 Step 8: Starting docker-compose services...${NC}"
-docker-compose up -d --build
+# Step 8: Start docker compose
+echo -e "\n${YELLOW}🚀 Step 8: Starting docker compose services...${NC}"
+docker compose up -d --build
 echo "  Waiting for services to start..."
 sleep 15
 
 # Check services
-if docker-compose ps | grep -q "Up"; then
+if docker compose ps | grep -q "Up"; then
     echo -e "${GREEN}  ✓ Services started successfully${NC}"
 else
     echo -e "${RED}  ✗ Services failed to start${NC}"
-    docker-compose logs
+    docker compose logs
     exit 1
 fi
 
 # Step 9: Initialize database
 echo -e "\n${YELLOW}💾 Step 9: Initializing database...${NC}"
-docker-compose exec -T postgres psql -U testuser -d stonescript_test <<'SQL'
+docker compose exec -T postgres psql -U testuser -d stonescript_test <<'SQL'
 CREATE TABLE IF NOT EXISTS health_check (
     id SERIAL PRIMARY KEY,
     status VARCHAR(50) NOT NULL,
@@ -440,7 +440,7 @@ if echo "$DEV_RESPONSE" | grep -q "connected"; then
     echo -e "${GREEN}  ✓ DEV database connection successful${NC}"
 else
     echo -e "${RED}  ✗ DEV database connection failed${NC}"
-    docker-compose logs dev
+    docker compose logs dev
 fi
 
 # Test Prod endpoint
@@ -453,13 +453,13 @@ if echo "$PROD_RESPONSE" | grep -q "connected"; then
     echo -e "${GREEN}  ✓ PROD database connection successful${NC}"
 else
     echo -e "${RED}  ✗ PROD database connection failed${NC}"
-    docker-compose logs prod
+    docker compose logs prod
 fi
 
 # Verify database records
 echo ""
 echo "  Verifying database records:"
-RECORD_COUNT=$(docker-compose exec -T postgres psql -U testuser -d stonescript_test -t -c "SELECT COUNT(*) FROM health_check;" | tr -d ' ')
+RECORD_COUNT=$(docker compose exec -T postgres psql -U testuser -d stonescript_test -t -c "SELECT COUNT(*) FROM health_check;" | tr -d ' ')
 echo "  Health check records: $RECORD_COUNT"
 
 if [ "$RECORD_COUNT" -gt 0 ]; then
@@ -468,9 +468,9 @@ fi
 
 # Additional verification
 echo -e "\n${YELLOW}📊 Additional Verification:${NC}"
-echo "  • PostgreSQL status: $(docker-compose ps postgres | grep Up | wc -l) running"
-echo "  • Dev container status: $(docker-compose ps dev | grep Up | wc -l) running"
-echo "  • Prod container status: $(docker-compose ps prod | grep Up | wc -l) running"
+echo "  • PostgreSQL status: $(docker compose ps postgres | grep Up | wc -l) running"
+echo "  • Dev container status: $(docker compose ps dev | grep Up | wc -l) running"
+echo "  • Prod container status: $(docker compose ps prod | grep Up | wc -l) running"
 echo "  • Database records: $RECORD_COUNT"
 
 # Test passed

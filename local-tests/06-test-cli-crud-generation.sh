@@ -34,10 +34,10 @@ echo ""
 cleanup() {
     echo -e "\n${YELLOW}🧹 Cleaning up...${NC}"
 
-    if [ -f "$TEST_DIR/docker-compose.yml" ]; then
+    if [ -f "$TEST_DIR/docker compose.yml" ]; then
         cd "$TEST_DIR"
-        echo "  Stopping docker-compose services..."
-        docker-compose down -v 2>/dev/null || true
+        echo "  Stopping docker compose services..."
+        docker compose down -v 2>/dev/null || true
     fi
 
     if [ -d "$TEST_DIR" ]; then
@@ -432,8 +432,8 @@ PHP
 
 echo -e "${GREEN}  ✓ Route handlers implemented${NC}"
 
-# Step 11: Create docker-compose setup
-echo -e "\n${YELLOW}🐳 Step 11: Creating docker-compose setup...${NC}"
+# Step 11: Create docker compose setup
+echo -e "\n${YELLOW}🐳 Step 11: Creating docker compose setup...${NC}"
 cd "$TEST_DIR"
 
 # Create Dockerfile
@@ -459,8 +459,8 @@ EXPOSE 80
 CMD ["apache2-foreground"]
 EOF
 
-# Create docker-compose.yml
-cat > docker-compose.yml <<EOF
+# Create docker compose.yml
+cat > docker compose.yml <<EOF
 version: '3.8'
 
 services:
@@ -515,23 +515,23 @@ echo -e "${GREEN}  ✓ Docker setup created${NC}"
 
 # Step 12: Start services
 echo -e "\n${YELLOW}🚀 Step 12: Starting services...${NC}"
-docker-compose up -d --build
+docker compose up -d --build
 echo "  Waiting for services to start..."
 sleep 15
 
-if docker-compose ps | grep -q "Up"; then
+if docker compose ps | grep -q "Up"; then
     echo -e "${GREEN}  ✓ Services started${NC}"
 else
     echo -e "${RED}  ✗ Services failed to start${NC}"
-    docker-compose logs
+    docker compose logs
     exit 1
 fi
 
 # Step 13: Initialize database
 echo -e "\n${YELLOW}💾 Step 13: Initializing database...${NC}"
-docker-compose exec -T postgres psql -U books_user -d books_db < api/src/App/Database/postgres/tables/001_books.pssql
+docker compose exec -T postgres psql -U books_user -d books_db < api/src/App/Database/postgres/tables/001_books.pssql
 for func in api/src/App/Database/postgres/functions/*.pssql; do
-    docker-compose exec -T postgres psql -U books_user -d books_db < "$func"
+    docker compose exec -T postgres psql -U books_user -d books_db < "$func"
 done
 echo -e "${GREEN}  ✓ Database initialized with seed data${NC}"
 

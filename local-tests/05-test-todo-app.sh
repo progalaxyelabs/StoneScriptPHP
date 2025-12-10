@@ -34,10 +34,10 @@ echo ""
 cleanup() {
     echo -e "\n${YELLOW}🧹 Cleaning up...${NC}"
 
-    if [ -f "$TEST_DIR/docker-compose.yml" ]; then
+    if [ -f "$TEST_DIR/docker compose.yml" ]; then
         cd "$TEST_DIR"
-        echo "  Stopping docker-compose services..."
-        docker-compose down -v 2>/dev/null || true
+        echo "  Stopping docker compose services..."
+        docker compose down -v 2>/dev/null || true
     fi
 
     if [ -d "$TEST_DIR" ]; then
@@ -430,11 +430,11 @@ EOF
 
 echo -e "${GREEN}  ✓ Dockerfile created${NC}"
 
-# Step 8: Create docker-compose.yml
-echo -e "\n${YELLOW}🐳 Step 8: Creating docker-compose.yml...${NC}"
+# Step 8: Create docker compose.yml
+echo -e "\n${YELLOW}🐳 Step 8: Creating docker compose.yml...${NC}"
 cd "$TEST_DIR"
 
-cat > docker-compose.yml <<EOF
+cat > docker compose.yml <<EOF
 version: '3.8'
 
 services:
@@ -485,27 +485,27 @@ networks:
     driver: bridge
 EOF
 
-echo -e "${GREEN}  ✓ docker-compose.yml created${NC}"
+echo -e "${GREEN}  ✓ docker compose.yml created${NC}"
 
 # Step 9: Start services
 echo -e "\n${YELLOW}🚀 Step 9: Starting services...${NC}"
-docker-compose up -d --build
+docker compose up -d --build
 echo "  Waiting for services to start..."
 sleep 15
 
-if docker-compose ps | grep -q "Up"; then
+if docker compose ps | grep -q "Up"; then
     echo -e "${GREEN}  ✓ Services started${NC}"
 else
     echo -e "${RED}  ✗ Services failed to start${NC}"
-    docker-compose logs
+    docker compose logs
     exit 1
 fi
 
 # Step 10: Initialize database
 echo -e "\n${YELLOW}💾 Step 10: Initializing database...${NC}"
-docker-compose exec -T postgres psql -U todo_user -d todo_db < api/src/App/Database/postgres/tables/001_todos.pssql
+docker compose exec -T postgres psql -U todo_user -d todo_db < api/src/App/Database/postgres/tables/001_todos.pssql
 for func in api/src/App/Database/postgres/functions/*.pssql; do
-    docker-compose exec -T postgres psql -U todo_user -d todo_db < "$func"
+    docker compose exec -T postgres psql -U todo_user -d todo_db < "$func"
 done
 echo -e "${GREEN}  ✓ Database initialized${NC}"
 
@@ -629,7 +629,7 @@ echo -e "${GREEN}✅ TEST CASE 5 PASSED - ALL TESTS PASSED${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Summary:"
-echo "  • Full TODO app deployed with docker-compose"
+echo "  • Full TODO app deployed with docker compose"
 echo "  • PostgreSQL database with 5 functions"
 echo "  • REST API with 5 endpoints"
 echo "  • All CRUD operations tested successfully:"

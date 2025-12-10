@@ -154,7 +154,7 @@ fi
 
 # Test 4: Docker-Compose DB
 if should_run_test "4"; then
-    run_test "4" "Docker-Compose + PostgreSQL" "04-test-docker-compose-db.sh"
+    run_test "4" "Docker-Compose + PostgreSQL" "04-test-docker compose-db.sh"
     echo ""
     sleep 2
 fi
