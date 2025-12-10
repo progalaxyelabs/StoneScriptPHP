@@ -1,0 +1,267 @@
+#!/usr/bin/env php
+<?php
+/**
+ * StoneScriptPHP CLI Tool
+ * Like 'php artisan' for Laravel or 'ng' for Angular
+ *
+ * Usage: php stone <command> [options]
+ */
+
+// Detect installation mode
+$isVendorMode = strpos(__DIR__, 'vendor/progalaxyelabs/stonescriptphp') !== false;
+
+if ($isVendorMode) {
+    // Installed via composer require - running from vendor/bin/stone
+    $vendorDir = dirname(dirname(__DIR__));
+    define('ROOT_PATH', dirname($vendorDir) . DIRECTORY_SEPARATOR);
+    define('FRAMEWORK_PATH', __DIR__ . '/Framework');
+    define('IS_VENDOR_MODE', true);
+} else {
+    // Installed via composer create-project - running from project root
+    define('ROOT_PATH', __DIR__ . DIRECTORY_SEPARATOR);
+    define('FRAMEWORK_PATH', ROOT_PATH . 'Framework');
+    define('IS_VENDOR_MODE', false);
+}
+
+// Define additional paths for CLI scripts
+define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
+define('CONFIG_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Config' . DIRECTORY_SEPARATOR);
+
+require_once ($isVendorMode ? $vendorDir : ROOT_PATH) . 'vendor/autoload.php';
+
+// CLI Colors
+class Color {
+    const RED = "\033[0;31m";
+    const GREEN = "\033[0;32m";
+    const YELLOW = "\033[1;33m";
+    const BLUE = "\033[0;34m";
+    const NC = "\033[0m"; // No Color
+
+    public static function red($text) { return self::RED . $text . self::NC; }
+    public static function green($text) { return self::GREEN . $text . self::NC; }
+    public static function yellow($text) { return self::YELLOW . $text . self::NC; }
+    public static function blue($text) { return self::BLUE . $text . self::NC; }
+}
+
+// Available commands
+$commands = [
+    'new' => [
+        'description' => 'Create new StoneScriptPHP project (like "ng new" for Angular)',
+        'file' => 'cli/new.php',
+    ],
+    'init' => [
+        'description' => 'Initialize StoneScriptPHP in existing project (after composer require)',
+        'file' => 'cli/init.php',
+    ],
+    'setup' => [
+        'description' => 'Interactive project setup (run after composer create-project)',
+        'file' => 'cli/setup.php',
+    ],
+    'serve' => [
+        'description' => 'Start development server',
+        'handler' => 'serve',
+    ],
+    'stop' => [
+        'description' => 'Stop development server',
+        'handler' => 'stop',
+    ],
+    'generate' => [
+        'description' => 'Generate code (route, model, migration, etc.)',
+        'file' => 'cli/generate-route.php', // Dispatcher
+    ],
+    'migrate' => [
+        'description' => 'Run database migrations',
+        'file' => 'cli/migrate.php',
+    ],
+    'test' => [
+        'description' => 'Run PHPUnit tests',
+        'handler' => 'test',
+    ],
+    'env' => [
+        'description' => 'Generate .env file',
+        'file' => 'cli/generate-env.php',
+    ],
+    'cli-server' => [
+        'description' => 'Start HTTP API server for code generation',
+        'file' => 'cli/cli-server.php',
+    ],
+];
+
+// Parse command
+$command = $argv[1] ?? 'help';
+$args = array_slice($argv, 2);
+
+// Special handling for 'generate' with sub-commands
+if ($command === 'generate' && !empty($args)) {
+    $subCommand = $args[0];
+
+    // Check if it's an auth command (auth:google, auth:linkedin, etc.)
+    if (str_starts_with($subCommand, 'auth:')) {
+        $commands['generate']['file'] = 'cli/generate-auth.php';
+    } elseif ($subCommand === 'route' || str_starts_with($subCommand, 'route')) {
+        $commands['generate']['file'] = 'cli/generate-route.php';
+    } elseif ($subCommand === 'model') {
+        $commands['generate']['file'] = 'cli/generate-model.php';
+    } elseif ($subCommand === 'client') {
+        $commands['generate']['file'] = 'cli/generate-client.php';
+    } elseif ($subCommand === 'env') {
+        $commands['generate']['file'] = 'cli/generate-env.php';
+    }
+}
+
+// Show help
+if ($command === 'help' || $command === '--help' || $command === '-h') {
+    echo Color::blue("StoneScriptPHP CLI Tool") . "\n\n";
+    echo "Usage: php stone <command> [options]\n\n";
+    echo "Available commands:\n";
+    foreach ($commands as $cmd => $info) {
+        printf("  %s%-12s%s %s\n", Color::GREEN, $cmd, Color::NC, $info['description']);
+    }
+    echo "\n";
+    echo "Examples:\n";
+    echo "  php stone new my-api                    # Create new project\n";
+    echo "  php stone setup                         # Interactive setup\n";
+    echo "  php stone serve                         # Start dev server\n";
+    echo "  php stone generate route login          # Generate login route\n";
+    echo "  php stone generate model get_user.pgsql # Generate model from PostgreSQL function\n";
+    echo "  php stone generate auth:google          # Generate Google OAuth\n";
+    echo "  php stone migrate verify                # Check database drift\n";
+    echo "\n";
+    echo "Run 'php stone <command> --help' for detailed help on any command.\n";
+    echo "\n";
+    exit(0);
+}
+
+// Execute command
+if (!isset($commands[$command])) {
+    echo Color::red("Error: Unknown command '$command'") . "\n";
+    echo "Run 'php stone help' for available commands\n";
+    exit(1);
+}
+
+$cmdInfo = $commands[$command];
+
+// Handle built-in commands
+if (isset($cmdInfo['handler'])) {
+    switch ($cmdInfo['handler']) {
+        case 'serve':
+            $port = $args[0] ?? 9100;
+            $pidFile = ROOT_PATH . "/.stone-server-$port.pid";
+
+            // Check if server is already running on this port
+            if (file_exists($pidFile)) {
+                $pid = (int) trim(file_get_contents($pidFile));
+                if (posix_kill($pid, 0)) {
+                    echo Color::yellow("Server is already running on port $port (PID $pid)") . "\n";
+                    echo "Run 'php stone stop $port' to stop it first\n";
+                    exit(1);
+                }
+            }
+
+            echo Color::green("Starting server on http://127.0.0.1:$port") . "\n";
+            echo "Run 'php stone stop $port' to stop the server\n\n";
+
+            // Start server in background and save PID and port
+            $command = sprintf('php -S 127.0.0.1:%d -t public > /dev/null 2>&1 & echo $!', $port);
+            $pid = (int) trim(shell_exec($command));
+            file_put_contents($pidFile, "$pid\n$port");
+
+            echo Color::green("Server started with PID $pid on port $port") . "\n";
+            break;
+
+        case 'stop':
+            $port = $args[0] ?? 9100;
+            $pidFile = ROOT_PATH . "/.stone-server-$port.pid";
+
+            if (!file_exists($pidFile)) {
+                echo Color::yellow("No server is running on port $port") . "\n";
+                exit(0);
+            }
+
+            $data = trim(file_get_contents($pidFile));
+            list($pid, $savedPort) = explode("\n", $data);
+            $pid = (int) $pid;
+
+            // Check if process is actually running
+            if (!posix_kill($pid, 0)) {
+                echo Color::yellow("Server process (PID $pid) is not running") . "\n";
+                unlink($pidFile);
+                exit(0);
+            }
+
+            // Verify it's a PHP server process on the correct port
+            $cmdline = file_get_contents("/proc/$pid/cmdline");
+            if (strpos($cmdline, "php") === false || strpos($cmdline, "$port") === false) {
+                echo Color::yellow("PID $pid doesn't match expected server on port $port") . "\n";
+                unlink($pidFile);
+                exit(1);
+            }
+
+            // Kill the process
+            posix_kill($pid, SIGTERM);
+
+            // Wait a bit and check if it stopped
+            usleep(500000); // 0.5 seconds
+            if (posix_kill($pid, 0)) {
+                // Still running, force kill
+                posix_kill($pid, SIGKILL);
+            }
+
+            unlink($pidFile);
+            echo Color::green("Server stopped (PID $pid on port $port)") . "\n";
+            break;
+
+        case 'test':
+            if (!file_exists('vendor/bin/phpunit')) {
+                echo Color::red("PHPUnit not installed. Run: composer require --dev phpunit/phpunit") . "\n";
+                exit(1);
+            }
+            passthru("vendor/bin/phpunit " . implode(' ', $args));
+            break;
+    }
+    exit(0);
+}
+
+// Execute external CLI script
+if (isset($cmdInfo['file'])) {
+    $scriptPath = null;
+
+    // Priority 1: Framework package (v2.0.13+) - auto-updates with composer
+    $vendorCliPath = ROOT_PATH . 'vendor/progalaxyelabs/stonescriptphp/' . $cmdInfo['file'];
+    if (file_exists($vendorCliPath)) {
+        $scriptPath = $vendorCliPath;
+    }
+
+    // Priority 2: Local cli/ directory (backward compatibility for v2.0.12 and earlier)
+    if (!$scriptPath) {
+        $localCliPath = ROOT_PATH . $cmdInfo['file'];
+        if (file_exists($localCliPath)) {
+            $scriptPath = $localCliPath;
+        }
+    }
+
+    // Priority 3: Old framework path (legacy)
+    if (!$scriptPath && defined('FRAMEWORK_PATH')) {
+        $frameworkPath = FRAMEWORK_PATH . '/' . $cmdInfo['file'];
+        if (file_exists($frameworkPath)) {
+            $scriptPath = $frameworkPath;
+        }
+    }
+
+    if (!$scriptPath) {
+        echo Color::red("Error: Command script not found: {$cmdInfo['file']}") . "\n";
+        echo "Tried:\n";
+        echo "  - $vendorCliPath\n";
+        echo "  - " . ROOT_PATH . $cmdInfo['file'] . "\n";
+        exit(1);
+    }
+
+    // Pass arguments to the script
+    // For 'generate' commands, skip the sub-command name (route, model, client, etc.)
+    $scriptArgs = ($command === 'generate' && !empty($args)) ? array_slice($args, 1) : $args;
+    $_SERVER['argv'] = array_merge([$scriptPath], $scriptArgs);
+    $_SERVER['argc'] = count($_SERVER['argv']);
+
+    require $scriptPath;
+    exit(0);
+}
