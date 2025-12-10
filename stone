@@ -224,35 +224,16 @@ if (isset($cmdInfo['handler'])) {
 
 // Execute external CLI script
 if (isset($cmdInfo['file'])) {
-    $scriptPath = null;
+    // CLI tools are in the framework package (vendor/)
+    $scriptPath = ROOT_PATH . 'vendor/progalaxyelabs/stonescriptphp/' . $cmdInfo['file'];
 
-    // Priority 1: Framework package (v2.0.13+) - auto-updates with composer
-    $vendorCliPath = ROOT_PATH . 'vendor/progalaxyelabs/stonescriptphp/' . $cmdInfo['file'];
-    if (file_exists($vendorCliPath)) {
-        $scriptPath = $vendorCliPath;
-    }
-
-    // Priority 2: Local cli/ directory (backward compatibility for v2.0.12 and earlier)
-    if (!$scriptPath) {
-        $localCliPath = ROOT_PATH . $cmdInfo['file'];
-        if (file_exists($localCliPath)) {
-            $scriptPath = $localCliPath;
-        }
-    }
-
-    // Priority 3: Old framework path (legacy)
-    if (!$scriptPath && defined('FRAMEWORK_PATH')) {
-        $frameworkPath = FRAMEWORK_PATH . '/' . $cmdInfo['file'];
-        if (file_exists($frameworkPath)) {
-            $scriptPath = $frameworkPath;
-        }
-    }
-
-    if (!$scriptPath) {
-        echo Color::red("Error: Command script not found: {$cmdInfo['file']}") . "\n";
-        echo "Tried:\n";
-        echo "  - $vendorCliPath\n";
-        echo "  - " . ROOT_PATH . $cmdInfo['file'] . "\n";
+    if (!file_exists($scriptPath)) {
+        echo Color::red("Error: CLI script not found") . "\n\n";
+        echo "Looking for: $scriptPath\n\n";
+        echo "This usually means:\n";
+        echo "  1. StoneScriptPHP framework is not installed\n";
+        echo "  2. You need to run: composer install\n";
+        echo "  3. Or update to latest version: composer update progalaxyelabs/stonescriptphp\n";
         exit(1);
     }
 

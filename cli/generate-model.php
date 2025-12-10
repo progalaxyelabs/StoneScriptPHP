@@ -14,30 +14,81 @@
 
 require_once __DIR__ . '/generate-common.php';
 
+// Use $_SERVER values if set by stone script, otherwise use global $argc/$argv
+$argc = $_SERVER['argc'] ?? $argc;
+$argv = $_SERVER['argv'] ?? $argv;
+
 // Check for help flag
 if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))) {
     echo "Model Generator\n";
     echo "===============\n\n";
-    echo "Usage: php generate model <filename.pssql>\n\n";
+    echo "Usage: php generate model <filename>\n\n";
     echo "Arguments:\n";
-    echo "  filename.pgsql    PostgreSQL function file in src/postgresql/functions/\n\n";
-    echo "Example:\n";
+    echo "  filename    PostgreSQL function file in src/postgresql/functions/\n";
+    echo "              Extension is optional (.pgsql, .pssql, .sql supported)\n\n";
+    echo "Examples:\n";
     echo "  php generate model get_user.pgsql\n";
+    echo "  php generate model get_user         # Auto-detects extension\n";
+    echo "  php generate model get_howtos.pssql\n";
     exit(0);
 }
 
 if ($argc !== 2) {
-    echo "Error: Invalid number of arguments\n";
-    echo "Usage: php generate model <filename.pgsql>\n";
+    echo "Error: Invalid number of arguments (got $argc, expected 2)\n";
+    echo "Arguments received: " . implode(', ', $argv) . "\n\n";
+    echo "Usage: php generate model <filename>\n";
     echo "Run 'php generate model --help' for more information.\n";
     exit(1);
 }
 
-$src_filepath = ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR . str_replace('..', '.', $argv[1]);
+// Get the base filename (without path separators for security)
+$filename = str_replace('..', '.', $argv[1]);
+$functions_dir = ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR;
 
-if (!file_exists($src_filepath)) {
-    echo 'file does not exist' . PHP_EOL;
-    die(0);
+// Check if user provided extension
+if (preg_match('/\.(pgsql|pssql|sql)$/i', $filename)) {
+    // User specified extension - use exactly what they provided
+    $src_filepath = $functions_dir . $filename;
+
+    if (!file_exists($src_filepath)) {
+        echo "Error: PostgreSQL function file not found\n\n";
+        echo "Looked for: $src_filepath\n";
+        echo "\nPlease ensure the file exists with the exact name you specified.\n";
+        exit(1);
+    }
+} else {
+    // No extension provided - try to auto-detect
+    $found_files = [];
+    foreach (['pgsql', 'pssql', 'sql'] as $ext) {
+        $test_path = $functions_dir . $filename . '.' . $ext;
+        if (file_exists($test_path)) {
+            $found_files[] = $test_path;
+        }
+    }
+
+    if (count($found_files) === 0) {
+        echo "Error: PostgreSQL function file not found\n\n";
+        echo "Searched for:\n";
+        echo "  - {$functions_dir}{$filename}.pgsql\n";
+        echo "  - {$functions_dir}{$filename}.pssql\n";
+        echo "  - {$functions_dir}{$filename}.sql\n";
+        echo "\nPlease ensure the file exists in src/postgresql/functions/\n";
+        echo "Or specify the exact filename with extension.\n";
+        exit(1);
+    }
+
+    if (count($found_files) > 1) {
+        echo "Error: Multiple files found with the same base name\n\n";
+        echo "Found:\n";
+        foreach ($found_files as $file) {
+            echo "  - " . basename($file) . "\n";
+        }
+        echo "\nPlease specify the exact filename with extension to avoid ambiguity.\n";
+        echo "Example: php stone generate model {$filename}.pgsql\n";
+        exit(1);
+    }
+
+    $src_filepath = $found_files[0];
 }
 
 $content = file_get_contents($src_filepath);
@@ -173,7 +224,14 @@ $lines[] = '        return Database::' . ($is_return_table ? 'result_as_table' :
 $lines[] = '    }';
 $lines[] = '}';
 
-$dst_filepath = ROOT_PATH . 'Database' . DIRECTORY_SEPARATOR . 'Functions' . DIRECTORY_SEPARATOR . $fn_class_name . '.php';
+$dst_filepath = SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Database' . DIRECTORY_SEPARATOR . 'Functions' . DIRECTORY_SEPARATOR . $fn_class_name . '.php';
+
+// Create directory if it doesn't exist
+$dst_dir = dirname($dst_filepath);
+if (!is_dir($dst_dir)) {
+    mkdir($dst_dir, 0755, true);
+}
+
 $status = file_put_contents($dst_filepath, join("\n", $lines));
 if ($status === false) {
     echo 'error writing to file ' . $dst_filepath . PHP_EOL;
