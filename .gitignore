@@ -16,6 +16,7 @@ composer.lock
 # IDE
 /.idea/
 /.vscode/
+/.claude/
 /.phpunit.cache/
 *.swp
 *.swo

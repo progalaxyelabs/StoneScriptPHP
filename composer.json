@@ -80,6 +80,7 @@
             "/uploads",
             "/.idea",
             "/.vscode",
+            "/.claude",
             "/.phpunit.cache",
             "/vendor",
             "/node_modules",
