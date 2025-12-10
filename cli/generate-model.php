@@ -12,8 +12,7 @@
  *   php generate model get_user.pssql
  */
 
-// Determine the root path (go up two levels from Framework/cli)
-if (!defined('ROOT_PATH')) define('ROOT_PATH', dirname(__DIR__) . DIRECTORY_SEPARATOR);
+require_once __DIR__ . '/generate-common.php';
 
 // Check for help flag
 if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))) {

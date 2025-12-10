@@ -14,7 +14,20 @@
  *   php generate auth:apple
  */
 
-if (!defined('ROOT_PATH')) define('ROOT_PATH', dirname(__DIR__) . DIRECTORY_SEPARATOR);
+if (!defined('ROOT_PATH')) {
+    // Check if running from 'api' subdirectory (common structure: project/api/)
+    $cliDir = __DIR__;
+    $frameworkDir = dirname($cliDir);
+    $potentialApiDir = dirname(dirname(dirname($frameworkDir))); // vendor/progalaxyelabs/stonescriptphp -> api
+
+    if (basename($potentialApiDir) === 'api' && file_exists($potentialApiDir . DIRECTORY_SEPARATOR . 'composer.json')) {
+        // We're in project/api/vendor/progalaxyelabs/stonescriptphp/cli
+        define('ROOT_PATH', $potentialApiDir . DIRECTORY_SEPARATOR);
+    } else {
+        // Standard structure - go up from framework directory
+        define('ROOT_PATH', dirname($frameworkDir) . DIRECTORY_SEPARATOR);
+    }
+}
 if (!defined('SRC_PATH')) define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
 if (!defined('CONFIG_PATH')) define('CONFIG_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Config' . DIRECTORY_SEPARATOR);
 
