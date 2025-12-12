@@ -55,13 +55,7 @@
         }
     },
     "scripts": {
-        "test": "phpunit",
-        "post-install-cmd": [
-            "@php scripts/post-install.php"
-        ],
-        "post-update-cmd": [
-            "@php scripts/post-install.php"
-        ]
+        "test": "phpunit"
     },
     "config": {
         "sort-packages": true,
