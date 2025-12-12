@@ -4,7 +4,7 @@
  * Runs after: composer create-project progalaxyelabs/stone-script-php my-api
  */
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/generate-common.php';
 
 class Setup {
     public function run(): void
