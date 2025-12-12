@@ -104,6 +104,7 @@ $filesToUpdate = [
     'cli/generate-auth.php' => 'cli/generate-auth.php',
     'cli/generate-client.php' => 'cli/generate-client.php',
     'cli/generate-env.php' => 'cli/generate-env.php',
+    'cli/generate-jwt-keys.php' => 'cli/generate-jwt-keys.php',
     'cli/migrate.php' => 'cli/migrate.php',
     'cli/upgrade.php' => 'cli/upgrade.php',
 ];

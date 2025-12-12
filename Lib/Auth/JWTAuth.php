@@ -12,6 +12,11 @@ use DomainException;
 use InvalidArgumentException;
 use UnexpectedValueException;
 
+/**
+ * @deprecated Use Framework\Auth\JwtHandler or Framework\Auth\RsaJwtHandler instead
+ * This class uses hardcoded paths and will be removed in v3.0
+ * See docs/authentication.md for migration guide
+ */
 class JWTAuth
 {
     const PEM_FILE_PATH = ROOT_PATH .'stone-script-php.pem';

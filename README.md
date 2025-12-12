@@ -105,6 +105,26 @@ php stone serve
 
 **👉 [View Full Getting Started Guide](https://stonescriptphp.org/docs/getting-started)**
 
+## Upgrading
+
+### Keep Your Project Up-to-Date
+
+**Update framework and CLI tools:**
+```bash
+# Update framework (vendor packages)
+composer update progalaxyelabs/stonescriptphp
+
+# Update CLI tools (project files)
+php stone upgrade
+```
+
+**Check for updates without installing:**
+```bash
+php stone upgrade --check
+```
+
+See [UPGRADE.md](UPGRADE.md) for version-specific migration guides.
+
 ## Development Workflow
 
 ### 1. Define Database Schema
