@@ -106,6 +106,8 @@ if ($command === 'generate' && !empty($args)) {
         $commands['generate']['file'] = 'cli/generate-client.php';
     } elseif ($subCommand === 'env') {
         $commands['generate']['file'] = 'cli/generate-env.php';
+    } elseif ($subCommand === 'jwt') {
+        $commands['generate']['file'] = 'cli/generate-jwt-keys.php';
     }
 }
 
@@ -125,6 +127,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone generate route login          # Generate login route\n";
     echo "  php stone generate model get_user.pgsql # Generate model from PostgreSQL function\n";
     echo "  php stone generate auth:google          # Generate Google OAuth\n";
+    echo "  php stone generate jwt                  # Generate JWT RSA keys\n";
     echo "  php stone migrate verify                # Check database drift\n";
     echo "\n";
     echo "Run 'php stone <command> --help' for detailed help on any command.\n";
