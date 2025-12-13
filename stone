@@ -85,6 +85,10 @@ $commands = [
         'description' => 'Start HTTP API server for code generation',
         'file' => 'cli/cli-server.php',
     ],
+    'tenant' => [
+        'description' => 'Manage multi-tenant databases (create, list, migrate, etc.)',
+        'file' => 'cli/tenant.php',
+    ],
 ];
 
 // Parse command
@@ -129,6 +133,8 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone generate auth:google          # Generate Google OAuth\n";
     echo "  php stone generate jwt                  # Generate JWT RSA keys\n";
     echo "  php stone migrate verify                # Check database drift\n";
+    echo "  php stone tenant:create \"Acme\" acme    # Create new tenant\n";
+    echo "  php stone tenant:list                   # List all tenants\n";
     echo "\n";
     echo "Run 'php stone <command> --help' for detailed help on any command.\n";
     echo "\n";

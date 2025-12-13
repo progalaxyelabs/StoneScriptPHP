@@ -244,3 +244,116 @@ function auth_load_merge(PDO $db, callable $loaderFn): array
 
     return Framework\Auth\UserLoader::loadAndMerge($user, $db, $loaderFn);
 }
+
+// ===========================
+// Multi-Tenancy Helper Functions
+// ===========================
+
+/**
+ * Get current tenant
+ *
+ * @return Framework\Tenancy\Tenant|null
+ */
+function tenant(): ?Framework\Tenancy\Tenant
+{
+    return Framework\Tenancy\TenantContext::getTenant();
+}
+
+/**
+ * Get current tenant ID
+ *
+ * @return int|string|null
+ */
+function tenant_id(): int|string|null
+{
+    return Framework\Tenancy\TenantContext::id();
+}
+
+/**
+ * Get current tenant UUID
+ *
+ * @return string|null
+ */
+function tenant_uuid(): ?string
+{
+    return Framework\Tenancy\TenantContext::uuid();
+}
+
+/**
+ * Get current tenant slug
+ *
+ * @return string|null
+ */
+function tenant_slug(): ?string
+{
+    return Framework\Tenancy\TenantContext::slug();
+}
+
+/**
+ * Get current tenant database name
+ *
+ * @return string|null
+ */
+function tenant_db_name(): ?string
+{
+    return Framework\Tenancy\TenantContext::dbName();
+}
+
+/**
+ * Check if tenant context is set
+ *
+ * @return bool
+ */
+function tenant_check(): bool
+{
+    return Framework\Tenancy\TenantContext::check();
+}
+
+/**
+ * Get tenant database connection
+ *
+ * Returns a PDO connection to the current tenant's database.
+ * Automatically uses connection pooling for performance.
+ *
+ * @param array|null $config Database configuration (optional, reads from config/database.php if not provided)
+ * @return PDO|null PDO connection or null if no tenant context
+ */
+function tenant_db(?array $config = null): ?PDO
+{
+    $tenant = tenant();
+
+    if (!$tenant || !$tenant->dbName) {
+        return null;
+    }
+
+    // Load config if not provided
+    if ($config === null) {
+        $configFile = __DIR__ . '/../../config/database.php';
+        if (file_exists($configFile)) {
+            $config = require $configFile;
+        } else {
+            // Fallback to environment variables
+            $config = [
+                'driver' => $_ENV['DB_DRIVER'] ?? 'pgsql',
+                'host' => $_ENV['DB_HOST'] ?? 'localhost',
+                'port' => (int) ($_ENV['DB_PORT'] ?? 5432),
+                'user' => $_ENV['DB_USER'] ?? 'postgres',
+                'password' => $_ENV['DB_PASSWORD'] ?? '',
+            ];
+        }
+    }
+
+    return Framework\Tenancy\TenantConnectionManager::getConnection($tenant->dbName, $config);
+}
+
+/**
+ * Get tenant metadata value
+ *
+ * @param string $key Metadata key
+ * @param mixed $default Default value if key doesn't exist
+ * @return mixed
+ */
+function tenant_get(string $key, mixed $default = null): mixed
+{
+    return Framework\Tenancy\TenantContext::get($key, $default);
+}

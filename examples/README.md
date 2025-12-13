@@ -188,6 +188,192 @@ $router->get('/api/users/:id', function($request) {
 $response = $router->handle();
 ```
 
+### 7. Multi-Tenancy Example
+
+StoneScriptPHP supports multiple tenancy strategies out of the box:
+
+#### **Strategy 1: Per-Tenant Database Isolation**
+
+Each tenant gets their own dedicated PostgreSQL database for complete data isolation.
+
+```php
+<?php
+use Framework\Routing\Router;
+use Framework\Tenancy\TenantResolver;
+use Framework\Tenancy\TenantConnectionManager;
+use Framework\Http\Middleware\JwtAuthMiddleware;
+use Framework\Http\Middleware\TenantMiddleware;
+
+// Connect to central auth database
+$authDb = new PDO('pgsql:host=localhost;dbname=auth', 'user', 'pass');
+
+// Setup tenant resolver (tries JWT, then header, then subdomain)
+$tenantResolver = new TenantResolver($authDb, ['jwt', 'header', 'subdomain']);
+
+// Setup router with tenant middleware
+$router = new Router();
+
+// Add JWT auth middleware (extracts user from token)
+$router->use(new JwtAuthMiddleware($jwtHandler, ['/api/health']));
+
+// Add tenant middleware (resolves tenant from JWT or other sources)
+$router->use(new TenantMiddleware($tenantResolver, ['/api/health']));
+
+// All routes automatically have tenant context
+$router->get('/api/products', function($request) {
+    // Get current tenant
+    $tenant = tenant();
+
+    // Get tenant database connection (automatically uses connection pooling)
+    $db = tenant_db();
+
+    // Query tenant's products from their dedicated database
+    $stmt = $db->query('SELECT * FROM products ORDER BY created_at DESC');
+    $products = $stmt->fetchAll();
+
+    return new Framework\ApiResponse('success', 'Products retrieved', [
+        'tenant_id' => tenant_id(),
+        'tenant_slug' => tenant_slug(),
+        'products' => $products
+    ]);
+});
+
+$router->post('/api/products', function($request) {
+    $db = tenant_db();
+    $data = $request['body'];
+
+    $stmt = $db->prepare('INSERT INTO products (name, price) VALUES (?, ?) RETURNING *');
+    $stmt->execute([$data['name'], $data['price']]);
+    $product = $stmt->fetch();
+
+    return new Framework\ApiResponse('success', 'Product created', $product);
+});
+
+$router->handle();
+```
+
+#### **Strategy 2: Shared Database with Automatic Filtering**
+
+All tenants share the same database, but data is isolated using `tenant_id` column with automatic filtering.
+
+```php
+<?php
+use Framework\Tenancy\TenantQueryBuilder;
+
+$router->get('/api/products', function($request) {
+    // Get shared database connection
+    $db = get_db_connection();
+
+    // TenantQueryBuilder automatically adds tenant_id filter to all queries
+    $builder = new TenantQueryBuilder($db, 'products');
+
+    // SELECT * FROM products WHERE tenant_id = ? (automatically added)
+    $products = $builder->all();
+
+    return new Framework\ApiResponse('success', 'Products', ['products' => $products]);
+});
+
+$router->post('/api/products', function($request) {
+    $db = get_db_connection();
+    $builder = new TenantQueryBuilder($db, 'products');
+
+    // INSERT INTO products (name, price, tenant_id) VALUES (?, ?, ?)
+    // tenant_id is automatically added
+    $productId = $builder->insert([
+        'name' => $request['body']['name'],
+        'price' => $request['body']['price']
+    ]);
+
+    $product = $builder->find($productId);
+
+    return new Framework\ApiResponse('success', 'Product created', $product);
+});
+```
+
+#### **Tenant Provisioning via CLI**
+
+Create and manage tenants using the built-in CLI:
+
+```bash
+# Create new tenant with dedicated database
+php stone tenant:create "Acme Corporation" acme --email=admin@acme.com
+
+# List all tenants
+php stone tenant:list
+
+# Check tenant status
+php stone tenant:status acme
+
+# Run migrations on tenant database
+php stone tenant:migrate acme
+
+# Seed tenant database
+php stone tenant:seed acme
+
+# Suspend tenant access
+php stone tenant:suspend acme
+
+# Reactivate tenant
+php stone tenant:activate acme
+
+# Delete tenant (optionally drop database)
+php stone tenant:delete acme --drop-db
+```
+
+#### **Tenant Resolution Strategies**
+
+Tenants can be resolved from multiple sources (tried in order):
+
+1. **JWT Token Claims**: `tenant_id`, `tenant_uuid`, `tenant_slug`
+2. **HTTP Headers**: `X-Tenant-ID`, `X-Tenant-UUID`, `X-Tenant-Slug`
+3. **Subdomain**: `{tenant}.example.com` → resolves `tenant` slug
+4. **Domain**: `tenant.com` → looks up domain in database
+5. **Route Parameter**: `/tenant/{slug}/...` → extracts from route
+
+#### **Tenant Helper Functions**
+
+```php
+// Get current tenant object
+$tenant = tenant();
+
+// Get tenant properties
+$id = tenant_id();           // Tenant ID
+$uuid = tenant_uuid();       // Tenant UUID
+$slug = tenant_slug();       // Tenant slug
+$dbName = tenant_db_name();  // Database name
+
+// Check if tenant context is set
+if (tenant_check()) {
+    echo "Tenant: " . tenant()->slug;
+}
+
+// Get tenant database connection
+$db = tenant_db();
+
+// Get tenant metadata
+$plan = tenant_get('subscription_plan', 'free');
+$maxUsers = tenant_get('max_users', 10);
+```
+
+#### **Use Cases by Application Type**
+
+**B2B SaaS (MedStoreApp-style)**: Use per-tenant database isolation
+- Each customer gets dedicated database
+- Complete data isolation and security
+- Easier compliance (HIPAA, SOC 2)
+- Can customize schema per tenant if needed
+
+**B2C Social Platform (ProGalaxy-style)**: Use shared database
+- All users share same database
+- Filter by `tenant_id` (can represent organization, workspace, etc.)
+- Better resource utilization
+- Simpler backups and migrations
+
+**Website Builder (WebMeteor-style)**: Use hybrid approach
+- Free tier: Shared database with `tenant_id`
+- Pro tier: Dedicated database per tenant
+- Automatically upgrade tenant's database on plan change
+
 ## More Examples
 
 For more examples, see:
