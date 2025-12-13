@@ -89,7 +89,7 @@ cache_forget('key');
 ```php
 <?php
 use Framework\Auth\RsaJwtHandler;
-use Framework\Http\Middleware\JwtAuthMiddleware;
+use Framework\Routing\Middleware\JwtAuthMiddleware;
 
 // Setup JWT handler
 $jwtHandler = new RsaJwtHandler();
@@ -161,7 +161,7 @@ echo $user->email;
 ```php
 <?php
 use Framework\Routing\Router;
-use Framework\Http\Middleware\CorsMiddleware;
+use Framework\Routing\Middleware\CorsMiddleware;
 
 $router = new Router();
 
@@ -201,8 +201,8 @@ Each tenant gets their own dedicated PostgreSQL database for complete data isola
 use Framework\Routing\Router;
 use Framework\Tenancy\TenantResolver;
 use Framework\Tenancy\TenantConnectionManager;
-use Framework\Http\Middleware\JwtAuthMiddleware;
-use Framework\Http\Middleware\TenantMiddleware;
+use Framework\Routing\Middleware\JwtAuthMiddleware;
+use Framework\Routing\Middleware\TenantMiddleware;
 
 // Connect to central auth database
 $authDb = new PDO('pgsql:host=localhost;dbname=auth', 'user', 'pass');

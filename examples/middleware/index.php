@@ -28,12 +28,12 @@ function log_debug($message) {
 }
 
 use Framework\Routing\Router;
-use Framework\Http\Middleware\CorsMiddleware;
-use Framework\Http\Middleware\LoggingMiddleware;
-use Framework\Http\Middleware\AuthMiddleware;
-use Framework\Http\Middleware\RateLimitMiddleware;
-use Framework\Http\Middleware\SecurityHeadersMiddleware;
-use Framework\Http\Middleware\JsonBodyParserMiddleware;
+use Framework\Routing\Middleware\CorsMiddleware;
+use Framework\Routing\Middleware\LoggingMiddleware;
+use Framework\Routing\Middleware\AuthMiddleware;
+use Framework\Routing\Middleware\RateLimitMiddleware;
+use Framework\Routing\Middleware\SecurityHeadersMiddleware;
+use Framework\Routing\Middleware\JsonBodyParserMiddleware;
 use Framework\ApiResponse;
 use Framework\IRouteHandler;
 

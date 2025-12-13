@@ -18,7 +18,7 @@ use Framework\Tenancy\TenantResolver;
 use Framework\Tenancy\TenantContext;
 use Framework\Tenancy\TenantConnectionManager;
 use Framework\Tenancy\TenantQueryBuilder;
-use Framework\Http\Middleware\TenantMiddleware;
+use Framework\Routing\Middleware\TenantMiddleware;
 use Framework\Routing\Router;
 use Framework\ApiResponse;
 

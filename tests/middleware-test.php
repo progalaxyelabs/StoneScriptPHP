@@ -24,10 +24,10 @@ function log_debug($message) {
     // Suppress logs during tests
 }
 
-use Framework\Http\MiddlewarePipeline;
-use Framework\Http\MiddlewareInterface;
-use Framework\Http\Middleware\LoggingMiddleware;
-use Framework\Http\Middleware\AuthMiddleware;
+use Framework\Routing\MiddlewarePipeline;
+use Framework\Routing\MiddlewareInterface;
+use Framework\Routing\Middleware\LoggingMiddleware;
+use Framework\Routing\Middleware\AuthMiddleware;
 use Framework\ApiResponse;
 
 // Test counter

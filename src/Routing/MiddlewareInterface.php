@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Http;
+namespace Framework\Routing;
 
 use Framework\ApiResponse;
 

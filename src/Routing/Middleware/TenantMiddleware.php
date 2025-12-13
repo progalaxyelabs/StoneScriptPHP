@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Http\Middleware;
+namespace Framework\Routing\Middleware;
 
 use Framework\Tenancy\TenantResolver;
 use Framework\Tenancy\TenantContext;

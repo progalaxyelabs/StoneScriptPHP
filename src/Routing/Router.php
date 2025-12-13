@@ -3,8 +3,8 @@
 namespace Framework\Routing;
 
 use Framework\ApiResponse;
-use Framework\Http\MiddlewarePipeline;
-use Framework\Http\MiddlewareInterface;
+use Framework\Routing\MiddlewarePipeline;
+use Framework\Routing\MiddlewareInterface;
 
 class Router
 {

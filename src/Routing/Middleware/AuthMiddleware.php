@@ -1,8 +1,8 @@
 <?php
 
-namespace Framework\Http\Middleware;
+namespace Framework\Routing\Middleware;
 
-use Framework\Http\MiddlewareInterface;
+use Framework\Routing\MiddlewareInterface;
 use Framework\ApiResponse;
 
 class AuthMiddleware implements MiddlewareInterface
