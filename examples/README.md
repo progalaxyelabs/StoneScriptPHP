@@ -188,7 +188,68 @@ $router->get('/api/users/:id', function($request) {
 $response = $router->handle();
 ```
 
-### 7. Multi-Tenancy Example
+### 7. Email+Password Authentication Example
+
+**Location:** `src/Templates/Auth/email-password/`
+
+Tenant-aware email and password authentication with registration, login, and password reset.
+
+```php
+<?php
+use App\Routes\Auth\RegisterRoute;
+use App\Routes\Auth\LoginRoute;
+
+// Register new user
+$router->post('/api/auth/register', RegisterRoute::class);
+
+// Login
+$router->post('/api/auth/login', LoginRoute::class);
+
+// Password reset
+$router->post('/api/auth/password-reset', PasswordResetRoute::class);
+$router->post('/api/auth/password-reset/confirm', PasswordResetConfirmRoute::class);
+```
+
+**Features:**
+- User registration with email validation
+- Login with credential verification
+- Password reset flow with secure tokens
+- BCrypt password hashing
+- Full multi-tenancy support (per-tenant and shared DB)
+- JWT token generation
+
+**See:** [src/Templates/Auth/email-password/README.md](../src/Templates/Auth/email-password/README.md) for full documentation.
+
+### 8. Mobile+OTP Authentication Example
+
+**Location:** `src/Templates/Auth/mobile-otp/`
+
+Passwordless authentication using mobile number and one-time password (OTP).
+
+```php
+<?php
+use App\Routes\Auth\SendOtpRoute;
+use App\Routes\Auth\VerifyOtpRoute;
+
+// Send OTP to mobile number
+$router->post('/api/auth/otp/send', SendOtpRoute::class);
+
+// Verify OTP and authenticate
+$router->post('/api/auth/otp/verify', VerifyOtpRoute::class);
+```
+
+**Features:**
+- Passwordless mobile authentication
+- 6-digit OTP generation
+- SMS integration ready (Twilio, AWS SNS, Vonage)
+- OTP expiration (10 minutes)
+- Rate limiting via attempt tracking (max 3 attempts)
+- E.164 mobile number format validation
+- Full multi-tenancy support
+
+**See:** [src/Templates/Auth/mobile-otp/README.md](../src/Templates/Auth/mobile-otp/README.md) for full documentation.
+
+### 9. Multi-Tenancy Example
 
 StoneScriptPHP supports multiple tenancy strategies out of the box:
 

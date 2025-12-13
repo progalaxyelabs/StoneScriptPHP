@@ -1,0 +1,65 @@
+<?php
+/**
+ * Mobile+OTP Authentication Setup (Tenant-Aware)
+ *
+ * This file demonstrates how to set up mobile+OTP authentication routes
+ * with multi-tenancy support.
+ *
+ * Usage:
+ *   1. Copy mobile_users.pgsql.template and otp_codes.pgsql.template to your migrations directory
+ *   2. Run the migrations on your database
+ *   3. Copy the route templates to your App\Routes\Auth directory
+ *   4. Register the routes in your main application file
+ */
+
+require_once __DIR__ . '/../../vendor/autoload.php';
+
+use Framework\Routing\Router;
+use Framework\Routing\Middleware\JwtAuthMiddleware;
+use Framework\Routing\Middleware\TenantMiddleware;
+use Framework\Auth\RsaJwtHandler;
+use Framework\Tenancy\TenantResolver;
+
+use App\Routes\Auth\SendOtpRoute;
+use App\Routes\Auth\VerifyOtpRoute;
+
+// Setup router
+$router = new Router();
+
+// Setup tenant resolver (if using multi-tenancy)
+$authDb = new PDO(
+    sprintf('pgsql:host=%s;dbname=%s', getenv('DB_HOST'), getenv('DB_NAME')),
+    getenv('DB_USER'),
+    getenv('DB_PASSWORD')
+);
+$tenantResolver = new TenantResolver($authDb, ['jwt', 'header', 'subdomain']);
+$jwtHandler = new RsaJwtHandler();
+
+// Add tenant middleware (exclude public auth routes)
+$router->use(new TenantMiddleware($tenantResolver, [
+    '/api/auth/otp/send',
+    '/api/auth/otp/verify'
+]));
+
+// Public routes (no authentication required)
+$router->post('/api/auth/otp/send', SendOtpRoute::class);
+$router->post('/api/auth/otp/verify', VerifyOtpRoute::class);
+
+// Protected routes (authentication required)
+$router->use(new JwtAuthMiddleware($jwtHandler, [
+    '/api/auth/otp/send',
+    '/api/auth/otp/verify'
+]));
+
+$router->get('/api/auth/me', function($request) {
+    $user = auth();
+    return new Framework\ApiResponse('success', 'User profile', [
+        'user_id' => $user->user_id,
+        'mobile_number' => $user->mobile_number ?? null,
+        'display_name' => $user->display_name,
+        'tenant_id' => $user->tenant_id
+    ]);
+});
+
+// Handle request
+$response = $router->handle();

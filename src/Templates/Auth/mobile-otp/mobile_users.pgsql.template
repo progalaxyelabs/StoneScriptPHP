@@ -1,0 +1,39 @@
+-- Mobile users table for mobile+OTP authentication with multi-tenancy support
+--
+-- Usage:
+--   1. For per-tenant database strategy: Run this migration on each tenant database
+--   2. For shared database strategy: Run once on shared database (includes tenant_id)
+
+CREATE TABLE IF NOT EXISTS mobile_users (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER,  -- NULL for per-tenant DB strategy, required for shared DB
+    mobile_number VARCHAR(20) NOT NULL,  -- E.164 format: +1234567890
+    country_code VARCHAR(5),  -- +1, +91, etc.
+    display_name VARCHAR(255),
+    status VARCHAR(50) DEFAULT 'active',  -- active, suspended, deleted
+    mobile_verified BOOLEAN DEFAULT FALSE,
+    last_login_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- For shared database strategy: ensure mobile is unique per tenant
+-- For per-tenant database: ensure mobile is unique globally
+CREATE UNIQUE INDEX idx_mobile_users_mobile_unique ON mobile_users(mobile_number);
+
+-- For shared database strategy: add tenant filter index
+-- CREATE INDEX idx_mobile_users_tenant_id ON mobile_users(tenant_id);
+
+-- Update timestamp trigger
+CREATE OR REPLACE FUNCTION update_mobile_users_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER mobile_users_updated_at_trigger
+    BEFORE UPDATE ON mobile_users
+    FOR EACH ROW
+    EXECUTE FUNCTION update_mobile_users_updated_at();

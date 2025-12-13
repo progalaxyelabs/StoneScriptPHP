@@ -2,6 +2,7 @@
 
 namespace Framework\Routing\Middleware;
 
+use Framework\Routing\MiddlewareInterface;
 use Framework\Tenancy\TenantResolver;
 use Framework\Tenancy\TenantContext;
 use Framework\ApiResponse;
@@ -16,7 +17,7 @@ use Framework\ApiResponse;
  *   $resolver = new TenantResolver($authDb, ['jwt', 'header', 'subdomain']);
  *   $router->use(new TenantMiddleware($resolver, ['/api/health', '/api/public/*']));
  */
-class TenantMiddleware implements IMiddleware
+class TenantMiddleware implements MiddlewareInterface
 {
     /**
      * Create a new TenantMiddleware

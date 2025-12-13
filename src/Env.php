@@ -25,6 +25,8 @@ class Env
     public $ZEPTOMAIL_SENDER_NAME;
     public $ZEPTOMAIL_SEND_MAIL_TOKEN;
 
+    public $EMAIL_VERIFICATION_ENABLED;
+
     /**
      * Define the environment variable schema
      * Each entry contains: type, required, default, and description
@@ -113,6 +115,30 @@ class Env
                 'required' => false,
                 'default' => null,
                 'description' => 'ZeptoMail API token'
+            ],
+            'EMAIL_VERIFICATION_ENABLED' => [
+                'type' => 'bool',
+                'required' => false,
+                'default' => true,
+                'description' => 'Enable/disable email verification on registration'
+            ],
+            'CSRF_SECRET_KEY' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => null,
+                'description' => 'Secret key for CSRF token generation (64-char hex string)'
+            ],
+            'HCAPTCHA_SITE_KEY' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => null,
+                'description' => 'hCaptcha site key (get from https://www.hcaptcha.com/)'
+            ],
+            'HCAPTCHA_SECRET_KEY' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => null,
+                'description' => 'hCaptcha secret key (get from https://www.hcaptcha.com/)'
             ],
         ];
     }

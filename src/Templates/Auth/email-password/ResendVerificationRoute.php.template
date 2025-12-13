@@ -1,0 +1,234 @@
+<?php
+
+namespace App\Routes\Auth;
+
+use Framework\IRouteHandler;
+use Framework\ApiResponse;
+use Framework\Lib\Email\MyZeptoMail;
+use PDO;
+
+/**
+ * Resend Email Verification Route (Tenant-Aware)
+ *
+ * Resends the email verification link to users who didn't receive it
+ * or whose verification token has expired.
+ *
+ * POST /api/auth/resend-verification
+ * Body: { "email": "user@example.com" }
+ */
+class ResendVerificationRoute implements IRouteHandler
+{
+    public string $email;
+
+    public function validation_rules(): array
+    {
+        return [
+            'email' => ['required', 'email']
+        ];
+    }
+
+    public function process(): ApiResponse
+    {
+        try {
+            // Get database connection (tenant-aware)
+            $db = $this->getDatabase();
+
+            // Find user by email
+            $user = $this->findUser($db, $this->email);
+
+            // Always return success to prevent email enumeration
+            if (!$user) {
+                return new ApiResponse('success', 'If the email exists and is not verified, a verification link will be sent.');
+            }
+
+            // Check if already verified
+            if ($user['email_verified']) {
+                return new ApiResponse('success', 'Email is already verified');
+            }
+
+            // Generate new verification token
+            $verificationToken = bin2hex(random_bytes(32));
+            $tokenExpiry = new \DateTime('+24 hours');
+
+            // Update user with new token
+            $this->updateVerificationToken($db, $user['id'], $verificationToken, $tokenExpiry);
+
+            // Send verification email
+            $emailSent = $this->sendVerificationEmail(
+                $this->email,
+                $user['display_name'],
+                $verificationToken
+            );
+
+            if (!$emailSent) {
+                log_warning("ResendVerificationRoute: Failed to send email to {$this->email}");
+            }
+
+            // For development: Return token in response (remove in production)
+            $devData = getenv('APP_ENV') === 'development' ? [
+                'verification_token' => $verificationToken,
+                'verification_url' => $this->getVerificationUrl($verificationToken)
+            ] : [];
+
+            log_info("Verification email resent", [
+                'user_id' => $user['id'],
+                'email' => $this->email,
+                'tenant_id' => tenant_id()
+            ]);
+
+            return new ApiResponse(
+                'success',
+                'Verification email sent. Please check your inbox.',
+                $devData
+            );
+
+        } catch (\Exception $e) {
+            log_error("ResendVerificationRoute: {$e->getMessage()}");
+            return new ApiResponse('error', 'Failed to resend verification email', null, 500);
+        }
+    }
+
+    /**
+     * Get database connection based on multi-tenancy strategy
+     */
+    private function getDatabase(): PDO
+    {
+        if (tenant_check()) {
+            $db = tenant_db();
+            if ($db) {
+                return $db;
+            }
+        }
+        return db_connection(getenv('DB_NAME'));
+    }
+
+    /**
+     * Find user by email
+     */
+    private function findUser(PDO $db, string $email): ?array
+    {
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'SELECT id, email, display_name, email_verified
+                 FROM users
+                 WHERE email = ? AND tenant_id = ? AND status = ?'
+            );
+            $stmt->execute([$email, tenant_id(), 'active']);
+        } else {
+            $stmt = $db->prepare(
+                'SELECT id, email, display_name, email_verified
+                 FROM users
+                 WHERE email = ? AND status = ?'
+            );
+            $stmt->execute([$email, 'active']);
+        }
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ?: null;
+    }
+
+    /**
+     * Update verification token
+     */
+    private function updateVerificationToken(
+        PDO $db,
+        int $userId,
+        string $token,
+        \DateTime $expiresAt
+    ): void {
+        $stmt = $db->prepare(
+            'UPDATE users
+             SET email_verification_token = ?,
+                 email_verification_expires_at = ?,
+                 updated_at = NOW()
+             WHERE id = ?'
+        );
+        $stmt->execute([$token, $expiresAt->format('Y-m-d H:i:s'), $userId]);
+    }
+
+    /**
+     * Send verification email
+     */
+    private function sendVerificationEmail(string $email, ?string $displayName, string $token): bool
+    {
+        $emailService = new MyZeptoMail();
+
+        if (!$emailService->isConfigured()) {
+            log_error("ResendVerificationRoute: Email service not configured");
+            return false;
+        }
+
+        $verificationUrl = $this->getVerificationUrl($token);
+        $appName = getenv('APP_NAME') ?: 'Our Application';
+
+        $emailBody = $this->getVerificationEmailTemplate($displayName, $verificationUrl, $appName);
+
+        return $emailService->send(
+            $email,
+            "Verify your email address - {$appName}",
+            $emailBody,
+            $displayName
+        );
+    }
+
+    /**
+     * Get verification URL
+     */
+    private function getVerificationUrl(string $token): string
+    {
+        $baseUrl = getenv('APP_URL') ?: 'http://localhost:8000';
+        return "{$baseUrl}/api/auth/verify-email?token={$token}";
+    }
+
+    /**
+     * Get email verification HTML template
+     */
+    private function getVerificationEmailTemplate(?string $name, string $verificationUrl, string $appName): string
+    {
+        $displayName = $name ?: 'there';
+
+        return <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Your Email</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background-color: #f8f9fa; border-radius: 10px; padding: 30px; margin-bottom: 20px;">
+        <h1 style="color: #2c3e50; margin-bottom: 20px;">Verify Your Email</h1>
+
+        <p>Hi {$displayName},</p>
+
+        <p>You requested a new email verification link for your {$appName} account. Please click the button below to verify your email address:</p>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{$verificationUrl}"
+               style="background-color: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                Verify Email Address
+            </a>
+        </div>
+
+        <p style="color: #666; font-size: 14px;">
+            If the button doesn't work, copy and paste this link into your browser:<br>
+            <a href="{$verificationUrl}" style="color: #007bff; word-break: break-all;">{$verificationUrl}</a>
+        </p>
+
+        <p style="color: #666; font-size: 14px; margin-top: 30px;">
+            <strong>This link will expire in 24 hours.</strong>
+        </p>
+
+        <p style="color: #666; font-size: 14px;">
+            If you didn't request this email, please ignore it.
+        </p>
+    </div>
+
+    <div style="text-align: center; color: #666; font-size: 12px;">
+        <p>&copy; {$appName}. All rights reserved.</p>
+    </div>
+</body>
+</html>
+HTML;
+    }
+}

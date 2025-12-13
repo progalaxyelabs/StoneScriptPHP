@@ -1,0 +1,69 @@
+<?php
+
+namespace App\Routes\Security;
+
+use Framework\IRouteHandler;
+use Framework\ApiResponse;
+use Framework\Security\ProofOfWorkChallenge;
+
+/**
+ * Proof-of-Work Challenge Route
+ *
+ * Provides computational challenges for bot prevention.
+ *
+ * GET /api/challenge?difficulty=4
+ *
+ * Response:
+ * {
+ *   "status": "success",
+ *   "data": {
+ *     "challenge": "a1b2c3d4...",
+ *     "difficulty": 4,
+ *     "expires_at": 1234567890,
+ *     "estimated_time": {
+ *       "min_seconds": 1,
+ *       "max_seconds": 5,
+ *       "avg_seconds": 3
+ *     }
+ *   }
+ * }
+ *
+ * Frontend Usage:
+ * 1. Request challenge before form submission
+ * 2. Solve challenge using JavaScript (see docs)
+ * 3. Include solution in X-POW-Solution header
+ */
+class ChallengeRoute implements IRouteHandler
+{
+    public ?int $difficulty = null;
+
+    public function validation_rules(): array
+    {
+        return [
+            'difficulty' => ['optional', 'int', 'min:3', 'max:6']
+        ];
+    }
+
+    public function process(): ApiResponse
+    {
+        try {
+            $pow = new ProofOfWorkChallenge();
+
+            $difficulty = $this->difficulty ?? 4;
+            $challengeData = $pow->generateChallenge($difficulty);
+            $estimatedTime = $pow->getEstimatedSolveTime($difficulty);
+
+            return new ApiResponse('success', 'Challenge generated', array_merge(
+                $challengeData,
+                ['estimated_time' => $estimatedTime]
+            ));
+
+        } catch (\InvalidArgumentException $e) {
+            return new ApiResponse('error', $e->getMessage(), null, 400);
+
+        } catch (\Exception $e) {
+            log_error("Challenge generation failed: {$e->getMessage()}");
+            return new ApiResponse('error', 'Failed to generate challenge', null, 500);
+        }
+    }
+}

@@ -1,0 +1,266 @@
+<?php
+
+namespace App\Routes\Auth;
+
+use Framework\IRouteHandler;
+use Framework\ApiResponse;
+use Framework\Auth\RsaJwtHandler;
+use PDO;
+
+/**
+ * Verify OTP Route (Tenant-Aware)
+ *
+ * Verifies the OTP code and authenticates the user.
+ * Creates a new user if purpose is 'registration'.
+ *
+ * POST /api/auth/otp/verify
+ * Body: { "mobile_number": "+1234567890", "otp_code": "123456", "display_name": "John Doe" }
+ */
+class VerifyOtpRoute implements IRouteHandler
+{
+    public string $mobile_number;
+    public string $otp_code;
+    public ?string $display_name = null;  // Required for registration
+
+    public function validation_rules(): array
+    {
+        return [
+            'mobile_number' => ['required', 'regex:/^\+[1-9]\d{1,14}$/'],
+            'otp_code' => ['required', 'regex:/^\d{6}$/'],
+            'display_name' => ['max:255']
+        ];
+    }
+
+    public function process(): ApiResponse
+    {
+        try {
+            // Get database connection (tenant-aware)
+            $db = $this->getDatabase();
+
+            // Normalize mobile number
+            $mobileNumber = $this->normalizeMobileNumber($this->mobile_number);
+
+            // Find and verify OTP
+            $otp = $this->findOtp($db, $mobileNumber, $this->otp_code);
+
+            if (!$otp) {
+                return new ApiResponse('error', 'Invalid OTP code', null, 401);
+            }
+
+            // Check if OTP is expired
+            $expiresAt = new \DateTime($otp['expires_at']);
+            if ($expiresAt < new \DateTime()) {
+                return new ApiResponse('error', 'OTP code has expired', null, 401);
+            }
+
+            // Check if OTP is already verified
+            if ($otp['verified']) {
+                return new ApiResponse('error', 'OTP code already used', null, 401);
+            }
+
+            // Check max attempts
+            if ($otp['attempts'] >= $otp['max_attempts']) {
+                return new ApiResponse('error', 'Maximum verification attempts exceeded', null, 429);
+            }
+
+            // Increment attempts
+            $this->incrementAttempts($db, $otp['id']);
+
+            // Verify OTP code
+            if ($this->otp_code !== $otp['otp_code']) {
+                return new ApiResponse('error', 'Invalid OTP code', null, 401);
+            }
+
+            // Mark OTP as verified
+            $this->markOtpVerified($db, $otp['id']);
+
+            // Get or create user
+            $user = $this->getOrCreateUser($db, $mobileNumber, $otp['purpose']);
+
+            // Generate JWT token
+            $jwtHandler = new RsaJwtHandler();
+            $token = $jwtHandler->generateToken([
+                'user_id' => $user['id'],
+                'mobile_number' => $user['mobile_number'],
+                'display_name' => $user['display_name'],
+                'user_role' => 'user',
+                'tenant_id' => tenant_id()
+            ]);
+
+            log_info("OTP verified successfully", [
+                'user_id' => $user['id'],
+                'mobile_number' => $mobileNumber,
+                'purpose' => $otp['purpose'],
+                'tenant_id' => tenant_id()
+            ]);
+
+            return new ApiResponse('success', 'Authentication successful', [
+                'user_id' => $user['id'],
+                'mobile_number' => $user['mobile_number'],
+                'display_name' => $user['display_name'],
+                'token' => $token
+            ]);
+
+        } catch (\Exception $e) {
+            log_error("VerifyOtpRoute: {$e->getMessage()}");
+            return new ApiResponse('error', 'Verification failed', null, 500);
+        }
+    }
+
+    /**
+     * Get database connection based on multi-tenancy strategy
+     */
+    private function getDatabase(): PDO
+    {
+        if (tenant_check()) {
+            $db = tenant_db();
+            if ($db) {
+                return $db;
+            }
+        }
+        return db_connection(getenv('DB_NAME'));
+    }
+
+    /**
+     * Normalize mobile number to E.164 format
+     */
+    private function normalizeMobileNumber(string $mobile): string
+    {
+        $mobile = preg_replace('/[^\d+]/', '', $mobile);
+        if (!str_starts_with($mobile, '+')) {
+            $mobile = '+' . $mobile;
+        }
+        return $mobile;
+    }
+
+    /**
+     * Find OTP by mobile number and code
+     */
+    private function findOtp(PDO $db, string $mobileNumber, string $otpCode): ?array
+    {
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'SELECT id, otp_code, purpose, expires_at, verified, attempts, max_attempts
+                 FROM otp_codes
+                 WHERE mobile_number = ? AND tenant_id = ?
+                 ORDER BY created_at DESC
+                 LIMIT 1'
+            );
+            $stmt->execute([$mobileNumber, tenant_id()]);
+        } else {
+            $stmt = $db->prepare(
+                'SELECT id, otp_code, purpose, expires_at, verified, attempts, max_attempts
+                 FROM otp_codes
+                 WHERE mobile_number = ?
+                 ORDER BY created_at DESC
+                 LIMIT 1'
+            );
+            $stmt->execute([$mobileNumber]);
+        }
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ?: null;
+    }
+
+    /**
+     * Increment OTP verification attempts
+     */
+    private function incrementAttempts(PDO $db, int $otpId): void
+    {
+        $stmt = $db->prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?');
+        $stmt->execute([$otpId]);
+    }
+
+    /**
+     * Mark OTP as verified
+     */
+    private function markOtpVerified(PDO $db, int $otpId): void
+    {
+        $stmt = $db->prepare('UPDATE otp_codes SET verified = true, verified_at = NOW() WHERE id = ?');
+        $stmt->execute([$otpId]);
+    }
+
+    /**
+     * Get existing user or create new one
+     */
+    private function getOrCreateUser(PDO $db, string $mobileNumber, string $purpose): array
+    {
+        // Try to find existing user
+        $user = $this->findUser($db, $mobileNumber);
+
+        if ($user) {
+            // Update last login
+            $this->updateLastLogin($db, $user['id']);
+            return $user;
+        }
+
+        // Create new user (for registration purpose)
+        if ($purpose === 'registration') {
+            return $this->createUser($db, $mobileNumber, $this->display_name);
+        }
+
+        throw new \RuntimeException('User not found');
+    }
+
+    /**
+     * Find user by mobile number
+     */
+    private function findUser(PDO $db, string $mobileNumber): ?array
+    {
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'SELECT id, mobile_number, display_name, status
+                 FROM mobile_users
+                 WHERE mobile_number = ? AND tenant_id = ?'
+            );
+            $stmt->execute([$mobileNumber, tenant_id()]);
+        } else {
+            $stmt = $db->prepare(
+                'SELECT id, mobile_number, display_name, status
+                 FROM mobile_users
+                 WHERE mobile_number = ?'
+            );
+            $stmt->execute([$mobileNumber]);
+        }
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ?: null;
+    }
+
+    /**
+     * Create new user
+     */
+    private function createUser(PDO $db, string $mobileNumber, ?string $displayName): array
+    {
+        // Extract country code
+        preg_match('/^(\+\d{1,3})/', $mobileNumber, $matches);
+        $countryCode = $matches[1] ?? null;
+
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'INSERT INTO mobile_users (tenant_id, mobile_number, country_code, display_name, mobile_verified, status, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, true, ?, NOW(), NOW())
+                 RETURNING id, mobile_number, display_name'
+            );
+            $stmt->execute([tenant_id(), $mobileNumber, $countryCode, $displayName, 'active']);
+        } else {
+            $stmt = $db->prepare(
+                'INSERT INTO mobile_users (mobile_number, country_code, display_name, mobile_verified, status, created_at, updated_at)
+                 VALUES (?, ?, ?, true, ?, NOW(), NOW())
+                 RETURNING id, mobile_number, display_name'
+            );
+            $stmt->execute([$mobileNumber, $countryCode, $displayName, 'active']);
+        }
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Update last login timestamp
+     */
+    private function updateLastLogin(PDO $db, int $userId): void
+    {
+        $stmt = $db->prepare('UPDATE mobile_users SET last_login_at = NOW() WHERE id = ?');
+        $stmt->execute([$userId]);
+    }
+}

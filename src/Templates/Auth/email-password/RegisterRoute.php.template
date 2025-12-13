@@ -1,0 +1,329 @@
+<?php
+
+namespace App\Routes\Auth;
+
+use Framework\IRouteHandler;
+use Framework\ApiResponse;
+use Framework\Auth\RsaJwtHandler;
+use Framework\Lib\Email\MyZeptoMail;
+use Framework\Lib\Email\EmailValidator;
+use PDO;
+
+/**
+ * User Registration Route (Tenant-Aware) with Email Verification
+ *
+ * Registers a new user with email and password.
+ * Sends email verification link to confirm email address.
+ * Works with both per-tenant and shared database strategies.
+ *
+ * POST /api/auth/register
+ * Body: { "email": "user@example.com", "password": "secret123", "display_name": "John Doe" }
+ */
+class RegisterRoute implements IRouteHandler
+{
+    public string $email;
+    public string $password;
+    public ?string $display_name = null;
+
+    public function validation_rules(): array
+    {
+        return [
+            'email' => ['required', 'email', 'max:255'],
+            'password' => ['required', 'min:8', 'max:100'],
+            'display_name' => ['max:255']
+        ];
+    }
+
+    public function process(): ApiResponse
+    {
+        try {
+            // Validate email with DNS/MX verification
+            $emailValidator = new EmailValidator();
+            if (!$emailValidator->validate($this->email, true, true, false)) {
+                return new ApiResponse('error', $emailValidator->getError(), null, 400);
+            }
+
+            // Get database connection (tenant-aware)
+            $db = $this->getDatabase();
+
+            // Check if user already exists
+            if ($this->userExists($db, $this->email)) {
+                return new ApiResponse('error', 'User with this email already exists', null, 409);
+            }
+
+            // Hash password
+            $passwordHash = password_hash($this->password, PASSWORD_BCRYPT, ['cost' => 12]);
+
+            // Check if email verification is enabled
+            $verificationEnabled = getenv('EMAIL_VERIFICATION_ENABLED') !== 'false';
+
+            if ($verificationEnabled) {
+                // Email verification enabled - create user with verification token
+                $verificationToken = bin2hex(random_bytes(32));
+                $tokenExpiry = new \DateTime('+24 hours');
+
+                $userId = $this->createUser(
+                    $db,
+                    $this->email,
+                    $passwordHash,
+                    $this->display_name,
+                    $verificationToken,
+                    $tokenExpiry
+                );
+
+                // Send verification email
+                $emailSent = $this->sendVerificationEmail($this->email, $this->display_name, $verificationToken);
+
+                if (!$emailSent) {
+                    log_warning("RegisterRoute: Failed to send verification email to {$this->email}");
+                }
+
+                // For development: Return token in response
+                $devData = getenv('APP_ENV') === 'development' ? [
+                    'verification_token' => $verificationToken,
+                    'verification_url' => $this->getVerificationUrl($verificationToken)
+                ] : [];
+
+                return new ApiResponse('success', 'Registration successful. Please check your email to verify your account.', array_merge([
+                    'user_id' => $userId,
+                    'email' => $this->email,
+                    'display_name' => $this->display_name,
+                    'email_verified' => false
+                ], $devData));
+
+            } else {
+                // Email verification disabled - create user with verified email and return JWT
+                $userId = $this->createUserWithoutVerification(
+                    $db,
+                    $this->email,
+                    $passwordHash,
+                    $this->display_name
+                );
+
+                // Generate JWT token for immediate login
+                $jwtHandler = new RsaJwtHandler();
+                $token = $jwtHandler->generateToken([
+                    'user_id' => $userId,
+                    'email' => $this->email,
+                    'display_name' => $this->display_name,
+                    'user_role' => 'user',
+                    'tenant_id' => tenant_id()
+                ]);
+
+                return new ApiResponse('success', 'User registered successfully', [
+                    'user_id' => $userId,
+                    'email' => $this->email,
+                    'display_name' => $this->display_name,
+                    'email_verified' => true,
+                    'token' => $token
+                ]);
+            }
+
+        } catch (\Exception $e) {
+            log_error("RegisterRoute: {$e->getMessage()}");
+            return new ApiResponse('error', 'Registration failed', null, 500);
+        }
+    }
+
+    /**
+     * Get database connection based on multi-tenancy strategy
+     */
+    private function getDatabase(): PDO
+    {
+        if (tenant_check()) {
+            $db = tenant_db();
+            if ($db) {
+                return $db;
+            }
+        }
+        return db_connection(getenv('DB_NAME'));
+    }
+
+    /**
+     * Check if user exists
+     */
+    private function userExists(PDO $db, string $email): bool
+    {
+        if (tenant_check()) {
+            $stmt = $db->prepare('SELECT id FROM users WHERE email = ? AND tenant_id = ?');
+            $stmt->execute([$email, tenant_id()]);
+        } else {
+            $stmt = $db->prepare('SELECT id FROM users WHERE email = ?');
+            $stmt->execute([$email]);
+        }
+
+        return $stmt->fetch() !== false;
+    }
+
+    /**
+     * Create new user with email verification token
+     */
+    private function createUser(
+        PDO $db,
+        string $email,
+        string $passwordHash,
+        ?string $displayName,
+        string $verificationToken,
+        \DateTime $tokenExpiry
+    ): int {
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'INSERT INTO users (tenant_id, email, password_hash, display_name, status, email_verified, email_verification_token, email_verification_expires_at, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, false, ?, ?, NOW(), NOW())
+                 RETURNING id'
+            );
+            $stmt->execute([
+                tenant_id(),
+                $email,
+                $passwordHash,
+                $displayName,
+                'active',
+                $verificationToken,
+                $tokenExpiry->format('Y-m-d H:i:s')
+            ]);
+        } else {
+            $stmt = $db->prepare(
+                'INSERT INTO users (email, password_hash, display_name, status, email_verified, email_verification_token, email_verification_expires_at, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, false, ?, ?, NOW(), NOW())
+                 RETURNING id'
+            );
+            $stmt->execute([
+                $email,
+                $passwordHash,
+                $displayName,
+                'active',
+                $verificationToken,
+                $tokenExpiry->format('Y-m-d H:i:s')
+            ]);
+        }
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result['id'];
+    }
+
+    /**
+     * Create new user without verification (email_verified = true)
+     */
+    private function createUserWithoutVerification(
+        PDO $db,
+        string $email,
+        string $passwordHash,
+        ?string $displayName
+    ): int {
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'INSERT INTO users (tenant_id, email, password_hash, display_name, status, email_verified, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())
+                 RETURNING id'
+            );
+            $stmt->execute([
+                tenant_id(),
+                $email,
+                $passwordHash,
+                $displayName,
+                'active'
+            ]);
+        } else {
+            $stmt = $db->prepare(
+                'INSERT INTO users (email, password_hash, display_name, status, email_verified, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, true, NOW(), NOW())
+                 RETURNING id'
+            );
+            $stmt->execute([
+                $email,
+                $passwordHash,
+                $displayName,
+                'active'
+            ]);
+        }
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result['id'];
+    }
+
+    /**
+     * Send verification email
+     */
+    private function sendVerificationEmail(string $email, ?string $displayName, string $token): bool
+    {
+        $emailService = new MyZeptoMail();
+
+        if (!$emailService->isConfigured()) {
+            log_error("RegisterRoute: Email service not configured");
+            return false;
+        }
+
+        $verificationUrl = $this->getVerificationUrl($token);
+        $appName = getenv('APP_NAME') ?: 'Our Application';
+
+        $emailBody = $this->getVerificationEmailTemplate($displayName, $verificationUrl, $appName);
+
+        return $emailService->send(
+            $email,
+            "Verify your email address - {$appName}",
+            $emailBody,
+            $displayName
+        );
+    }
+
+    /**
+     * Get verification URL
+     */
+    private function getVerificationUrl(string $token): string
+    {
+        $baseUrl = getenv('APP_URL') ?: 'http://localhost:8000';
+        return "{$baseUrl}/api/auth/verify-email?token={$token}";
+    }
+
+    /**
+     * Get email verification HTML template
+     */
+    private function getVerificationEmailTemplate(?string $name, string $verificationUrl, string $appName): string
+    {
+        $displayName = $name ?: 'there';
+
+        return <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Your Email</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background-color: #f8f9fa; border-radius: 10px; padding: 30px; margin-bottom: 20px;">
+        <h1 style="color: #2c3e50; margin-bottom: 20px;">Welcome to {$appName}!</h1>
+
+        <p>Hi {$displayName},</p>
+
+        <p>Thank you for registering with {$appName}. To complete your registration and verify your email address, please click the button below:</p>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{$verificationUrl}"
+               style="background-color: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                Verify Email Address
+            </a>
+        </div>
+
+        <p style="color: #666; font-size: 14px;">
+            If the button doesn't work, copy and paste this link into your browser:<br>
+            <a href="{$verificationUrl}" style="color: #007bff; word-break: break-all;">{$verificationUrl}</a>
+        </p>
+
+        <p style="color: #666; font-size: 14px; margin-top: 30px;">
+            <strong>This link will expire in 24 hours.</strong>
+        </p>
+
+        <p style="color: #666; font-size: 14px;">
+            If you didn't create an account with {$appName}, please ignore this email.
+        </p>
+    </div>
+
+    <div style="text-align: center; color: #666; font-size: 12px;">
+        <p>&copy; {$appName}. All rights reserved.</p>
+    </div>
+</body>
+</html>
+HTML;
+    }
+}

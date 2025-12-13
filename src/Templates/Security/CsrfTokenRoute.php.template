@@ -1,0 +1,80 @@
+<?php
+
+namespace App\Routes\Security;
+
+use Framework\IRouteHandler;
+use Framework\ApiResponse;
+use Framework\Security\CsrfTokenHandler;
+
+/**
+ * CSRF Token Generation Route
+ *
+ * Provides CSRF tokens for frontend applications.
+ *
+ * GET /api/csrf/token?action=register
+ *
+ * Response:
+ * {
+ *   "status": "success",
+ *   "data": {
+ *     "csrf_token": "...",
+ *     "expires_in": 3600,
+ *     "action": "register"
+ *   }
+ * }
+ *
+ * Frontend Usage:
+ * 1. On page load, request a CSRF token
+ * 2. Store token in memory (not localStorage!)
+ * 3. Include token in form submissions via X-CSRF-Token header or csrf_token field
+ * 4. Request new token after each use (tokens are single-use)
+ */
+class CsrfTokenRoute implements IRouteHandler
+{
+    public ?string $action = null;
+
+    public function validation_rules(): array
+    {
+        return [
+            'action' => ['optional', 'max:50']
+        ];
+    }
+
+    public function process(): ApiResponse
+    {
+        try {
+            $handler = new CsrfTokenHandler();
+
+            // Generate token with action context
+            $action = $this->action ?? 'general';
+            $token = $handler->generateToken(['action' => $action]);
+
+            log_debug("CSRF token generated", [
+                'action' => $action,
+                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+            ]);
+
+            return new ApiResponse('success', 'CSRF token generated', [
+                'csrf_token' => $token,
+                'expires_in' => 3600, // 1 hour
+                'action' => $action,
+                'usage' => 'single-use'
+            ]);
+
+        } catch (\RuntimeException $e) {
+            // Rate limit exceeded
+            log_warning("CSRF token generation failed: {$e->getMessage()}", [
+                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+            ]);
+
+            return new ApiResponse('error', $e->getMessage(), [
+                'error_code' => 'RATE_LIMIT_EXCEEDED'
+            ], 429);
+
+        } catch (\Exception $e) {
+            log_error("CSRF token generation error: {$e->getMessage()}");
+
+            return new ApiResponse('error', 'Failed to generate CSRF token', null, 500);
+        }
+    }
+}

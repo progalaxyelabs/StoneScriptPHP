@@ -145,6 +145,50 @@ class Logger
         $this->log(self::EMERGENCY, $message, $context);
     }
 
+    // Sensitive field patterns to redact
+    const SENSITIVE_KEYS = [
+        'password', 'password_hash', 'token', 'secret', 'api_key', 'access_token',
+        'refresh_token', 'private_key', 'authorization', 'cookie', 'session',
+        'csrf_token', 'otp_code', 'verification_token', 'reset_token', 'jwt'
+    ];
+
+    /**
+     * Sanitize context to remove sensitive data
+     */
+    private function sanitize_context(array $context): array
+    {
+        $sanitized = [];
+
+        foreach ($context as $key => $value) {
+            $lower_key = strtolower($key);
+
+            // Check if key contains sensitive patterns
+            $is_sensitive = false;
+            foreach (self::SENSITIVE_KEYS as $pattern) {
+                if (str_contains($lower_key, $pattern)) {
+                    $is_sensitive = true;
+                    break;
+                }
+            }
+
+            if ($is_sensitive) {
+                // Redact sensitive value
+                if (is_string($value) && strlen($value) > 0) {
+                    $sanitized[$key] = '***REDACTED***';
+                } else {
+                    $sanitized[$key] = '***';
+                }
+            } elseif (is_array($value)) {
+                // Recursively sanitize nested arrays
+                $sanitized[$key] = $this->sanitize_context($value);
+            } else {
+                $sanitized[$key] = $value;
+            }
+        }
+
+        return $sanitized;
+    }
+
     /**
      * Core logging method
      */
@@ -153,12 +197,15 @@ class Logger
         $timestamp = new DateTime();
         $formatted_time = $timestamp->format('Y-m-d H:i:s.u');
 
+        // Sanitize context to remove sensitive data
+        $sanitized_context = $this->sanitize_context($context);
+
         // Build log entry
         $log_entry = [
             'timestamp' => $formatted_time,
             'level' => $level,
             'message' => $message,
-            'context' => $context,
+            'context' => $sanitized_context,
             'memory' => memory_get_usage(true),
             'pid' => getmypid()
         ];
@@ -170,7 +217,7 @@ class Logger
 
         // Output to console
         if ($this->enable_console && $this->should_output_to_console($level)) {
-            $this->write_to_console($level, $message, $formatted_time, $context);
+            $this->write_to_console($level, $message, $formatted_time, $sanitized_context);
         }
 
         // Output to file
@@ -178,7 +225,7 @@ class Logger
             if ($this->enable_json) {
                 $this->write_json_to_file($log_entry);
             } else {
-                $this->write_to_file($level, $message, $formatted_time, $context);
+                $this->write_to_file($level, $message, $formatted_time, $sanitized_context);
             }
         }
     }

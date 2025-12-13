@@ -1,0 +1,193 @@
+<?php
+
+namespace App\Routes\Auth;
+
+use Framework\IRouteHandler;
+use Framework\ApiResponse;
+use PDO;
+
+/**
+ * Send OTP Route (Tenant-Aware)
+ *
+ * Sends a one-time password to the mobile number.
+ * Works with both per-tenant and shared database strategies.
+ *
+ * POST /api/auth/otp/send
+ * Body: { "mobile_number": "+1234567890", "purpose": "login" }
+ */
+class SendOtpRoute implements IRouteHandler
+{
+    public string $mobile_number;
+    public string $purpose = 'login';  // 'login', 'registration', 'verification'
+
+    public function validation_rules(): array
+    {
+        return [
+            'mobile_number' => ['required', 'regex:/^\+[1-9]\d{1,14}$/'],  // E.164 format
+            'purpose' => ['in:login,registration,verification']
+        ];
+    }
+
+    public function process(): ApiResponse
+    {
+        try {
+            // Get database connection (tenant-aware)
+            $db = $this->getDatabase();
+
+            // Normalize mobile number
+            $mobileNumber = $this->normalizeMobileNumber($this->mobile_number);
+
+            // For registration: check if user doesn't exist
+            // For login: check if user exists
+            $userExists = $this->mobileExists($db, $mobileNumber);
+
+            if ($this->purpose === 'registration' && $userExists) {
+                return new ApiResponse('error', 'Mobile number already registered', null, 409);
+            }
+
+            if ($this->purpose === 'login' && !$userExists) {
+                // Don't reveal if user exists - just say OTP sent
+                return new ApiResponse('success', 'OTP sent successfully');
+            }
+
+            // Generate OTP (6-digit code)
+            $otpCode = $this->generateOtp();
+
+            // Save OTP to database
+            $expiresAt = new \DateTime('+10 minutes');
+            $this->saveOtp($db, $mobileNumber, $otpCode, $this->purpose, $expiresAt);
+
+            // TODO: Send OTP via SMS service (Twilio, AWS SNS, etc.)
+            // In production, you would integrate with an SMS provider:
+            // $this->sendSms($mobileNumber, "Your OTP code is: {$otpCode}");
+
+            log_info("OTP sent", [
+                'mobile_number' => $mobileNumber,
+                'purpose' => $this->purpose,
+                'tenant_id' => tenant_id()
+            ]);
+
+            return new ApiResponse('success', 'OTP sent successfully', [
+                'otp_code' => $otpCode,  // Remove this in production
+                'expires_at' => $expiresAt->format('Y-m-d H:i:s'),
+                'mobile_number' => $mobileNumber
+            ]);
+
+        } catch (\Exception $e) {
+            log_error("SendOtpRoute: {$e->getMessage()}");
+            return new ApiResponse('error', 'Failed to send OTP', null, 500);
+        }
+    }
+
+    /**
+     * Get database connection based on multi-tenancy strategy
+     */
+    private function getDatabase(): PDO
+    {
+        if (tenant_check()) {
+            $db = tenant_db();
+            if ($db) {
+                return $db;
+            }
+        }
+        return db_connection(getenv('DB_NAME'));
+    }
+
+    /**
+     * Normalize mobile number to E.164 format
+     */
+    private function normalizeMobileNumber(string $mobile): string
+    {
+        // Remove all non-digit characters except +
+        $mobile = preg_replace('/[^\d+]/', '', $mobile);
+
+        // Ensure it starts with +
+        if (!str_starts_with($mobile, '+')) {
+            $mobile = '+' . $mobile;
+        }
+
+        return $mobile;
+    }
+
+    /**
+     * Check if mobile number exists
+     */
+    private function mobileExists(PDO $db, string $mobileNumber): bool
+    {
+        if (tenant_check()) {
+            $stmt = $db->prepare('SELECT id FROM mobile_users WHERE mobile_number = ? AND tenant_id = ?');
+            $stmt->execute([$mobileNumber, tenant_id()]);
+        } else {
+            $stmt = $db->prepare('SELECT id FROM mobile_users WHERE mobile_number = ?');
+            $stmt->execute([$mobileNumber]);
+        }
+
+        return $stmt->fetch() !== false;
+    }
+
+    /**
+     * Generate 6-digit OTP
+     */
+    private function generateOtp(): string
+    {
+        return str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Save OTP to database
+     */
+    private function saveOtp(
+        PDO $db,
+        string $mobileNumber,
+        string $otpCode,
+        string $purpose,
+        \DateTime $expiresAt
+    ): void {
+        // Invalidate any existing OTPs for this mobile number and purpose
+        $this->invalidateExistingOtps($db, $mobileNumber, $purpose);
+
+        // Insert new OTP
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'INSERT INTO otp_codes (tenant_id, mobile_number, otp_code, purpose, expires_at, created_at)
+                 VALUES (?, ?, ?, ?, ?, NOW())'
+            );
+            $stmt->execute([tenant_id(), $mobileNumber, $otpCode, $purpose, $expiresAt->format('Y-m-d H:i:s')]);
+        } else {
+            $stmt = $db->prepare(
+                'INSERT INTO otp_codes (mobile_number, otp_code, purpose, expires_at, created_at)
+                 VALUES (?, ?, ?, ?, NOW())'
+            );
+            $stmt->execute([$mobileNumber, $otpCode, $purpose, $expiresAt->format('Y-m-d H:i:s')]);
+        }
+    }
+
+    /**
+     * Invalidate existing OTPs
+     */
+    private function invalidateExistingOtps(PDO $db, string $mobileNumber, string $purpose): void
+    {
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'UPDATE otp_codes SET verified = true WHERE mobile_number = ? AND purpose = ? AND tenant_id = ? AND verified = false'
+            );
+            $stmt->execute([$mobileNumber, $purpose, tenant_id()]);
+        } else {
+            $stmt = $db->prepare(
+                'UPDATE otp_codes SET verified = true WHERE mobile_number = ? AND purpose = ? AND verified = false'
+            );
+            $stmt->execute([$mobileNumber, $purpose]);
+        }
+    }
+
+    /**
+     * Send SMS (placeholder - implement with your SMS provider)
+     */
+    private function sendSms(string $mobileNumber, string $message): void
+    {
+        // TODO: Integrate with SMS provider
+        // Example with Twilio:
+        // $twilio = new \Twilio\Rest\Client($accountSid, $authToken);
+        // $twilio->messages->create($mobileNumber, ['from' => '+1234567890', 'body' => $message]);
+    }
+}

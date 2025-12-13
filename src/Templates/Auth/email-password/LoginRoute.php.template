@@ -1,0 +1,133 @@
+<?php
+
+namespace App\Routes\Auth;
+
+use Framework\IRouteHandler;
+use Framework\ApiResponse;
+use Framework\Auth\RsaJwtHandler;
+use PDO;
+
+/**
+ * User Login Route (Tenant-Aware)
+ *
+ * Authenticates user with email and password.
+ * Works with both per-tenant and shared database strategies.
+ *
+ * POST /api/auth/login
+ * Body: { "email": "user@example.com", "password": "secret123" }
+ */
+class LoginRoute implements IRouteHandler
+{
+    public string $email;
+    public string $password;
+
+    public function validation_rules(): array
+    {
+        return [
+            'email' => ['required', 'email'],
+            'password' => ['required']
+        ];
+    }
+
+    public function process(): ApiResponse
+    {
+        try {
+            // Get database connection (tenant-aware)
+            $db = $this->getDatabase();
+
+            // Find user by email
+            $user = $this->findUser($db, $this->email);
+
+            if (!$user) {
+                return new ApiResponse('error', 'Invalid credentials', null, 401);
+            }
+
+            // Verify password
+            if (!password_verify($this->password, $user['password_hash'])) {
+                return new ApiResponse('error', 'Invalid credentials', null, 401);
+            }
+
+            // Check user status
+            if ($user['status'] !== 'active') {
+                return new ApiResponse('error', 'Account is not active', null, 403);
+            }
+
+            // Update last login timestamp
+            $this->updateLastLogin($db, $user['id']);
+
+            // Generate JWT token
+            $jwtHandler = new RsaJwtHandler();
+            $token = $jwtHandler->generateToken([
+                'user_id' => $user['id'],
+                'email' => $user['email'],
+                'display_name' => $user['display_name'],
+                'user_role' => 'user',  // You can add roles table if needed
+                'tenant_id' => tenant_id()
+            ]);
+
+            return new ApiResponse('success', 'Login successful', [
+                'user_id' => $user['id'],
+                'email' => $user['email'],
+                'display_name' => $user['display_name'],
+                'token' => $token
+            ]);
+
+        } catch (\Exception $e) {
+            log_error("LoginRoute: {$e->getMessage()}");
+            return new ApiResponse('error', 'Login failed', null, 500);
+        }
+    }
+
+    /**
+     * Get database connection based on multi-tenancy strategy
+     */
+    private function getDatabase(): PDO
+    {
+        // For per-tenant database strategy
+        if (tenant_check()) {
+            $db = tenant_db();
+            if ($db) {
+                return $db;
+            }
+        }
+
+        // For shared database or non-tenant setup
+        return db_connection(getenv('DB_NAME'));
+    }
+
+    /**
+     * Find user by email
+     */
+    private function findUser(PDO $db, string $email): ?array
+    {
+        // For shared database with tenant_id
+        if (tenant_check()) {
+            $stmt = $db->prepare(
+                'SELECT id, email, password_hash, display_name, status
+                 FROM users
+                 WHERE email = ? AND tenant_id = ?'
+            );
+            $stmt->execute([$email, tenant_id()]);
+        } else {
+            // For per-tenant database
+            $stmt = $db->prepare(
+                'SELECT id, email, password_hash, display_name, status
+                 FROM users
+                 WHERE email = ?'
+            );
+            $stmt->execute([$email]);
+        }
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ?: null;
+    }
+
+    /**
+     * Update last login timestamp
+     */
+    private function updateLastLogin(PDO $db, int $userId): void
+    {
+        $stmt = $db->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?');
+        $stmt->execute([$userId]);
+    }
+}

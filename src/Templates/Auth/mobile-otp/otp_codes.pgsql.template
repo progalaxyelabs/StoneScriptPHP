@@ -1,0 +1,34 @@
+-- OTP codes table for mobile authentication with multi-tenancy support
+--
+-- Stores one-time passwords for mobile verification and login.
+
+CREATE TABLE IF NOT EXISTS otp_codes (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER,  -- NULL for per-tenant DB strategy, required for shared DB
+    mobile_number VARCHAR(20) NOT NULL,
+    otp_code VARCHAR(10) NOT NULL,
+    purpose VARCHAR(50) NOT NULL,  -- 'login', 'registration', 'verification'
+    attempts INTEGER DEFAULT 0,  -- Track verification attempts
+    max_attempts INTEGER DEFAULT 3,
+    expires_at TIMESTAMP NOT NULL,
+    verified BOOLEAN DEFAULT FALSE,
+    verified_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Index for quick OTP lookup
+CREATE INDEX idx_otp_codes_mobile_purpose ON otp_codes(mobile_number, purpose, verified);
+
+-- Index for cleanup of expired OTPs
+CREATE INDEX idx_otp_codes_expires_at ON otp_codes(expires_at);
+
+-- For shared database strategy: add tenant filter index
+-- CREATE INDEX idx_otp_codes_tenant_id ON otp_codes(tenant_id);
+
+-- Automatic cleanup of expired OTPs (optional - can also use a cron job)
+-- CREATE OR REPLACE FUNCTION cleanup_expired_otps()
+-- RETURNS void AS $$
+-- BEGIN
+--     DELETE FROM otp_codes WHERE expires_at < NOW() - INTERVAL '24 hours';
+-- END;
+-- $$ LANGUAGE plpgsql;
