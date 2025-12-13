@@ -3,7 +3,7 @@
 namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use Framework\Validator;
+use StoneScriptPHP\Validator;
 
 /**
  * Validator Unit Tests

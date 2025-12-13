@@ -9,11 +9,11 @@
  * 4. Token extraction from multiple sources
  */
 
-require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
 
-use Framework\Security\HCaptchaVerifier;
-use Framework\Routing\Middleware\HCaptchaMiddleware;
-use Framework\ApiResponse;
+use StoneScriptPHP\Security\HCaptchaVerifier;
+use StoneScriptPHP\Routing\Middleware\HCaptchaMiddleware;
+use StoneScriptPHP\ApiResponse;
 
 echo "=== hCaptcha Integration Tests ===\n\n";
 

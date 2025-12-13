@@ -1,11 +1,11 @@
 <?php
 
-namespace Framework\Routing\Middleware;
+namespace StoneScriptPHP\Routing\Middleware;
 
-use Framework\Routing\MiddlewareInterface;
-use Framework\ApiResponse;
-use Framework\Attributes\RequiresPermission;
-use Framework\Attributes\RequiresRole;
+use StoneScriptPHP\Routing\MiddlewareInterface;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Attributes\RequiresPermission;
+use StoneScriptPHP\Attributes\RequiresRole;
 use App\Models\User;
 use ReflectionClass;
 

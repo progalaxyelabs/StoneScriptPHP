@@ -1,10 +1,10 @@
 <?php
 
-namespace Framework\Routing;
+namespace StoneScriptPHP\Routing;
 
-use Framework\ApiResponse;
-use Framework\Routing\MiddlewarePipeline;
-use Framework\Routing\MiddlewareInterface;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Routing\MiddlewarePipeline;
+use StoneScriptPHP\Routing\MiddlewareInterface;
 
 class Router
 {

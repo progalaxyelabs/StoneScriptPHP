@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Lib\User;
+namespace StoneScriptPHP\Lib\User;
 
 class Role
 {

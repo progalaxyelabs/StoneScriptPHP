@@ -161,8 +161,8 @@ class Init {
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-use Framework\Router;
-use Framework\Database;
+use StoneScriptPHP\Router;
+use StoneScriptPHP\Database;
 
 // Load environment variables
 if (file_exists(__DIR__ . '/../.env')) {
@@ -194,8 +194,8 @@ PHP;
 
 namespace App\Routes;
 
-use Framework\Attributes\Route;
-use Framework\Attributes\GET;
+use StoneScriptPHP\Attributes\Route;
+use StoneScriptPHP\Attributes\GET;
 
 class HealthRoute
 {

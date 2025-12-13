@@ -191,7 +191,7 @@ class RouteGeneratorTest extends TestCase
     {
         $generatorContent = file_get_contents($this->generatorScript);
 
-        // Should use Framework\ApiResponse
+        // Should use StoneScriptPHP\ApiResponse
         $this->assertStringContainsString(
             'Framework\ApiResponse',
             $generatorContent,

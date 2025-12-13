@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Attributes;
+namespace StoneScriptPHP\Attributes;
 
 use Attribute;
 

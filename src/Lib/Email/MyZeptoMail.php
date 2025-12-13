@@ -1,8 +1,8 @@
 <?php
 
-namespace Framework\Lib\Email;
+namespace StoneScriptPHP\Lib\Email;
 
-use Framework\Env;
+use StoneScriptPHP\Env;
 
 /**
  * ZeptoMail Email Service Implementation

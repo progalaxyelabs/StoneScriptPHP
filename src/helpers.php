@@ -1,9 +1,9 @@
 <?php
 
-use Framework\Env;
-use Framework\ApiResponse;
-use Framework\Logger;
-use Framework\CacheManager;
+use StoneScriptPHP\Env;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Logger;
+use StoneScriptPHP\CacheManager;
 
 // ===========================
 // Logging Functions (PSR-3 Compatible)
@@ -103,12 +103,12 @@ function init_env()
     }
 }
 
-function cache(): \Framework\Cache
+function cache(): \StoneScriptPHP\Cache
 {
     return CacheManager::instance();
 }
 
-function cache_invalidator(): \Framework\CacheInvalidator
+function cache_invalidator(): \StoneScriptPHP\CacheInvalidator
 {
     return CacheManager::invalidator();
 }
@@ -118,7 +118,7 @@ function cache_remember(string $key, callable $callback, ?int $ttl = null): mixe
     return cache()->remember($key, $callback, $ttl);
 }
 
-function cache_tags(array $tags): \Framework\CacheTaggedStore
+function cache_tags(array $tags): \StoneScriptPHP\CacheTaggedStore
 {
     return cache()->tags($tags);
 }
@@ -156,7 +156,7 @@ function cache_flush(): bool
  */
 function env(string $key, mixed $default = null): mixed
 {
-    $env = \Framework\Env::get_instance();
+    $env = \StoneScriptPHP\Env::get_instance();
     return $env->$key ?? $default;
 }
 
@@ -172,11 +172,11 @@ function env(string $key, mixed $default = null): mixed
  *   $userId = auth()->user_id;
  *   $email = auth()->email;
  *
- * @return Framework\Auth\AuthenticatedUser|null
+ * @return StoneScriptPHP\Auth\AuthenticatedUser|null
  */
-function auth(): ?Framework\Auth\AuthenticatedUser
+function auth(): ?StoneScriptPHP\Auth\AuthenticatedUser
 {
-    return Framework\Auth\AuthContext::getUser();
+    return StoneScriptPHP\Auth\AuthContext::getUser();
 }
 
 /**
@@ -186,7 +186,7 @@ function auth(): ?Framework\Auth\AuthenticatedUser
  */
 function auth_id(): ?int
 {
-    return Framework\Auth\AuthContext::id();
+    return StoneScriptPHP\Auth\AuthContext::id();
 }
 
 /**
@@ -196,7 +196,7 @@ function auth_id(): ?int
  */
 function auth_check(): bool
 {
-    return Framework\Auth\AuthContext::check();
+    return StoneScriptPHP\Auth\AuthContext::check();
 }
 
 /**
@@ -224,7 +224,7 @@ function auth_load(PDO $db, callable $loaderFn): array|object|null
         return null;
     }
 
-    return Framework\Auth\UserLoader::load($user, $db, $loaderFn);
+    return StoneScriptPHP\Auth\UserLoader::load($user, $db, $loaderFn);
 }
 
 /**
@@ -242,7 +242,7 @@ function auth_load_fn(PDO $db, string $functionClass, string $method = 'run'): m
         return null;
     }
 
-    return Framework\Auth\UserLoader::loadWithFunction($user, $db, $functionClass, $method);
+    return StoneScriptPHP\Auth\UserLoader::loadWithFunction($user, $db, $functionClass, $method);
 }
 
 /**
@@ -259,7 +259,7 @@ function auth_load_merge(PDO $db, callable $loaderFn): array
         return [];
     }
 
-    return Framework\Auth\UserLoader::loadAndMerge($user, $db, $loaderFn);
+    return StoneScriptPHP\Auth\UserLoader::loadAndMerge($user, $db, $loaderFn);
 }
 
 // ===========================
@@ -269,11 +269,11 @@ function auth_load_merge(PDO $db, callable $loaderFn): array
 /**
  * Get current tenant
  *
- * @return Framework\Tenancy\Tenant|null
+ * @return StoneScriptPHP\Tenancy\Tenant|null
  */
-function tenant(): ?Framework\Tenancy\Tenant
+function tenant(): ?StoneScriptPHP\Tenancy\Tenant
 {
-    return Framework\Tenancy\TenantContext::getTenant();
+    return StoneScriptPHP\Tenancy\TenantContext::getTenant();
 }
 
 /**
@@ -283,7 +283,7 @@ function tenant(): ?Framework\Tenancy\Tenant
  */
 function tenant_id(): int|string|null
 {
-    return Framework\Tenancy\TenantContext::id();
+    return StoneScriptPHP\Tenancy\TenantContext::id();
 }
 
 /**
@@ -293,7 +293,7 @@ function tenant_id(): int|string|null
  */
 function tenant_uuid(): ?string
 {
-    return Framework\Tenancy\TenantContext::uuid();
+    return StoneScriptPHP\Tenancy\TenantContext::uuid();
 }
 
 /**
@@ -303,7 +303,7 @@ function tenant_uuid(): ?string
  */
 function tenant_slug(): ?string
 {
-    return Framework\Tenancy\TenantContext::slug();
+    return StoneScriptPHP\Tenancy\TenantContext::slug();
 }
 
 /**
@@ -313,7 +313,7 @@ function tenant_slug(): ?string
  */
 function tenant_db_name(): ?string
 {
-    return Framework\Tenancy\TenantContext::dbName();
+    return StoneScriptPHP\Tenancy\TenantContext::dbName();
 }
 
 /**
@@ -323,7 +323,7 @@ function tenant_db_name(): ?string
  */
 function tenant_check(): bool
 {
-    return Framework\Tenancy\TenantContext::check();
+    return StoneScriptPHP\Tenancy\TenantContext::check();
 }
 
 /**
@@ -343,7 +343,7 @@ function tenant_db(?array $config = null): ?PDO
         return null;
     }
 
-    $pool = Framework\Database\DbConnectionPool::getInstance();
+    $pool = StoneScriptPHP\Database\DbConnectionPool::getInstance();
 
     // Set config if provided
     if ($config !== null) {
@@ -362,7 +362,7 @@ function tenant_db(?array $config = null): ?PDO
  */
 function tenant_get(string $key, mixed $default = null): mixed
 {
-    return Framework\Tenancy\TenantContext::get($key, $default);
+    return StoneScriptPHP\Tenancy\TenantContext::get($key, $default);
 }
 
 // ===========================
@@ -381,7 +381,7 @@ function tenant_get(string $key, mixed $default = null): mixed
  */
 function db_connection(string $database, ?array $config = null): PDO
 {
-    $pool = Framework\Database\DbConnectionPool::getInstance();
+    $pool = StoneScriptPHP\Database\DbConnectionPool::getInstance();
 
     // Set config if provided
     if ($config !== null) {
@@ -401,7 +401,7 @@ function db_connection(string $database, ?array $config = null): PDO
  */
 function db_set_config(array $config): void
 {
-    Framework\Database\DbConnectionPool::getInstance()->setConfig($config);
+    StoneScriptPHP\Database\DbConnectionPool::getInstance()->setConfig($config);
 }
 
 /**
@@ -411,7 +411,7 @@ function db_set_config(array $config): void
  */
 function db_pool_stats(): array
 {
-    $pool = Framework\Database\DbConnectionPool::getInstance();
+    $pool = StoneScriptPHP\Database\DbConnectionPool::getInstance();
     return [
         'active_connections' => $pool->getConnectionCount(),
         'databases' => $pool->getActiveConnections()

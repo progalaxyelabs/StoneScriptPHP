@@ -5,7 +5,7 @@
 // var_dump($argc);
 // var_dump($argv);
 
-use Framework\Database;
+use StoneScriptPHP\Database;
 
 $options = array_slice($argv, 1);
 // var_dump($options);

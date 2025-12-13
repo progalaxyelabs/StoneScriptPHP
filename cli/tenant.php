@@ -15,8 +15,8 @@
 
 require_once __DIR__ . '/generate-common.php';
 
-use Framework\Tenancy\TenantProvisioner;
-use Framework\Tenancy\Tenant;
+use StoneScriptPHP\Tenancy\TenantProvisioner;
+use StoneScriptPHP\Tenancy\Tenant;
 
 // Parse subcommand
 $subCommand = $args[0] ?? 'help';

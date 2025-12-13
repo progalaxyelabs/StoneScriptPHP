@@ -1,13 +1,13 @@
 <?php
 
-namespace Framework;
+namespace StoneScriptPHP;
 
 use Error;
 use Exception;
 use ReflectionClass;
 use ReflectionProperty;
 use RequestMethod;
-use Framework\Validator;
+use StoneScriptPHP\Validator;
 
 
 abstract class RequestParser

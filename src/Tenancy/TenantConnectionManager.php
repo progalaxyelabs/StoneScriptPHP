@@ -1,10 +1,10 @@
 <?php
 
-namespace Framework\Tenancy;
+namespace StoneScriptPHP\Tenancy;
 
 use PDO;
 use PDOException;
-use Framework\Database\DbConnectionPool;
+use StoneScriptPHP\Database\DbConnectionPool;
 
 /**
  * Tenant Connection Manager

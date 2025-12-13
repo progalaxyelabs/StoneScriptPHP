@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Auth;
+namespace StoneScriptPHP\Auth;
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;

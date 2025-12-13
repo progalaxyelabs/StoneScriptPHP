@@ -1,12 +1,12 @@
 <?php
 
-namespace Framework\Routing\Middleware;
+namespace StoneScriptPHP\Routing\Middleware;
 
-use Framework\Routing\MiddlewareInterface;
-use Framework\ApiResponse;
-use Framework\Auth\AuthenticatedUser;
-use Framework\Auth\AuthContext;
-use Framework\Auth\JwtHandlerInterface;
+use StoneScriptPHP\Routing\MiddlewareInterface;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Auth\AuthenticatedUser;
+use StoneScriptPHP\Auth\AuthContext;
+use StoneScriptPHP\Auth\JwtHandlerInterface;
 
 /**
  * JWT Authentication Middleware

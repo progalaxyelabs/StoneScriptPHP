@@ -6,12 +6,12 @@
  * Run with: php test-connection-pool.php
  */
 
-require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/../../src/helpers.php';
 
-use Framework\Database\DbConnectionPool;
-use Framework\Tenancy\Tenant;
-use Framework\Tenancy\TenantContext;
+use StoneScriptPHP\Database\DbConnectionPool;
+use StoneScriptPHP\Tenancy\Tenant;
+use StoneScriptPHP\Tenancy\TenantContext;
 
 echo "=== Database Connection Pool Test ===\n\n";
 

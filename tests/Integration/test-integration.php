@@ -10,17 +10,17 @@
  * Run with: php test-integration.php
  */
 
-require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/../../src/helpers.php';
 
-use Framework\Tenancy\TenantProvisioner;
-use Framework\Tenancy\TenantResolver;
-use Framework\Tenancy\TenantContext;
-use Framework\Tenancy\TenantConnectionManager;
-use Framework\Tenancy\TenantQueryBuilder;
-use Framework\Routing\Middleware\TenantMiddleware;
-use Framework\Routing\Router;
-use Framework\ApiResponse;
+use StoneScriptPHP\Tenancy\TenantProvisioner;
+use StoneScriptPHP\Tenancy\TenantResolver;
+use StoneScriptPHP\Tenancy\TenantContext;
+use StoneScriptPHP\Tenancy\TenantConnectionManager;
+use StoneScriptPHP\Tenancy\TenantQueryBuilder;
+use StoneScriptPHP\Routing\Middleware\TenantMiddleware;
+use StoneScriptPHP\Routing\Router;
+use StoneScriptPHP\ApiResponse;
 
 echo "=== Multi-Tenancy Integration Test ===\n\n";
 

@@ -24,11 +24,11 @@ function log_debug($message) {
     // Suppress logs during tests
 }
 
-use Framework\Routing\MiddlewarePipeline;
-use Framework\Routing\MiddlewareInterface;
-use Framework\Routing\Middleware\LoggingMiddleware;
-use Framework\Routing\Middleware\AuthMiddleware;
-use Framework\ApiResponse;
+use StoneScriptPHP\Routing\MiddlewarePipeline;
+use StoneScriptPHP\Routing\MiddlewareInterface;
+use StoneScriptPHP\Routing\Middleware\LoggingMiddleware;
+use StoneScriptPHP\Routing\Middleware\AuthMiddleware;
+use StoneScriptPHP\ApiResponse;
 
 // Test counter
 $testsPassed = 0;

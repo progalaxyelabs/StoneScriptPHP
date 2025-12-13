@@ -1,8 +1,8 @@
 <?php
 
-namespace Framework\Routing;
+namespace StoneScriptPHP\Routing;
 
-use Framework\ApiResponse;
+use StoneScriptPHP\ApiResponse;
 
 class MiddlewarePipeline
 {

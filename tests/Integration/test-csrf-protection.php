@@ -6,9 +6,9 @@
  * Demonstrates CSRF token generation and validation
  */
 
-require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
 
-use Framework\Security\CsrfTokenHandler;
+use StoneScriptPHP\Security\CsrfTokenHandler;
 
 echo "\033[1;33m========================================\033[0m\n";
 echo "\033[1;33mCSRF Protection Test\033[0m\n";

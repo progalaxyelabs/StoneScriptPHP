@@ -3,10 +3,10 @@
 namespace Tests;
 
 use PHPUnit\Framework\TestCase;
-use Framework\Cache;
-use Framework\CacheManager;
-use Framework\CacheTaggedStore;
-use Framework\CacheInvalidator;
+use StoneScriptPHP\Cache;
+use StoneScriptPHP\CacheManager;
+use StoneScriptPHP\CacheTaggedStore;
+use StoneScriptPHP\CacheInvalidator;
 
 class CacheTest extends TestCase
 {

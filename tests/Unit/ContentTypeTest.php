@@ -3,7 +3,7 @@
 namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use Framework\Router;
+use StoneScriptPHP\Router;
 
 /**
  * Content-Type Handling Tests

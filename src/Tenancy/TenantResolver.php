@@ -1,8 +1,8 @@
 <?php
 
-namespace Framework\Tenancy;
+namespace StoneScriptPHP\Tenancy;
 
-use Framework\Auth\AuthContext;
+use StoneScriptPHP\Auth\AuthContext;
 
 /**
  * Tenant Resolver

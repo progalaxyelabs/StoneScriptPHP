@@ -2,8 +2,8 @@
 
 namespace Tests\Fixtures;
 
-use Framework\IRouteHandler;
-use Framework\ApiResponse;
+use StoneScriptPHP\IRouteHandler;
+use StoneScriptPHP\ApiResponse;
 
 /**
  * Test route handler that accepts an {id} parameter from URL

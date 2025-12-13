@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Lib\Email;
+namespace StoneScriptPHP\Lib\Email;
 
 /**
  * Email Service Interface

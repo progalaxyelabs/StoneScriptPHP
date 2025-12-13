@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Tenancy;
+namespace StoneScriptPHP\Tenancy;
 
 use PDO;
 use PDOStatement;

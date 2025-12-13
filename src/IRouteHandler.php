@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework;
+namespace StoneScriptPHP;
 
 interface IRouteHandler
 {

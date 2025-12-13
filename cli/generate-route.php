@@ -245,8 +245,8 @@ $routeContent = <<<'EOD'
 
 namespace App\Routes;
 
-use Framework\IRouteHandler;
-use Framework\ApiResponse;
+use StoneScriptPHP\IRouteHandler;
+use StoneScriptPHP\ApiResponse;
 use App\Contracts\{INTERFACE_NAME};
 use App\DTO\{REQUEST_CLASS};
 use App\DTO\{RESPONSE_CLASS};

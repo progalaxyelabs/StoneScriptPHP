@@ -7,8 +7,8 @@
  * It initializes the framework environment.
  */
 
-use Framework\Env;
-use Framework\ExceptionHandler;
+use StoneScriptPHP\Env;
+use StoneScriptPHP\ExceptionHandler;
 
 // These constants should be defined by the application before loading composer autoloader
 // If not defined, provide defaults (though this is not recommended)

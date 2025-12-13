@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework;
+namespace StoneScriptPHP;
 
 function e500($message = 'Server error'): ApiResponse
 {

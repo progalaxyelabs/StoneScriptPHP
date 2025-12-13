@@ -1,10 +1,10 @@
 <?php
 
-namespace Framework\Auth;
+namespace StoneScriptPHP\Auth;
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
-use Framework\Env;
+use StoneScriptPHP\Env;
 
 /**
  * RSA JWT Handler

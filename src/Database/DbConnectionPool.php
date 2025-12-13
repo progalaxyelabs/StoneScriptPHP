@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Database;
+namespace StoneScriptPHP\Database;
 
 use PDO;
 use PDOException;

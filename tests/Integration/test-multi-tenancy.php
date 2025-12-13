@@ -6,16 +6,16 @@
  * Run with: php test-multi-tenancy.php
  */
 
-require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/../../src/helpers.php';
 
-use Framework\Tenancy\Tenant;
-use Framework\Tenancy\TenantContext;
-use Framework\Tenancy\TenantResolver;
-use Framework\Tenancy\TenantConnectionManager;
-use Framework\Tenancy\TenantQueryBuilder;
-use Framework\Auth\AuthenticatedUser;
-use Framework\Auth\AuthContext;
+use StoneScriptPHP\Tenancy\Tenant;
+use StoneScriptPHP\Tenancy\TenantContext;
+use StoneScriptPHP\Tenancy\TenantResolver;
+use StoneScriptPHP\Tenancy\TenantConnectionManager;
+use StoneScriptPHP\Tenancy\TenantQueryBuilder;
+use StoneScriptPHP\Auth\AuthenticatedUser;
+use StoneScriptPHP\Auth\AuthContext;
 
 echo "=== Multi-Tenancy Test Suite ===\n\n";
 

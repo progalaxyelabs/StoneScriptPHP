@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework;
+namespace StoneScriptPHP;
 
 use Exception;
 
@@ -311,7 +311,7 @@ class Env
     public static function get_instance(): Env
     {
         if (!self::$_instance) {
-            // Check if App\Env exists and use it, otherwise use Framework\Env
+            // Check if App\Env exists and use it, otherwise use StoneScriptPHP\Env
             if (class_exists('App\\Env')) {
                 self::$_instance = new \App\Env();
             } else {

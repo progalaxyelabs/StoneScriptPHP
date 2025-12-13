@@ -1,9 +1,9 @@
 <?php
 
-namespace Framework\Routing\Middleware;
+namespace StoneScriptPHP\Routing\Middleware;
 
-use Framework\Routing\MiddlewareInterface;
-use Framework\ApiResponse;
+use StoneScriptPHP\Routing\MiddlewareInterface;
+use StoneScriptPHP\ApiResponse;
 
 class JsonBodyParserMiddleware implements MiddlewareInterface
 {

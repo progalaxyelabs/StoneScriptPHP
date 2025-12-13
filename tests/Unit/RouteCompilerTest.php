@@ -3,7 +3,7 @@
 namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use Framework\RouteCompiler;
+use StoneScriptPHP\RouteCompiler;
 
 /**
  * RouteCompiler Tests

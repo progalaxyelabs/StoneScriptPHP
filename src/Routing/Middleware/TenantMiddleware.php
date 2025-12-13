@@ -1,11 +1,11 @@
 <?php
 
-namespace Framework\Routing\Middleware;
+namespace StoneScriptPHP\Routing\Middleware;
 
-use Framework\Routing\MiddlewareInterface;
-use Framework\Tenancy\TenantResolver;
-use Framework\Tenancy\TenantContext;
-use Framework\ApiResponse;
+use StoneScriptPHP\Routing\MiddlewareInterface;
+use StoneScriptPHP\Tenancy\TenantResolver;
+use StoneScriptPHP\Tenancy\TenantContext;
+use StoneScriptPHP\ApiResponse;
 
 /**
  * Tenant Middleware

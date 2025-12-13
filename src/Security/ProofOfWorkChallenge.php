@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Security;
+namespace StoneScriptPHP\Security;
 
 /**
  * Proof-of-Work Challenge System

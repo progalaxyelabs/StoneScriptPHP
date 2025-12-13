@@ -5,13 +5,13 @@
  * Tests the new JWT configuration system with custom keys, passphrases, and settings
  */
 
-define('ROOT_PATH', __DIR__ . DIRECTORY_SEPARATOR);
+define('ROOT_PATH', dirname(__DIR__, 2) . DIRECTORY_SEPARATOR);
 
-require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/../../src/helpers.php';
 
-use Framework\Env;
-use Framework\Auth\RsaJwtHandler;
+use StoneScriptPHP\Env;
+use StoneScriptPHP\Auth\RsaJwtHandler;
 
 echo "=== JWT Configuration Tests ===\n\n";
 

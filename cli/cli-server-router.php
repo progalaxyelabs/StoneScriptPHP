@@ -142,8 +142,8 @@ function generateRouteFile(string $name, string $path, ?string $handler, array $
     $routeFile = ROOT_PATH . "/src/App/Routes/{$name}Route.php";
 
     $content = "<?php\n\nnamespace App\\Routes;\n\n";
-    $content .= "use Framework\\IRouteHandler;\n";
-    $content .= "use Framework\\ApiResponse;\n";
+    $content .= "use StoneScriptPHP\\IRouteHandler;\n";
+    $content .= "use StoneScriptPHP\\ApiResponse;\n";
 
     if ($requestDTOClass) {
         $content .= "use App\\DTO\\{$requestDTOClass};\n";

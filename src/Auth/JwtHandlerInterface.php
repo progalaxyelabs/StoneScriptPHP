@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Auth;
+namespace StoneScriptPHP\Auth;
 
 /**
  * JWT Handler Interface

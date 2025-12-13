@@ -314,8 +314,8 @@ PHP;
 
 namespace App\Routes;
 
-use Framework\ApiResponse;
-use Framework\IRouteHandler;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\IRouteHandler;
 
 class HomeRoute implements IRouteHandler
 {

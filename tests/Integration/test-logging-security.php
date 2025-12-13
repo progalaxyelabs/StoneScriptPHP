@@ -11,9 +11,9 @@ if (!defined('DEBUG_MODE')) {
     define('DEBUG_MODE', true);
 }
 
-require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
 
-use Framework\Logger;
+use StoneScriptPHP\Logger;
 
 echo "\033[1;33m========================================\033[0m\n";
 echo "\033[1;33mLogging Security Test\033[0m\n";

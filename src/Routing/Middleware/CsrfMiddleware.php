@@ -1,10 +1,10 @@
 <?php
 
-namespace Framework\Routing\Middleware;
+namespace StoneScriptPHP\Routing\Middleware;
 
-use Framework\Routing\MiddlewareInterface;
-use Framework\ApiResponse;
-use Framework\Security\CsrfTokenHandler;
+use StoneScriptPHP\Routing\MiddlewareInterface;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Security\CsrfTokenHandler;
 
 /**
  * CSRF Protection Middleware

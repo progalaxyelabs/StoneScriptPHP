@@ -42,16 +42,17 @@
     },
     "autoload": {
         "psr-4": {
-            "Framework\\": "src/"
+            "StoneScriptPHP\\": "src/",
+            "StoneScriptPHP\\CLI\\": "cli/"
         },
         "files": [
-            "functions.php",
-            "bootstrap.php"
+            "src/helpers.php",
+            "src/bootstrap.php"
         ]
     },
     "autoload-dev": {
         "psr-4": {
-            "Tests\\": "tests/"
+            "StoneScriptPHP\\Tests\\": "tests/"
         }
     },
     "scripts": {

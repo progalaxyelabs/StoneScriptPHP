@@ -31,8 +31,8 @@ if (!defined('CONFIG_PATH')) {
 // Load composer autoloader
 require_once $rootPath . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
 
-use Framework\Migrations;
-use Framework\Env;
+use StoneScriptPHP\Migrations;
+use StoneScriptPHP\Env;
 
 // Define DEBUG_MODE for CLI (defaults to false)
 if (!defined('DEBUG_MODE')) {
