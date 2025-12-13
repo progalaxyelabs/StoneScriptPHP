@@ -1,67 +1,70 @@
 # StoneScriptPHP Documentation
 
 **Version:** 1.0.0
-**Last Updated:** December 5, 2025
+**Last Updated:** December 13, 2025
 
 ---
 
 ## 📚 Table of Contents
 
 ### Getting Started
-- [**Getting Started Guide**](getting-started.md) - Complete tutorial from installation to deployment
-- [**CLI Usage**](CLI-USAGE.md) - Command reference for the Stone CLI tool
-- [**Environment Configuration**](environment-configuration.md) - Type-safe environment setup
+- [**Getting Started Guide**](guides/getting-started.md) - Complete tutorial from installation to deployment
+- [**CLI Usage**](reference/cli-usage.md) - Command reference for the Stone CLI tool
+- [**Environment Configuration**](reference/environment-configuration.md) - Type-safe environment setup
+- [**Setup Quiet Mode**](guides/setup-quiet-mode.md) - Automated setup for CI/CD
 
-### Core Concepts
-- [**API Reference**](api-reference.md) - Complete framework API documentation
-- [**Routing & Handlers**](getting-started.md#routes-and-url-mapping) - Route configuration and handlers
-- [**Database & Models**](getting-started.md#sql-functions--php-models) - PostgreSQL functions and PHP models
-- [**Validation**](validation.md) - Request validation system
+### User Guides
+- [**Authentication**](guides/authentication.md) - JWT and OAuth (Google)
+- [**JWT Configuration**](guides/jwt-configuration.md) - Interactive JWT setup
+- [**RBAC Quickstart**](guides/rbac-quickstart.md) - Quick guide to role-based access control
+- [**RBAC Complete Example**](guides/rbac-complete-example.md) - Full RBAC implementation
 
-### Features
-- [**Authentication**](authentication.md) - JWT and OAuth (Google)
-- [**Caching**](CACHING.md) - Redis integration with cache tags
-- [**Middleware**](MIDDLEWARE.md) - HTTP middleware pipeline
-- [**RBAC (Role-Based Access Control)**](RBAC.md) - Permissions and roles system
-- [**Logging & Exceptions**](logging-and-exceptions.md) - Production-ready logging
+### Reference Documentation
+- [**API Reference**](reference/api-reference.md) - Complete framework API documentation
+- [**API Design Guidelines**](reference/api-design-guidelines.md) - REST API design patterns
+- [**Coding Standards**](reference/coding-standards.md) - PHP coding conventions
+- [**Caching**](reference/caching.md) - Redis integration with cache tags
+- [**Middleware**](reference/middleware.md) - HTTP middleware pipeline
+- [**RBAC**](reference/rbac.md) - Permissions and roles system
 
 ### Security
-- [**Security Best Practices**](security-best-practices.md) - Comprehensive security guide
-- [**RBAC Implementation**](RBAC_IMPLEMENTATION_SUMMARY.md) - Access control implementation
-- [**RBAC Quickstart**](RBAC_QUICKSTART.md) - Quick guide to RBAC
+- [**Security Best Practices**](security/security-best-practices.md) - Comprehensive security guide
+- [**CSRF Protection**](security/csrf-protection.md) - Cross-site request forgery prevention
+- [**hCaptcha Integration**](security/hcaptcha-integration.md) - CAPTCHA for bot protection
+- [**Bot Protection Strategy**](security/bot-protection-strategy.md) - Multi-layer bot defense
+- [**Proof of Work Integration**](security/proof-of-work-integration.md) - Client-side PoW challenges
 
-### Architecture & Design
-- [**API Design Guidelines**](api-design-guidelines.md) - REST API design patterns
-- [**Coding Standards**](coding-standards.md) - PHP coding conventions
+### General Documentation
+- [**Validation**](validation.md) - Request validation system
+- [**Logging & Exceptions**](logging-and-exceptions.md) - Production-ready logging
 - [**Performance Guidelines**](performance-guidelines.md) - Optimization best practices
-- [**Migration Playbook**](migration-playbook.md) - Database migration strategies
-
-### Advanced Topics
 - [**CLI API Server**](cli-api-server.md) - Built-in development server
-- [**RBAC Complete Example**](RBAC_COMPLETE_EXAMPLE.md) - Full RBAC implementation
-- [**Cache Integration Summary**](CACHE-INTEGRATION-SUMMARY.md) - Redis caching details
-- [**Test Coverage**](test-coverage-summary.md) - Testing guidelines
+- [**Upgrade Guide**](UPGRADE.md) - Version upgrade instructions
+- [**Release Notes**](releases.md) - Framework release history
+
+### For Contributors
+- [**Internal Documentation**](internal/) - Implementation summaries and development guides
 
 ---
 
 ## 🔍 Quick Links
 
 ### New to StoneScriptPHP?
-1. Start with [Getting Started Guide](getting-started.md)
-2. Learn [CLI Usage](../CLI-USAGE.md)
-3. Read [API Reference](api-reference.md)
+1. Start with [Getting Started Guide](guides/getting-started.md)
+2. Learn [CLI Usage](reference/cli-usage.md)
+3. Read [API Reference](reference/api-reference.md)
 
 ### Building an API?
-1. [API Design Guidelines](api-design-guidelines.md)
-2. [Authentication](authentication.md)
+1. [API Design Guidelines](reference/api-design-guidelines.md)
+2. [Authentication](guides/authentication.md)
 3. [Validation](validation.md)
-4. [Security Best Practices](security-best-practices.md)
+4. [Security Best Practices](security/security-best-practices.md)
 
 ### Going to Production?
-1. [Security Best Practices](security-best-practices.md)
+1. [Security Best Practices](security/security-best-practices.md)
 2. [Performance Guidelines](performance-guidelines.md)
 3. [Logging & Exceptions](logging-and-exceptions.md)
-4. [Environment Configuration](environment-configuration.md)
+4. [Environment Configuration](reference/environment-configuration.md)
 
 ---
 
@@ -71,38 +74,52 @@
 docs/
 ├── INDEX.md (this file)
 │
-├── Getting Started
+├── guides/                          # User-facing tutorials and how-tos
 │   ├── getting-started.md
-│   ├── environment-configuration.md
-│   └── ../CLI-USAGE.md
-│
-├── Core Features
-│   ├── api-reference.md
-│   ├── validation.md
 │   ├── authentication.md
-│   ├── CACHING.md
-│   └── MIDDLEWARE.md
+│   ├── jwt-configuration.md
+│   ├── setup-quiet-mode.md
+│   ├── rbac-quickstart.md
+│   └── rbac-complete-example.md
 │
-├── Security & RBAC
-│   ├── security-best-practices.md
-│   ├── RBAC.md
-│   ├── RBAC_QUICKSTART.md
-│   ├── RBAC_IMPLEMENTATION_SUMMARY.md
-│   └── RBAC_COMPLETE_EXAMPLE.md
-│
-├── Logging & Errors
-│   └── logging-and-exceptions.md
-│
-├── Best Practices
+├── reference/                       # Technical specifications and API docs
+│   ├── api-reference.md
 │   ├── api-design-guidelines.md
 │   ├── coding-standards.md
-│   ├── performance-guidelines.md
+│   ├── environment-configuration.md
+│   ├── cli-usage.md
+│   ├── caching.md
+│   ├── middleware.md
+│   └── rbac.md
+│
+├── security/                        # Security features and best practices
+│   ├── security-best-practices.md
+│   ├── csrf-protection.md
+│   ├── hcaptcha-integration.md
+│   ├── bot-protection-strategy.md
+│   └── proof-of-work-integration.md
+│
+├── internal/                        # Implementation details (for contributors)
+│   ├── CACHE-INTEGRATION-SUMMARY.md
+│   ├── DOCUMENTATION-SUMMARY.md
+│   ├── DUAL-MODE-IMPLEMENTATION.md
+│   ├── LOGGING-IMPLEMENTATION-SUMMARY.md
+│   ├── RBAC_IMPLEMENTATION_SUMMARY.md
+│   ├── MIDDLEWARE_IMPLEMENTATION.md
+│   ├── RELEASE.md
+│   ├── SECURITY_IMPLEMENTATION_SUMMARY.md
+│   ├── TESTING-MULTI-TENANCY.md
+│   ├── test-coverage-summary.md
+│   ├── diag-report.md
 │   └── migration-playbook.md
 │
-└── Advanced
+└── General documentation (docs root)
+    ├── validation.md
+    ├── logging-and-exceptions.md
+    ├── performance-guidelines.md
     ├── cli-api-server.md
-    ├── test-coverage-summary.md
-    └── CACHE-INTEGRATION-SUMMARY.md
+    ├── UPGRADE.md
+    └── releases.md
 ```
 
 ---
@@ -112,22 +129,22 @@ docs/
 ### I want to...
 
 **Build a REST API**
-→ [Getting Started](getting-started.md) → [API Design](api-design-guidelines.md) → [Validation](validation.md)
+→ [Getting Started](guides/getting-started.md) → [API Design](reference/api-design-guidelines.md) → [Validation](validation.md)
 
 **Add Authentication**
-→ [Authentication Guide](authentication.md) → [RBAC Quickstart](RBAC_QUICKSTART.md)
+→ [Authentication Guide](guides/authentication.md) → [JWT Configuration](guides/jwt-configuration.md) → [RBAC Quickstart](guides/rbac-quickstart.md)
 
 **Improve Performance**
-→ [Caching Guide](CACHING.md) → [Performance Guidelines](performance-guidelines.md)
+→ [Caching Guide](reference/caching.md) → [Performance Guidelines](performance-guidelines.md)
 
 **Secure My API**
-→ [Security Best Practices](security-best-practices.md) → [RBAC](RBAC.md)
+→ [Security Best Practices](security/security-best-practices.md) → [CSRF Protection](security/csrf-protection.md) → [Bot Protection](security/bot-protection-strategy.md)
 
 **Debug Issues**
-→ [Logging & Exceptions](logging-and-exceptions.md) → [Test Coverage](test-coverage-summary.md)
+→ [Logging & Exceptions](logging-and-exceptions.md) → [Test Coverage](internal/test-coverage-summary.md)
 
 **Deploy to Production**
-→ [Getting Started: Deployment](getting-started.md#deployment) → [Security](security-best-practices.md)
+→ [Getting Started: Deployment](guides/getting-started.md#deployment) → [Security](security/security-best-practices.md) → [Setup Quiet Mode](guides/setup-quiet-mode.md)
 
 ---
 

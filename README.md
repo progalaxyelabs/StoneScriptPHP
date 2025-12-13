@@ -123,7 +123,7 @@ php stone upgrade
 php stone upgrade --check
 ```
 
-See [UPGRADE.md](UPGRADE.md) for version-specific migration guides.
+See [docs/UPGRADE.md](docs/UPGRADE.md) for version-specific migration guides.
 
 ## Development Workflow
 
@@ -252,33 +252,39 @@ This approach:
 
 ### 📖 Main Documentation
 
-* **[📑 Documentation Index](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/INDEX.md)** - Complete documentation with navigation
-* **[🏗️ High Level Design (HLD)](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/HLD.md)** - System architecture
-* **[📋 Release Notes](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/RELEASE.md)** - Version history
+* **[📑 Documentation Index](docs/INDEX.md)** - Complete documentation with navigation
+* **[🏗️ High Level Design (HLD)](HLD.md)** - System architecture and company work-management
+* **[📋 Release Notes](docs/releases.md)** - Version history
 
 ### 🚀 Getting Started
 
-* [Getting Started Guide](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/getting-started.md)
-* [CLI Usage Guide](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/CLI-USAGE.md)
-* [Environment Configuration](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/environment-configuration.md)
+* [Getting Started Guide](docs/guides/getting-started.md)
+* [CLI Usage Guide](docs/reference/cli-usage.md)
+* [Environment Configuration](docs/reference/environment-configuration.md)
+* [Setup Quiet Mode](docs/guides/setup-quiet-mode.md) - CI/CD and Docker automation
 
 ### 🔧 Core Features
 
-* [API Reference](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/api-reference.md)
-* [Logging & Exceptions](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/logging-and-exceptions.md)
-* [Request Validation](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/validation.md)
-* [Middleware Guide](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/MIDDLEWARE.md)
+* [API Reference](docs/reference/api-reference.md)
+* [Logging & Exceptions](docs/logging-and-exceptions.md)
+* [Request Validation](docs/validation.md)
+* [Middleware Guide](docs/reference/middleware.md)
+* [Caching System](docs/reference/caching.md)
 
 ### 🔐 Security
 
-* [Authentication](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/authentication.md)
-* [RBAC (Access Control)](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/RBAC.md)
-* [Security Best Practices](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/security-best-practices.md)
+* [Authentication](docs/guides/authentication.md)
+* [JWT Configuration](docs/guides/jwt-configuration.md)
+* [RBAC (Access Control)](docs/reference/rbac.md)
+* [RBAC Quickstart](docs/guides/rbac-quickstart.md)
+* [Security Best Practices](docs/security/security-best-practices.md)
+* [CSRF Protection](docs/security/csrf-protection.md)
+* [Bot Protection](docs/security/bot-protection-strategy.md)
 
 ### ⚡ Performance
 
-* [Redis Caching Guide](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/CACHING.md)
-* [Performance Guidelines](https://github.com/progalaxyelabs/StoneScriptPHP/blob/main/docs/performance-guidelines.md)
+* [Redis Caching Guide](docs/reference/caching.md)
+* [Performance Guidelines](docs/performance-guidelines.md)
 
 ## Contributing to the Framework
 
