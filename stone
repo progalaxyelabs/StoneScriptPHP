@@ -7,23 +7,25 @@
  * Usage: php stone <command> [options]
  */
 
-// Detect installation mode
+// Detect installation mode and set up paths
 $isVendorMode = strpos(__DIR__, 'vendor/progalaxyelabs/stonescriptphp') !== false;
 
 if ($isVendorMode) {
-    // Installed via composer require - running from vendor/bin/stone
-    $vendorDir = dirname(dirname(__DIR__));
-    define('ROOT_PATH', dirname($vendorDir) . DIRECTORY_SEPARATOR);
-    define('FRAMEWORK_PATH', __DIR__ . '/Framework');
+    // Running from vendor/progalaxyelabs/stonescriptphp/stone
+    // This happens when framework is installed via Composer in a project
+    $vendorDir = dirname(dirname(__DIR__)); // vendor/
+    $projectRoot = dirname($vendorDir);      // project root
+    define('ROOT_PATH', $projectRoot . DIRECTORY_SEPARATOR);
     define('IS_VENDOR_MODE', true);
 } else {
-    // Installed via composer create-project - running from project root
+    // Running from framework development repository
+    // This happens when working on the framework itself
     define('ROOT_PATH', __DIR__ . DIRECTORY_SEPARATOR);
-    define('FRAMEWORK_PATH', ROOT_PATH . 'Framework');
     define('IS_VENDOR_MODE', false);
 }
 
-// Define additional paths for CLI scripts
+// Define project paths
+// SRC_PATH points to the project's src/ directory (where App\ namespace lives)
 define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
 define('CONFIG_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Config' . DIRECTORY_SEPARATOR);
 
