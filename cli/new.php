@@ -176,30 +176,34 @@ class ProjectGenerator
 
     private function copyFrameworkFiles(): void
     {
-        echo "→ Copying framework files...\n";
+        echo "→ Setting up framework via Composer...\n";
 
-        // Copy Framework directory
-        $this->recursiveCopy(
-            $this->frameworkPath . DIRECTORY_SEPARATOR . 'Framework',
-            $this->projectDir . DIRECTORY_SEPARATOR . 'Framework'
-        );
-        echo $this->success("  ✓ Framework core files") . "\n";
+        // NOTE: The framework is now installed via Composer, not copied directly
+        // The composer.json created by this generator will require progalaxyelabs/stonescriptphp
+        // which provides the StoneScriptPHP namespace in vendor/
 
-        // Copy stone CLI script
-        copy(
-            $this->frameworkPath . DIRECTORY_SEPARATOR . 'stone',
-            $this->projectDir . DIRECTORY_SEPARATOR . 'stone'
-        );
-        chmod($this->projectDir . DIRECTORY_SEPARATOR . 'stone', 0755);
-        echo $this->success("  ✓ CLI tool (stone)") . "\n";
+        // Copy stone CLI script if it exists
+        $stoneScript = $this->frameworkPath . DIRECTORY_SEPARATOR . 'stone';
+        if (file_exists($stoneScript)) {
+            copy(
+                $stoneScript,
+                $this->projectDir . DIRECTORY_SEPARATOR . 'stone'
+            );
+            chmod($this->projectDir . DIRECTORY_SEPARATOR . 'stone', 0755);
+            echo $this->success("  ✓ CLI tool (stone)") . "\n";
+        }
 
-        // Copy public directory
-        $this->recursiveCopy(
-            $this->frameworkPath . DIRECTORY_SEPARATOR . 'public',
-            $this->projectDir . DIRECTORY_SEPARATOR . 'public'
-        );
-        echo $this->success("  ✓ Public directory") . "\n";
+        // Copy public directory if it exists
+        $publicDir = $this->frameworkPath . DIRECTORY_SEPARATOR . 'public';
+        if (is_dir($publicDir)) {
+            $this->recursiveCopy(
+                $publicDir,
+                $this->projectDir . DIRECTORY_SEPARATOR . 'public'
+            );
+            echo $this->success("  ✓ Public directory") . "\n";
+        }
 
+        echo $this->success("  ✓ Framework will be installed via Composer") . "\n";
         echo "\n";
     }
 
@@ -365,7 +369,7 @@ php stone generate route /api/users
 
 ## Project Structure
 
-- `Framework/` - Core framework files
+- `vendor/` - Composer dependencies (includes StoneScriptPHP framework)
 - `src/App/Routes/` - Route handlers
 - `src/App/Contracts/` - Route interfaces
 - `src/App/DTO/` - Data transfer objects
@@ -373,6 +377,7 @@ php stone generate route /api/users
 - `src/config/` - Configuration files
 - `src/postgresql/` - Database schema and migrations
 - `public/` - Public web root
+- `stone` - CLI tool entry point
 - `tests/` - Test files
 
 ## Documentation
@@ -498,11 +503,7 @@ PHP;
             ],
             'autoload' => [
                 'psr-4' => [
-                    'Framework\\' => 'Framework/',
                     'App\\' => 'src/App/'
-                ],
-                'files' => [
-                    'Framework/functions.php'
                 ]
             ],
             'scripts' => [
