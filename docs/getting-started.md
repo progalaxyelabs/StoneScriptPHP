@@ -531,7 +531,7 @@ StoneScriptPHP includes built-in JWT authentication and Google OAuth support.
 During setup, keys are auto-generated. To regenerate manually:
 
 ```bash
-bash generate-openssl-keypair.sh
+bash scripts/generate-openssl-keypair.sh
 ```
 
 This creates:

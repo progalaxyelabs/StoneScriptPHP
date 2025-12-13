@@ -667,7 +667,7 @@ DB_NAME=myapp_db
 DB_USER=myapp_user
 DB_PASSWORD=strong_random_password_here
 
-# JWT keys (use generate-openssl-keypair.sh)
+# JWT keys (use scripts/generate-openssl-keypair.sh)
 JWT_PRIVATE_KEY=/path/to/private.pem
 JWT_PUBLIC_KEY=/path/to/public.pem
 
