@@ -181,3 +181,66 @@ function auth_check(): bool
 {
     return Framework\Auth\AuthContext::check();
 }
+
+/**
+ * Load full user data from database
+ *
+ * Usage:
+ *   // With custom loader function
+ *   $dbUser = auth_load($db, function($user, $db) {
+ *       $stmt = $db->prepare("SELECT * FROM users WHERE id = ?");
+ *       $stmt->execute([$user->user_id]);
+ *       return $stmt->fetch(PDO::FETCH_ASSOC);
+ *   });
+ *
+ *   // With database function class
+ *   $dbUser = auth_load_fn($db, FnGetUserById::class);
+ *
+ * @param PDO $db Database connection
+ * @param callable $loaderFn Function to load user: fn(AuthenticatedUser, PDO): array|object|null
+ * @return array|object|null
+ */
+function auth_load(PDO $db, callable $loaderFn): array|object|null
+{
+    $user = auth();
+    if (!$user) {
+        return null;
+    }
+
+    return Framework\Auth\UserLoader::load($user, $db, $loaderFn);
+}
+
+/**
+ * Load user data using a database function class
+ *
+ * @param PDO $db Database connection
+ * @param string $functionClass Database function class (e.g., FnGetUserById::class)
+ * @param string $method Method to call (default: 'run')
+ * @return mixed
+ */
+function auth_load_fn(PDO $db, string $functionClass, string $method = 'run'): mixed
+{
+    $user = auth();
+    if (!$user) {
+        return null;
+    }
+
+    return Framework\Auth\UserLoader::loadWithFunction($user, $db, $functionClass, $method);
+}
+
+/**
+ * Load user from database and merge with JWT claims
+ *
+ * @param PDO $db Database connection
+ * @param callable $loaderFn Function to load user
+ * @return array Merged user data
+ */
+function auth_load_merge(PDO $db, callable $loaderFn): array
+{
+    $user = auth();
+    if (!$user) {
+        return [];
+    }
+
+    return Framework\Auth\UserLoader::loadAndMerge($user, $db, $loaderFn);
+}
