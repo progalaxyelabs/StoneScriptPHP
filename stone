@@ -54,7 +54,7 @@ $commands = [
         'file' => 'cli/init.php',
     ],
     'setup' => [
-        'description' => 'Interactive project setup (run after composer create-project)',
+        'description' => 'Interactive project setup (run after composer create-project). Use --quiet to skip prompts',
         'file' => 'cli/setup.php',
     ],
     'serve' => [

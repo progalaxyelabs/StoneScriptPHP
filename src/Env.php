@@ -27,6 +27,17 @@ class Env
 
     public $EMAIL_VERIFICATION_ENABLED;
 
+    public $CSRF_SECRET_KEY;
+    public $HCAPTCHA_SITE_KEY;
+    public $HCAPTCHA_SECRET_KEY;
+
+    public $JWT_PRIVATE_KEY_PATH;
+    public $JWT_PUBLIC_KEY_PATH;
+    public $JWT_PRIVATE_KEY_PASSPHRASE;
+    public $JWT_ISSUER;
+    public $JWT_ACCESS_TOKEN_EXPIRY;
+    public $JWT_REFRESH_TOKEN_EXPIRY;
+
     /**
      * Define the environment variable schema
      * Each entry contains: type, required, default, and description
@@ -139,6 +150,42 @@ class Env
                 'required' => false,
                 'default' => null,
                 'description' => 'hCaptcha secret key (get from https://www.hcaptcha.com/)'
+            ],
+            'JWT_PRIVATE_KEY_PATH' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => './keys/jwt-private.pem',
+                'description' => 'Path to JWT private key file (relative to project root)'
+            ],
+            'JWT_PUBLIC_KEY_PATH' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => './keys/jwt-public.pem',
+                'description' => 'Path to JWT public key file (relative to project root)'
+            ],
+            'JWT_PRIVATE_KEY_PASSPHRASE' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => null,
+                'description' => 'Passphrase for encrypted JWT private key (leave empty for unencrypted)'
+            ],
+            'JWT_ISSUER' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => 'example.com',
+                'description' => 'JWT token issuer (your domain name)'
+            ],
+            'JWT_ACCESS_TOKEN_EXPIRY' => [
+                'type' => 'int',
+                'required' => false,
+                'default' => 900,
+                'description' => 'JWT access token expiry in seconds (default: 900 = 15 minutes)'
+            ],
+            'JWT_REFRESH_TOKEN_EXPIRY' => [
+                'type' => 'int',
+                'required' => false,
+                'default' => 15552000,
+                'description' => 'JWT refresh token expiry in seconds (default: 15552000 = 180 days)'
             ],
         ];
     }

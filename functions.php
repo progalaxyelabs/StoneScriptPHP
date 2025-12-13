@@ -144,6 +144,23 @@ function cache_flush(): bool
 }
 
 // ===========================
+// Environment Helper
+// ===========================
+
+/**
+ * Get environment variable from Env singleton
+ *
+ * @param string $key Environment variable key
+ * @param mixed $default Default value if not set
+ * @return mixed
+ */
+function env(string $key, mixed $default = null): mixed
+{
+    $env = \Framework\Env::get_instance();
+    return $env->$key ?? $default;
+}
+
+// ===========================
 // Authentication Functions
 // ===========================
 

@@ -7,13 +7,27 @@
 require_once __DIR__ . '/generate-common.php';
 
 class Setup {
-    public function run(): void
+    private array $config = [];
+    private bool $quiet = false;
+
+    public function run(bool $quiet = false): void
     {
-        $this->printBanner();
+        $this->quiet = $quiet;
+
+        if (!$quiet) {
+            $this->printBanner();
+        }
 
         $this->generateEnv();
-        $this->generateKeys();
-        $this->showNextSteps();
+        $this->generateKeys(
+            $this->config['JWT_PRIVATE_KEY_PASSPHRASE'] ?? '',
+            $this->config['JWT_PRIVATE_KEY_PATH'] ?? 'keys/jwt-private.pem',
+            $this->config['JWT_PUBLIC_KEY_PATH'] ?? 'keys/jwt-public.pem'
+        );
+
+        if (!$quiet) {
+            $this->showNextSteps();
+        }
     }
 
     private function isEmptyProject(): bool
@@ -102,44 +116,128 @@ class Setup {
 
     private function generateEnv(): void
     {
+        // In quiet mode, load existing .env or use defaults
+        if ($this->quiet) {
+            $this->loadExistingEnvOrDefaults();
+            return;
+        }
+
         echo "📝 Generating .env file...\n\n";
 
-        $config = [];
-
         // Application
-        $config['APP_NAME'] = $this->ask('Project name', 'My API');
-        $config['APP_ENV'] = $this->ask('Environment', 'development');
-        $config['APP_PORT'] = $this->ask('Port', '9100');
+        $this->config['APP_NAME'] = $this->ask('Project name', 'My API');
+        $this->config['APP_ENV'] = $this->ask('Environment', 'development');
+        $this->config['APP_PORT'] = $this->ask('Port', '9100');
 
         // Database
         echo "\n📊 Database Configuration:\n";
-        $config['DATABASE_HOST'] = $this->ask('Database host', 'localhost');
-        $config['DATABASE_PORT'] = $this->ask('Database port', '5432');
-        $config['DATABASE_DBNAME'] = $this->ask('Database name', strtolower(str_replace(' ', '_', $config['APP_NAME'])));
-        $config['DATABASE_USER'] = $this->ask('Database user', 'postgres');
-        $config['DATABASE_PASSWORD'] = $this->ask('Database password', '', true);
+        $this->config['DATABASE_HOST'] = $this->ask('Database host', 'localhost');
+        $this->config['DATABASE_PORT'] = $this->ask('Database port', '5432');
+        $this->config['DATABASE_DBNAME'] = $this->ask('Database name', strtolower(str_replace(' ', '_', $this->config['APP_NAME'])));
+        $this->config['DATABASE_USER'] = $this->ask('Database user', 'postgres');
+        $this->config['DATABASE_PASSWORD'] = $this->ask('Database password', '', true);
 
         // JWT
         echo "\n🔐 JWT Configuration:\n";
-        $config['JWT_EXPIRY'] = $this->ask('JWT token expiry (seconds)', '3600');
+        $this->config['JWT_ISSUER'] = $this->ask('JWT issuer (your domain)', 'example.com');
+        $this->config['JWT_ACCESS_TOKEN_EXPIRY'] = $this->ask('Access token expiry (seconds)', '900');
+        $this->config['JWT_REFRESH_TOKEN_EXPIRY'] = $this->ask('Refresh token expiry (seconds)', '15552000');
+
+        // JWT Keys
+        $this->config['JWT_PRIVATE_KEY_PATH'] = $this->ask('JWT private key path', './keys/jwt-private.pem');
+        $this->config['JWT_PUBLIC_KEY_PATH'] = $this->ask('JWT public key path', './keys/jwt-public.pem');
+
+        $usePassphrase = $this->ask('Use passphrase-protected private key? (yes/no)', 'no');
+        if (strtolower($usePassphrase) === 'yes' || strtolower($usePassphrase) === 'y') {
+            $this->config['JWT_PRIVATE_KEY_PASSPHRASE'] = $this->ask('Enter passphrase for private key', '', true);
+        } else {
+            $this->config['JWT_PRIVATE_KEY_PASSPHRASE'] = '';
+        }
 
         // CORS
         echo "\n🌐 CORS Configuration:\n";
-        $config['ALLOWED_ORIGINS'] = $this->ask('Allowed origins (comma-separated)', 'http://localhost:3000,http://localhost:4200');
+        $this->config['ALLOWED_ORIGINS'] = $this->ask('Allowed origins (comma-separated)', 'http://localhost:3000,http://localhost:4200');
 
         // Write .env file
-        $envContent = $this->buildEnvContent($config);
+        $envContent = $this->buildEnvContent($this->config);
         file_put_contents('.env', $envContent);
 
         echo "\n✅ .env file created!\n\n";
     }
 
-    private function generateKeys(): void
+    private function loadExistingEnvOrDefaults(): void
     {
-        echo "🔐 Generating JWT keypair...\n";
+        $envFile = '.env';
 
-        if (!is_dir('keys')) {
-            mkdir('keys', 0755, true);
+        if (file_exists($envFile)) {
+            // Load existing .env
+            $env = parse_ini_file($envFile);
+
+            $this->config['APP_NAME'] = $env['APP_NAME'] ?? 'My API';
+            $this->config['APP_ENV'] = $env['APP_ENV'] ?? 'development';
+            $this->config['APP_PORT'] = $env['APP_PORT'] ?? '9100';
+
+            $this->config['DATABASE_HOST'] = $env['DATABASE_HOST'] ?? 'localhost';
+            $this->config['DATABASE_PORT'] = $env['DATABASE_PORT'] ?? '5432';
+            $this->config['DATABASE_DBNAME'] = $env['DATABASE_DBNAME'] ?? 'stonescriptphp';
+            $this->config['DATABASE_USER'] = $env['DATABASE_USER'] ?? 'postgres';
+            $this->config['DATABASE_PASSWORD'] = $env['DATABASE_PASSWORD'] ?? '';
+
+            $this->config['JWT_ISSUER'] = $env['JWT_ISSUER'] ?? 'example.com';
+            $this->config['JWT_ACCESS_TOKEN_EXPIRY'] = $env['JWT_ACCESS_TOKEN_EXPIRY'] ?? '900';
+            $this->config['JWT_REFRESH_TOKEN_EXPIRY'] = $env['JWT_REFRESH_TOKEN_EXPIRY'] ?? '15552000';
+            $this->config['JWT_PRIVATE_KEY_PATH'] = $env['JWT_PRIVATE_KEY_PATH'] ?? './keys/jwt-private.pem';
+            $this->config['JWT_PUBLIC_KEY_PATH'] = $env['JWT_PUBLIC_KEY_PATH'] ?? './keys/jwt-public.pem';
+            $this->config['JWT_PRIVATE_KEY_PASSPHRASE'] = $env['JWT_PRIVATE_KEY_PASSPHRASE'] ?? '';
+
+            $this->config['ALLOWED_ORIGINS'] = $env['ALLOWED_ORIGINS'] ?? 'http://localhost:3000,http://localhost:4200';
+        } else {
+            // Use defaults
+            $this->config['APP_NAME'] = 'My API';
+            $this->config['APP_ENV'] = 'development';
+            $this->config['APP_PORT'] = '9100';
+
+            $this->config['DATABASE_HOST'] = 'localhost';
+            $this->config['DATABASE_PORT'] = '5432';
+            $this->config['DATABASE_DBNAME'] = 'stonescriptphp';
+            $this->config['DATABASE_USER'] = 'postgres';
+            $this->config['DATABASE_PASSWORD'] = '';
+
+            $this->config['JWT_ISSUER'] = 'example.com';
+            $this->config['JWT_ACCESS_TOKEN_EXPIRY'] = '900';
+            $this->config['JWT_REFRESH_TOKEN_EXPIRY'] = '15552000';
+            $this->config['JWT_PRIVATE_KEY_PATH'] = './keys/jwt-private.pem';
+            $this->config['JWT_PUBLIC_KEY_PATH'] = './keys/jwt-public.pem';
+            $this->config['JWT_PRIVATE_KEY_PASSPHRASE'] = '';
+
+            $this->config['ALLOWED_ORIGINS'] = 'http://localhost:3000,http://localhost:4200';
+
+            // Write default .env file
+            $envContent = $this->buildEnvContent($this->config);
+            file_put_contents('.env', $envContent);
+        }
+    }
+
+    private function generateKeys(string $passphrase = '', string $privateKeyPath = 'keys/jwt-private.pem', string $publicKeyPath = 'keys/jwt-public.pem'): void
+    {
+        // Skip key generation if keys already exist
+        if (file_exists($privateKeyPath) && file_exists($publicKeyPath)) {
+            if (!$this->quiet) {
+                echo "ℹ️  JWT keypair already exists, skipping generation\n";
+                echo "  Private key: $privateKeyPath\n";
+                echo "  Public key: $publicKeyPath\n\n";
+            }
+            return;
+        }
+
+        if (!$this->quiet) {
+            echo "🔐 Generating JWT keypair...\n";
+        }
+
+        // Create keys directory if it doesn't exist
+        $keysDir = dirname($privateKeyPath);
+        if (!is_dir($keysDir)) {
+            mkdir($keysDir, 0755, true);
         }
 
         $config = [
@@ -149,15 +247,29 @@ class Setup {
         ];
 
         $res = openssl_pkey_new($config);
-        openssl_pkey_export($res, $privKey);
+
+        // Export with or without passphrase
+        if (!empty($passphrase)) {
+            openssl_pkey_export($res, $privKey, $passphrase);
+            if (!$this->quiet) {
+                echo "  ✓ Private key encrypted with passphrase\n";
+            }
+        } else {
+            openssl_pkey_export($res, $privKey);
+        }
+
         $pubKey = openssl_pkey_get_details($res)['key'];
 
-        file_put_contents('keys/jwt-private.pem', $privKey);
-        file_put_contents('keys/jwt-public.pem', $pubKey);
+        file_put_contents($privateKeyPath, $privKey);
+        file_put_contents($publicKeyPath, $pubKey);
 
-        chmod('keys/jwt-private.pem', 0600);
+        chmod($privateKeyPath, 0600);
 
-        echo "✅ JWT keypair generated!\n\n";
+        if (!$this->quiet) {
+            echo "  ✓ Private key: $privateKeyPath\n";
+            echo "  ✓ Public key: $publicKeyPath\n";
+            echo "✅ JWT keypair generated!\n\n";
+        }
     }
 
     private function showNextSteps(): void
@@ -192,6 +304,10 @@ class Setup {
 
     private function buildEnvContent(array $config): string
     {
+        $passphraseLine = !empty($config['JWT_PRIVATE_KEY_PASSPHRASE'])
+            ? "JWT_PRIVATE_KEY_PASSPHRASE={$config['JWT_PRIVATE_KEY_PASSPHRASE']}"
+            : "# JWT_PRIVATE_KEY_PASSPHRASE=";
+
         return <<<ENV
 # Application
 APP_NAME="{$config['APP_NAME']}"
@@ -199,23 +315,47 @@ APP_ENV={$config['APP_ENV']}
 APP_PORT={$config['APP_PORT']}
 
 # Database
-DB_HOST={$config['DB_HOST']}
-DB_PORT={$config['DB_PORT']}
-DB_NAME={$config['DB_NAME']}
-DB_USER={$config['DB_USER']}
-DB_PASS={$config['DB_PASS']}
+DATABASE_HOST={$config['DATABASE_HOST']}
+DATABASE_PORT={$config['DATABASE_PORT']}
+DATABASE_DBNAME={$config['DATABASE_DBNAME']}
+DATABASE_USER={$config['DATABASE_USER']}
+DATABASE_PASSWORD={$config['DATABASE_PASSWORD']}
+DATABASE_TIMEOUT=30
+DATABASE_APPNAME=StoneScriptPHP
 
 # JWT
-JWT_PRIVATE_KEY_PATH=./keys/jwt-private.pem
-JWT_PUBLIC_KEY_PATH=./keys/jwt-public.pem
-JWT_EXPIRY={$config['JWT_EXPIRY']}
+JWT_PRIVATE_KEY_PATH={$config['JWT_PRIVATE_KEY_PATH']}
+JWT_PUBLIC_KEY_PATH={$config['JWT_PUBLIC_KEY_PATH']}
+$passphraseLine
+JWT_ISSUER={$config['JWT_ISSUER']}
+JWT_ACCESS_TOKEN_EXPIRY={$config['JWT_ACCESS_TOKEN_EXPIRY']}
+JWT_REFRESH_TOKEN_EXPIRY={$config['JWT_REFRESH_TOKEN_EXPIRY']}
 
 # CORS
 ALLOWED_ORIGINS={$config['ALLOWED_ORIGINS']}
+
+# Security (optional)
+# CSRF_SECRET_KEY=
+# HCAPTCHA_SITE_KEY=
+# HCAPTCHA_SECRET_KEY=
+
+# Email (optional - configure if using email verification)
+# EMAIL_VERIFICATION_ENABLED=true
+# ZEPTOMAIL_BOUNCE_ADDRESS=
+# ZEPTOMAIL_SENDER_EMAIL=
+# ZEPTOMAIL_SENDER_NAME=
+# ZEPTOMAIL_SEND_MAIL_TOKEN=
+
+# Debug
+DEBUG_MODE=false
+TIMEZONE=UTC
 ENV;
     }
 }
 
+// Parse command line arguments
+$quiet = in_array('--quiet', $argv) || in_array('-q', $argv);
+
 // Run setup
 $setup = new Setup();
-$setup->run();
+$setup->run($quiet);

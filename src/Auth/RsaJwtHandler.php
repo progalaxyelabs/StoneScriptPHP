@@ -4,6 +4,7 @@ namespace Framework\Auth;
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
+use Framework\Env;
 
 /**
  * RSA JWT Handler
@@ -32,11 +33,12 @@ class RsaJwtHandler implements JwtHandlerInterface
      * Generate a JWT token using RSA private key
      *
      * @param array $payload Data to encode in the token
-     * @param int $expiryDays Token expiry in days (default: 30)
+     * @param int $expirySeconds Token expiry in seconds (default: 900 = 15 minutes)
+     * @param string $tokenType 'access' or 'refresh' (determines which expiry to use)
      * @return string JWT token
      * @throws \RuntimeException if private key cannot be loaded
      */
-    public function generateToken(array $payload, int $expiryDays = 30): string
+    public function generateToken(array $payload, ?int $expirySeconds = null, string $tokenType = 'access'): string
     {
         $privateKeyPath = $this->getPrivateKeyPath();
         $privateKeyContent = file_get_contents($privateKeyPath);
@@ -45,16 +47,32 @@ class RsaJwtHandler implements JwtHandlerInterface
             throw new \RuntimeException("Cannot read private key file: $privateKeyPath");
         }
 
-        $privateKey = openssl_pkey_get_private($privateKeyContent);
+        // Support passphrase-protected keys
+        $env = Env::get_instance();
+        $passphrase = $env->JWT_PRIVATE_KEY_PASSPHRASE;
+        $privateKey = $passphrase
+            ? openssl_pkey_get_private($privateKeyContent, $passphrase)
+            : openssl_pkey_get_private($privateKeyContent);
 
         if (!$privateKey) {
-            throw new \RuntimeException('Unable to load private key for JWT signing');
+            throw new \RuntimeException('Unable to load private key for JWT signing. Check JWT_PRIVATE_KEY_PASSPHRASE if using encrypted key.');
+        }
+
+        // Use custom expiry from .env if not provided
+        if ($expirySeconds === null) {
+            $expirySeconds = $tokenType === 'refresh'
+                ? ($env->JWT_REFRESH_TOKEN_EXPIRY ?? 15552000)  // 180 days
+                : ($env->JWT_ACCESS_TOKEN_EXPIRY ?? 900);        // 15 minutes
         }
 
         $issuedAt = time();
-        $expire = $issuedAt + ($expiryDays * 24 * 60 * 60);
+        $expire = $issuedAt + $expirySeconds;
+
+        // Support custom issuer from .env
+        $issuer = $env->JWT_ISSUER ?? 'example.com';
 
         $data = [
+            'iss' => $issuer,
             'iat' => $issuedAt,
             'exp' => $expire,
             'data' => $payload
@@ -67,9 +85,10 @@ class RsaJwtHandler implements JwtHandlerInterface
      * Verify and decode a JWT token using RSA public key
      *
      * @param string $token JWT token to verify
+     * @param bool $verifyIssuer Whether to verify the issuer claim
      * @return array|false Decoded payload on success, false on failure
      */
-    public function verifyToken(string $token): array|false
+    public function verifyToken(string $token, bool $verifyIssuer = true): array|false
     {
         try {
             $publicKeyPath = $this->getPublicKeyPath();
@@ -81,6 +100,17 @@ class RsaJwtHandler implements JwtHandlerInterface
             }
 
             $decoded = JWT::decode($token, new Key($publicKey, self::ALGORITHM));
+
+            // Optionally verify issuer
+            if ($verifyIssuer) {
+                $env = Env::get_instance();
+                $expectedIssuer = $env->JWT_ISSUER ?? 'example.com';
+                if (isset($decoded->iss) && $decoded->iss !== $expectedIssuer) {
+                    error_log("JWT issuer mismatch: expected '$expectedIssuer', got '{$decoded->iss}'");
+                    return false;
+                }
+            }
+
             return (array) $decoded->data;
         } catch (\Firebase\JWT\ExpiredException $e) {
             error_log('JWT token expired: ' . $e->getMessage());
@@ -102,7 +132,8 @@ class RsaJwtHandler implements JwtHandlerInterface
      */
     private function getPrivateKeyPath(): string
     {
-        $path = env('JWT_PRIVATE_KEY_PATH');
+        $env = Env::get_instance();
+        $path = $env->JWT_PRIVATE_KEY_PATH;
 
         if (empty($path)) {
             throw new \RuntimeException(
@@ -127,7 +158,8 @@ class RsaJwtHandler implements JwtHandlerInterface
      */
     private function getPublicKeyPath(): string
     {
-        $path = env('JWT_PUBLIC_KEY_PATH');
+        $env = Env::get_instance();
+        $path = $env->JWT_PUBLIC_KEY_PATH;
 
         if (empty($path)) {
             throw new \RuntimeException(
