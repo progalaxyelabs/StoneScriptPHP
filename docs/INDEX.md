@@ -15,6 +15,7 @@
 
 ### User Guides
 - [**Authentication**](guides/authentication.md) - JWT and OAuth (Google)
+- [**Built-in Auth Routes**](guides/auth-routes.md) - 🆕 Token refresh & logout endpoints (v2.2.0+)
 - [**JWT Configuration**](guides/jwt-configuration.md) - Interactive JWT setup
 - [**RBAC Quickstart**](guides/rbac-quickstart.md) - Quick guide to role-based access control
 - [**RBAC Complete Example**](guides/rbac-complete-example.md) - Full RBAC implementation
@@ -77,10 +78,15 @@ docs/
 ├── guides/                          # User-facing tutorials and how-tos
 │   ├── getting-started.md
 │   ├── authentication.md
+│   ├── auth-routes.md              # 🆕 Built-in auth routes (v2.2.0+)
 │   ├── jwt-configuration.md
 │   ├── setup-quiet-mode.md
 │   ├── rbac-quickstart.md
 │   └── rbac-complete-example.md
+│
+├── examples/                        # 🆕 Code examples and templates
+│   └── auth/
+│       └── LoginRoute.php           # Example login implementation
 │
 ├── reference/                       # Technical specifications and API docs
 │   ├── api-reference.md
@@ -132,7 +138,7 @@ docs/
 → [Getting Started](guides/getting-started.md) → [API Design](reference/api-design-guidelines.md) → [Validation](validation.md)
 
 **Add Authentication**
-→ [Authentication Guide](guides/authentication.md) → [JWT Configuration](guides/jwt-configuration.md) → [RBAC Quickstart](guides/rbac-quickstart.md)
+→ [Authentication Guide](guides/authentication.md) → [Built-in Auth Routes 🆕](guides/auth-routes.md) → [JWT Configuration](guides/jwt-configuration.md) → [RBAC Quickstart](guides/rbac-quickstart.md)
 
 **Improve Performance**
 → [Caching Guide](reference/caching.md) → [Performance Guidelines](performance-guidelines.md)

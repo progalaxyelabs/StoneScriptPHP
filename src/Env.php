@@ -42,6 +42,9 @@ class Env
     public $JWT_ACCESS_TOKEN_EXPIRY;
     public $JWT_REFRESH_TOKEN_EXPIRY;
 
+    public $AUTH_COOKIE_DOMAIN;
+    public $AUTH_COOKIE_SECURE;
+
     public $ALLOWED_ORIGINS;
 
     /**
@@ -210,6 +213,18 @@ class Env
                 'required' => false,
                 'default' => 15552000,
                 'description' => 'JWT refresh token expiry in seconds (default: 15552000 = 180 days)'
+            ],
+            'AUTH_COOKIE_DOMAIN' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => '',
+                'description' => 'Cookie domain for auth cookies (leave empty for current domain)'
+            ],
+            'AUTH_COOKIE_SECURE' => [
+                'type' => 'bool',
+                'required' => false,
+                'default' => null,
+                'description' => 'Force secure flag on auth cookies (leave empty to auto-detect HTTPS)'
             ],
             'ALLOWED_ORIGINS' => [
                 'type' => 'string',
