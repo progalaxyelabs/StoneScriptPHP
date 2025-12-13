@@ -142,3 +142,42 @@ function cache_flush(): bool
 {
     return cache()->flush();
 }
+
+// ===========================
+// Authentication Functions
+// ===========================
+
+/**
+ * Get the authenticated user
+ *
+ * Usage:
+ *   $user = auth();          // Get authenticated user object
+ *   $userId = auth()->user_id;
+ *   $email = auth()->email;
+ *
+ * @return Framework\Auth\AuthenticatedUser|null
+ */
+function auth(): ?Framework\Auth\AuthenticatedUser
+{
+    return Framework\Auth\AuthContext::getUser();
+}
+
+/**
+ * Get the authenticated user ID
+ *
+ * @return int|null
+ */
+function auth_id(): ?int
+{
+    return Framework\Auth\AuthContext::id();
+}
+
+/**
+ * Check if user is authenticated
+ *
+ * @return bool
+ */
+function auth_check(): bool
+{
+    return Framework\Auth\AuthContext::check();
+}

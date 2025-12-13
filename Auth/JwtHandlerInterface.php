@@ -1,6 +1,6 @@
 <?php
 
-namespace Framework\Lib\Auth;
+namespace Framework\Auth;
 
 /**
  * JWT Handler Interface
