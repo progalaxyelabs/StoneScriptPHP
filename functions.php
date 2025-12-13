@@ -1,6 +1,6 @@
 <?php
 
-use App\Env;
+use Framework\Env;
 use Framework\ApiResponse;
 use Framework\Logger;
 use Framework\CacheManager;

@@ -12,6 +12,10 @@ class Env
     public $DEBUG_MODE;
     public $TIMEZONE;
 
+    public $APP_NAME;
+    public $APP_ENV;
+    public $APP_PORT;
+
     public $DATABASE_HOST;
     public $DATABASE_PORT;
     public $DATABASE_USER;
@@ -38,6 +42,8 @@ class Env
     public $JWT_ACCESS_TOKEN_EXPIRY;
     public $JWT_REFRESH_TOKEN_EXPIRY;
 
+    public $ALLOWED_ORIGINS;
+
     /**
      * Define the environment variable schema
      * Each entry contains: type, required, default, and description
@@ -60,6 +66,24 @@ class Env
                 'required' => false,
                 'default' => 'UTC',
                 'description' => 'Default timezone for the application'
+            ],
+            'APP_NAME' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => 'My API',
+                'description' => 'Application name'
+            ],
+            'APP_ENV' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => 'development',
+                'description' => 'Application environment (development, production, etc.)'
+            ],
+            'APP_PORT' => [
+                'type' => 'int',
+                'required' => false,
+                'default' => 9100,
+                'description' => 'Application server port'
             ],
             'DATABASE_HOST' => [
                 'type' => 'string',
@@ -186,6 +210,12 @@ class Env
                 'required' => false,
                 'default' => 15552000,
                 'description' => 'JWT refresh token expiry in seconds (default: 15552000 = 180 days)'
+            ],
+            'ALLOWED_ORIGINS' => [
+                'type' => 'string',
+                'required' => false,
+                'default' => 'http://localhost:3000,http://localhost:4200',
+                'description' => 'Comma-separated list of allowed CORS origins'
             ],
         ];
     }
