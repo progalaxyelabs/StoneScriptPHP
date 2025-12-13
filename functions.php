@@ -313,9 +313,9 @@ function tenant_check(): bool
  * Get tenant database connection
  *
  * Returns a PDO connection to the current tenant's database.
- * Automatically uses connection pooling for performance.
+ * Automatically uses global connection pooling for performance.
  *
- * @param array|null $config Database configuration (optional, reads from config/database.php if not provided)
+ * @param array|null $config Database configuration (optional, uses global pool config if not provided)
  * @return PDO|null PDO connection or null if no tenant context
  */
 function tenant_db(?array $config = null): ?PDO
@@ -326,24 +326,14 @@ function tenant_db(?array $config = null): ?PDO
         return null;
     }
 
-    // Load config if not provided
-    if ($config === null) {
-        $configFile = __DIR__ . '/../../config/database.php';
-        if (file_exists($configFile)) {
-            $config = require $configFile;
-        } else {
-            // Fallback to environment variables
-            $config = [
-                'driver' => $_ENV['DB_DRIVER'] ?? 'pgsql',
-                'host' => $_ENV['DB_HOST'] ?? 'localhost',
-                'port' => (int) ($_ENV['DB_PORT'] ?? 5432),
-                'user' => $_ENV['DB_USER'] ?? 'postgres',
-                'password' => $_ENV['DB_PASSWORD'] ?? '',
-            ];
-        }
+    $pool = Framework\Database\DbConnectionPool::getInstance();
+
+    // Set config if provided
+    if ($config !== null) {
+        $pool->setConfig($config);
     }
 
-    return Framework\Tenancy\TenantConnectionManager::getConnection($tenant->dbName, $config);
+    return $pool->getConnection($tenant->dbName, $config);
 }
 
 /**
@@ -356,4 +346,57 @@ function tenant_db(?array $config = null): ?PDO
 function tenant_get(string $key, mixed $default = null): mixed
 {
     return Framework\Tenancy\TenantContext::get($key, $default);
+}
+
+// ===========================
+// Database Connection Pool Functions
+// ===========================
+
+/**
+ * Get database connection from global pool
+ *
+ * Returns a pooled PDO connection to any database.
+ * Use this for non-tenant databases (auth, shared, etc.)
+ *
+ * @param string $database Database name
+ * @param array|null $config Database configuration (optional, uses global pool config if not provided)
+ * @return PDO
+ */
+function db_connection(string $database, ?array $config = null): PDO
+{
+    $pool = Framework\Database\DbConnectionPool::getInstance();
+
+    // Set config if provided
+    if ($config !== null) {
+        $pool->setConfig($config);
+    }
+
+    return $pool->getConnection($database, $config);
+}
+
+/**
+ * Set global database configuration
+ *
+ * Configure the connection pool once at application startup
+ *
+ * @param array $config Database configuration
+ * @return void
+ */
+function db_set_config(array $config): void
+{
+    Framework\Database\DbConnectionPool::getInstance()->setConfig($config);
+}
+
+/**
+ * Get database connection pool statistics
+ *
+ * @return array
+ */
+function db_pool_stats(): array
+{
+    $pool = Framework\Database\DbConnectionPool::getInstance();
+    return [
+        'active_connections' => $pool->getConnectionCount(),
+        'databases' => $pool->getActiveConnections()
+    ];
 }
