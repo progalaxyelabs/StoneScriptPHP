@@ -112,6 +112,11 @@ if ($command === 'generate' && !empty($args)) {
     // Check if it's an auth command (auth:google, auth:linkedin, etc.)
     if (str_starts_with($subCommand, 'auth:')) {
         $commands['generate']['file'] = 'cli/generate-auth.php';
+    } elseif (str_starts_with($subCommand, 'cache:')) {
+        // Cache commands (cache:redis, etc.)
+        if ($subCommand === 'cache:redis') {
+            $commands['generate']['file'] = 'cli/generate-cache-redis.php';
+        }
     } elseif ($subCommand === 'route' || str_starts_with($subCommand, 'route')) {
         $commands['generate']['file'] = 'cli/generate-route.php';
     } elseif ($subCommand === 'model') {
@@ -141,6 +146,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone generate route login          # Generate login route\n";
     echo "  php stone generate model get_user.pgsql # Generate model from PostgreSQL function\n";
     echo "  php stone generate auth:google          # Generate Google OAuth\n";
+    echo "  php stone generate cache:redis          # Generate Redis caching\n";
     echo "  php stone generate jwt                  # Generate JWT RSA keys\n";
     echo "  php stone migrate verify                # Check database drift\n";
     echo "  php stone tenant:create \"Acme\" acme    # Create new tenant\n";

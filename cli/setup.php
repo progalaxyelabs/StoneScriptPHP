@@ -171,6 +171,17 @@ class Setup {
         echo "\n🌐 CORS Configuration:\n";
         $this->env->ALLOWED_ORIGINS = $this->ask('Allowed origins (comma-separated)', 'http://localhost:3000,http://localhost:4200');
 
+        // Redis (optional)
+        echo "\n💾 Caching Configuration:\n";
+        $enableRedis = $this->ask('Enable Redis caching? (yes/no)', 'no');
+        if (strtolower($enableRedis) === 'yes' || strtolower($enableRedis) === 'y') {
+            $this->env->REDIS_ENABLED = 'true';
+            $this->env->REDIS_HOST = $this->ask('Redis host', 'localhost');
+            $this->env->REDIS_PORT = $this->ask('Redis port', '6379');
+        } else {
+            $this->env->REDIS_ENABLED = 'false';
+        }
+
         // Write .env file
         $envContent = $this->buildEnvContent();
         file_put_contents('.env', $envContent);
@@ -299,6 +310,14 @@ class Setup {
         return $answer ?: $default;
     }
 
+    private function buildRedisConfig(): string
+    {
+        if (isset($this->env->REDIS_ENABLED) && $this->env->REDIS_ENABLED === 'true') {
+            return "REDIS_HOST={$this->env->REDIS_HOST}\nREDIS_PORT={$this->env->REDIS_PORT}";
+        }
+        return "# REDIS_HOST=localhost\n# REDIS_PORT=6379";
+    }
+
     private function buildEnvContent(): string
     {
         $passphraseLine = !empty($this->env->JWT_PRIVATE_KEY_PASSPHRASE)
@@ -330,6 +349,10 @@ JWT_REFRESH_TOKEN_EXPIRY={$this->env->JWT_REFRESH_TOKEN_EXPIRY}
 
 # CORS
 ALLOWED_ORIGINS={$this->env->ALLOWED_ORIGINS}
+
+# Redis Caching (optional)
+REDIS_ENABLED={$this->env->REDIS_ENABLED}
+{$this->buildRedisConfig()}
 
 # Security (optional)
 # CSRF_SECRET_KEY=
