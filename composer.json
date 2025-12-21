@@ -31,15 +31,15 @@
         "ext-pdo": "*",
         "ext-pdo_pgsql": "*",
         "firebase/php-jwt": "^6.11",
-        "google/apiclient": "^2.0",
-        "phpoffice/phpspreadsheet": "^5.0",
         "vlucas/phpdotenv": "^5.6"
     },
     "require-dev": {
         "phpunit/phpunit": "^11.0"
     },
     "suggest": {
-        "ext-redis": "Required for Redis caching support"
+        "ext-redis": "Required for Redis caching support",
+        "google/apiclient": "Required for Google OAuth authentication (install via: php stone generate auth:google)",
+        "phpoffice/phpspreadsheet": "Required for Excel/CSV export features"
     },
     "autoload": {
         "psr-4": {
