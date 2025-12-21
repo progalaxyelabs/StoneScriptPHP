@@ -284,11 +284,29 @@ class Logger
     }
 
     /**
+     * Get the appropriate log directory based on environment
+     */
+    private function get_log_directory(): string
+    {
+        // In production Docker (APP_ENV=production), use /var/log/stonescriptphp
+        // In development Docker or non-Docker, use ROOT_PATH/logs
+        $isDocker = file_exists('/.dockerenv') || getenv('DOCKER_CONTAINER') === 'true';
+        $isProduction = defined('APP_ENV') ? APP_ENV === 'production' : (getenv('APP_ENV') === 'production');
+
+        if ($isDocker && $isProduction) {
+            return '/var/log/stonescriptphp';
+        }
+        return ROOT_PATH . 'logs';
+    }
+
+    /**
      * Write plain text to log file
      */
     private function write_to_file(string $level, $message, string $timestamp, array $context): void
     {
-        $log_dir = ROOT_PATH . 'logs';
+        $log_dir = $this->get_log_directory();
+
+        // Create logs directory if it doesn't exist
         if (!is_dir($log_dir)) {
             mkdir($log_dir, 0755, true);
         }
@@ -309,7 +327,9 @@ class Logger
      */
     private function write_json_to_file(array $log_entry): void
     {
-        $log_dir = ROOT_PATH . 'logs';
+        $log_dir = $this->get_log_directory();
+
+        // Create logs directory if it doesn't exist
         if (!is_dir($log_dir)) {
             mkdir($log_dir, 0755, true);
         }
