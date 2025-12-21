@@ -3,15 +3,17 @@
 /**
  * Auth Generator
  *
- * Scaffolds OAuth authentication for various providers (Google, LinkedIn, Apple, etc.)
+ * Scaffolds authentication for various providers using composable migrations.
  *
  * Usage:
  *   php generate auth:<provider>
  *
  * Examples:
+ *   php generate auth:email-password
  *   php generate auth:google
  *   php generate auth:linkedin
  *   php generate auth:apple
+ *   php generate auth:api-key
  */
 
 if (!defined('ROOT_PATH')) {
@@ -42,21 +44,22 @@ if (!is_dir($vendorPath)) {
 if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))) {
     echo "Auth Generator\n";
     echo "==============\n\n";
-    echo "Scaffolds OAuth authentication for various providers.\n\n";
+    echo "Scaffolds authentication using composable migrations.\n\n";
     echo "Usage: php generate auth:<provider>\n\n";
     echo "Available providers:\n";
-    echo "  google     Google OAuth (Sign in with Google)\n";
-    echo "  linkedin   LinkedIn OAuth (Sign in with LinkedIn)\n";
-    echo "  apple      Apple OAuth (Sign in with Apple)\n\n";
+    echo "  email-password  Traditional email/password authentication\n";
+    echo "  google          Google OAuth (Sign in with Google)\n";
+    echo "  linkedin        LinkedIn OAuth (Sign in with LinkedIn)\n";
+    echo "  apple           Apple OAuth (Sign in with Apple)\n";
+    echo "  api-key         API key authentication\n\n";
     echo "Examples:\n";
-    echo "  php generate auth:google\n";
-    echo "  php generate auth:linkedin\n\n";
+    echo "  php generate auth:email-password\n";
+    echo "  php generate auth:google\n\n";
     echo "This will create:\n";
-    echo "  - Route handler in src/App/Routes/\n";
-    echo "  - Config file in src/App/Config/\n";
-    echo "  - PostgreSQL table in src/postgresql/tables/\n";
-    echo "  - PostgreSQL function in src/postgresql/functions/\n";
-    echo "  - Updates src/App/Config/routes.php\n";
+    echo "  - Database migration in migrations/\n";
+    echo "  - Route handlers in src/App/Routes/Auth/\n";
+    echo "  - Updates src/config/routes.php\n";
+    echo "  - Updates composer.json (if needed)\n";
     exit(0);
 }
 
@@ -71,12 +74,12 @@ $authCommand = $argv[1];
 if (!str_starts_with($authCommand, 'auth:')) {
     echo "Error: Invalid command format\n";
     echo "Usage: php generate auth:<provider>\n";
-    echo "Example: php generate auth:google\n";
+    echo "Example: php generate auth:email-password\n";
     exit(1);
 }
 
 $provider = substr($authCommand, 5); // Remove 'auth:' prefix
-$supportedProviders = ['google', 'linkedin', 'apple'];
+$supportedProviders = ['email-password', 'google', 'linkedin', 'apple', 'api-key'];
 
 if (!in_array($provider, $supportedProviders)) {
     echo "Error: Unsupported provider '$provider'\n";
@@ -84,22 +87,12 @@ if (!in_array($provider, $supportedProviders)) {
     exit(1);
 }
 
-$templatePath = $vendorPath . 'Templates' . DIRECTORY_SEPARATOR . 'Auth' . DIRECTORY_SEPARATOR . $provider . DIRECTORY_SEPARATOR;
-
-if (!is_dir($templatePath)) {
-    echo "Error: Template not found for provider '$provider'\n";
-    echo "Expected: $templatePath\n";
-    exit(1);
-}
-
-echo "Generating $provider OAuth authentication...\n\n";
+echo "Generating $provider authentication...\n\n";
 
 // Create necessary directories
 $dirs = [
-    'routes' => SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Routes',
-    'config' => CONFIG_PATH,
-    'postgresql_tables' => SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'tables',
-    'postgresql_functions' => SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'functions',
+    'routes' => SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Routes' . DIRECTORY_SEPARATOR . 'Auth',
+    'migrations' => ROOT_PATH . 'migrations',
 ];
 
 foreach ($dirs as $name => $dir) {
@@ -112,94 +105,144 @@ foreach ($dirs as $name => $dir) {
     }
 }
 
-// Provider-specific naming
-$providerCap = ucfirst($provider);
-$routeClassName = $providerCap . 'OauthRoute';
-$configFileName = $provider . '-oauth.php';
-
-// Copy template files
-$files = [
-    'route' => [
-        'template' => $templatePath . $providerCap . 'OauthRoute.php.template',
-        'destination' => $dirs['routes'] . DIRECTORY_SEPARATOR . $routeClassName . '.php',
-        'name' => 'Route handler'
-    ],
-    'config' => [
-        'template' => $templatePath . $provider . '-oauth.php.template',
-        'destination' => $dirs['config'] . $configFileName,
-        'name' => 'Config file'
-    ],
-    'table' => [
-        'template' => $templatePath . 'oauth_users.pgsql.template',
-        'destination' => $dirs['postgresql_tables'] . DIRECTORY_SEPARATOR . 'oauth_users.pgsql',
-        'name' => 'PostgreSQL table'
-    ],
-    'function' => [
-        'template' => $templatePath . 'upsert_oauth_user.pgsql.template',
-        'destination' => $dirs['postgresql_functions'] . DIRECTORY_SEPARATOR . 'upsert_oauth_user.pgsql',
-        'name' => 'PostgreSQL function'
-    ],
+// Map provider to migration template
+$migrationMapping = [
+    'email-password' => 'auth-email-password',
+    'google' => 'auth-oauth',
+    'linkedin' => 'auth-oauth',
+    'apple' => 'auth-oauth',
+    'api-key' => 'auth-api-key',
 ];
 
-foreach ($files as $type => $file) {
-    if (!file_exists($file['template'])) {
-        echo "Warning: Template not found: {$file['template']}\n";
-        continue;
-    }
+$migrationDir = $migrationMapping[$provider];
+$templatesPath = $vendorPath . 'src' . DIRECTORY_SEPARATOR . 'Templates' . DIRECTORY_SEPARATOR . 'Migrations' . DIRECTORY_SEPARATOR;
 
-    if (file_exists($file['destination'])) {
-        echo "Skipped (already exists): {$file['name']} - {$file['destination']}\n";
-        continue;
-    }
+// Check if base users table migration exists
+$baseUsersMigrationPath = $dirs['migrations'] . DIRECTORY_SEPARATOR . '001_create_users_table.sql';
+if (!file_exists($baseUsersMigrationPath)) {
+    echo "→ Creating base users table migration...\n";
+    $baseTemplate = $templatesPath . 'base' . DIRECTORY_SEPARATOR . '001_create_users_table.sql';
 
-    $content = file_get_contents($file['template']);
-    file_put_contents($file['destination'], $content);
-    echo "✓ Created {$file['name']}: {$file['destination']}\n";
+    if (file_exists($baseTemplate)) {
+        copy($baseTemplate, $baseUsersMigrationPath);
+        echo "  ✓ Created: 001_create_users_table.sql\n";
+    } else {
+        echo "  ❌ Error: Base template not found at $baseTemplate\n";
+        exit(1);
+    }
 }
 
-// Update routes.php
-$routesConfigPath = CONFIG_PATH . 'routes.php';
+// Copy provider-specific migration
+$providerMigrations = glob($templatesPath . $migrationDir . DIRECTORY_SEPARATOR . '*.sql');
 
-if (!file_exists($routesConfigPath)) {
-    echo "\nWarning: routes.php not found at $routesConfigPath\n";
-    echo "You'll need to manually add the route:\n";
-    echo "  'POST' => [\n";
-    echo "    '/{$provider}-oauth' => \\App\\Routes\\{$routeClassName}::class,\n";
-    echo "  ]\n";
-} else {
-    $routesContent = file_get_contents($routesConfigPath);
-    $routePath = "/{$provider}-oauth";
-    $routeEntry = "        '$routePath' => \\App\\Routes\\$routeClassName::class,\n";
+if (empty($providerMigrations)) {
+    echo "❌ Error: No migration templates found for $provider\n";
+    exit(1);
+}
 
-    // Check if route already exists
-    if (strpos($routesContent, $routePath) !== false) {
-        echo "\nSkipped: Route already exists in routes.php\n";
-    } else {
-        // Add to POST method array
-        $pattern = "/('POST'\s*=>\s*\[)([^\]]*?)(\s*\])/s";
+foreach ($providerMigrations as $migrationTemplate) {
+    $migrationName = basename($migrationTemplate);
+    $migrationDestination = $dirs['migrations'] . DIRECTORY_SEPARATOR . $migrationName;
 
-        if (preg_match($pattern, $routesContent)) {
-            $routesContent = preg_replace($pattern, "$1$2$routeEntry$3", $routesContent);
-            file_put_contents($routesConfigPath, $routesContent);
-            echo "✓ Updated routes.php with POST $routePath\n";
-        } else {
-            echo "\nWarning: Could not automatically update routes.php\n";
-            echo "Please add manually:\n";
-            echo "  'POST' => [\n";
-            echo "    '$routePath' => \\App\\Routes\\$routeClassName::class,\n";
-            echo "  ]\n";
+    if (file_exists($migrationDestination)) {
+        echo "→ Skipped (already exists): $migrationName\n";
+        continue;
+    }
+
+    copy($migrationTemplate, $migrationDestination);
+    echo "→ Created migration: $migrationName\n";
+}
+
+// Copy route templates based on provider
+$routeTemplatesPath = $vendorPath . 'src' . DIRECTORY_SEPARATOR . 'Templates' . DIRECTORY_SEPARATOR . 'Auth' . DIRECTORY_SEPARATOR;
+
+if ($provider === 'email-password') {
+    $routeTemplates = [
+        'LoginRoute.php.template',
+        'RegisterRoute.php.template',
+        'VerifyEmailRoute.php.template',
+        'ResendVerificationRoute.php.template',
+        'PasswordResetRoute.php.template',
+        'PasswordResetConfirmRoute.php.template',
+    ];
+
+    echo "\n→ Creating route handlers...\n";
+    foreach ($routeTemplates as $template) {
+        $templatePath = $routeTemplatesPath . 'email-password' . DIRECTORY_SEPARATOR . $template;
+        $routeName = str_replace('.template', '', $template);
+        $routeDestination = $dirs['routes'] . DIRECTORY_SEPARATOR . $routeName;
+
+        if (file_exists($routeDestination)) {
+            echo "  Skipped (already exists): $routeName\n";
+            continue;
+        }
+
+        if (file_exists($templatePath)) {
+            copy($templatePath, $routeDestination);
+            echo "  ✓ Created: $routeName\n";
+        }
+    }
+} elseif (in_array($provider, ['google', 'linkedin', 'apple'])) {
+    $providerCap = ucfirst($provider);
+    $routeName = $providerCap . 'OauthRoute.php';
+    $templatePath = $routeTemplatesPath . $provider . DIRECTORY_SEPARATOR . $routeName . '.template';
+    $routeDestination = $dirs['routes'] . DIRECTORY_SEPARATOR . $routeName;
+
+    echo "\n→ Creating route handler...\n";
+    if (file_exists($routeDestination)) {
+        echo "  Skipped (already exists): $routeName\n";
+    } elseif (file_exists($templatePath)) {
+        copy($templatePath, $routeDestination);
+        echo "  ✓ Created: $routeName\n";
+    }
+
+    // Update composer.json to add OAuth client dependency
+    if ($provider === 'google') {
+        echo "\n→ Updating composer.json...\n";
+        $composerPath = ROOT_PATH . 'composer.json';
+        if (file_exists($composerPath)) {
+            $composerContent = file_get_contents($composerPath);
+            $composer = json_decode($composerContent, true);
+
+            if (!isset($composer['require']['google/apiclient'])) {
+                echo "  Running: composer require google/apiclient\n";
+                exec('cd ' . escapeshellarg(ROOT_PATH) . ' && composer require google/apiclient', $output, $returnCode);
+
+                if ($returnCode === 0) {
+                    echo "  ✓ Added google/apiclient to composer.json\n";
+                } else {
+                    echo "  ⚠️  Failed to add google/apiclient automatically. Please run:\n";
+                    echo "     composer require google/apiclient\n";
+                }
+            } else {
+                echo "  ✓ google/apiclient already in composer.json\n";
+            }
         }
     }
 }
 
-echo "\n✅ $providerCap OAuth setup complete!\n\n";
+echo "\n✅ $provider authentication scaffolding complete!\n\n";
 echo "Next steps:\n";
-echo "1. Run database migrations:\n";
-echo "   php stone migrate\n\n";
-echo "2. Generate typed PHP model from PostgreSQL function:\n";
-echo "   php stone generate model upsert_oauth_user.pgsql\n\n";
-echo "3. Update the route handler to use the generated model:\n";
-echo "   Edit: {$dirs['routes']}" . DIRECTORY_SEPARATOR . "$routeClassName.php\n\n";
-echo "4. Configure $providerCap OAuth credentials:\n";
-echo "   Edit: {$dirs['config']}$configFileName\n\n";
-echo "5. Add GOOGLE_CLIENT_ID to your .env file\n\n";
+echo "1. Run migrations to create database tables:\n";
+echo "   php stone migrate up\n\n";
+echo "2. Check migration status:\n";
+echo "   php stone migrate status\n\n";
+
+if ($provider === 'email-password') {
+    echo "3. Configure routes in src/config/routes.php:\n";
+    echo "   'POST' => [\n";
+    echo "       '/auth/register' => \\App\\Routes\\Auth\\RegisterRoute::class,\n";
+    echo "       '/auth/login' => \\App\\Routes\\Auth\\LoginRoute::class,\n";
+    echo "       '/auth/verify-email' => \\App\\Routes\\Auth\\VerifyEmailRoute::class,\n";
+    echo "       '/auth/password-reset' => \\App\\Routes\\Auth\\PasswordResetRoute::class,\n";
+    echo "   ]\n\n";
+} elseif (in_array($provider, ['google', 'linkedin', 'apple'])) {
+    $providerCap = ucfirst($provider);
+    echo "3. Configure route in src/config/routes.php:\n";
+    echo "   'POST' => [\n";
+    echo "       '/auth/$provider' => \\App\\Routes\\Auth\\{$providerCap}OauthRoute::class,\n";
+    echo "   ]\n\n";
+    echo "4. Add {$providerCap} OAuth credentials to .env:\n";
+    echo "   " . strtoupper($provider) . "_CLIENT_ID=your_client_id\n";
+    echo "   " . strtoupper($provider) . "_CLIENT_SECRET=your_client_secret\n\n";
+}

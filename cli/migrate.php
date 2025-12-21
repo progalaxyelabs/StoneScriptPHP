@@ -62,24 +62,21 @@ try {
             break;
 
         case 'status':
-            echo "Migration status command - Coming soon!\n";
-            echo "This will show:\n";
-            echo "  - Applied migrations\n";
-            echo "  - Pending migrations\n";
-            echo "  - Current database state\n";
+            $migrations = new Migrations();
+            $migrations->status();
             exit(0);
             break;
 
         case 'up':
-            echo "Migration up command - Coming soon!\n";
-            echo "This will apply all pending migrations.\n";
-            exit(0);
+            $migrations = new Migrations();
+            $executed = $migrations->up();
+            exit(empty($executed) ? 1 : 0);
             break;
 
         case 'down':
-            echo "Migration down command - Coming soon!\n";
-            echo "This will rollback the last migration.\n";
-            exit(0);
+            $migrations = new Migrations();
+            $rolledBack = $migrations->down();
+            exit(empty($rolledBack) ? 1 : 0);
             break;
 
         case 'generate':

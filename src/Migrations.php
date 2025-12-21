@@ -482,4 +482,233 @@ class Migrations
 
         return $hasIssues ? 1 : 0;
     }
+
+    /**
+     * Ensure migrations tracking table exists
+     */
+    private function ensureMigrationsTable(): void
+    {
+        $query = "
+            CREATE TABLE IF NOT EXISTS migrations (
+                id SERIAL PRIMARY KEY,
+                migration VARCHAR(255) NOT NULL UNIQUE,
+                batch INTEGER NOT NULL,
+                executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_migrations_batch ON migrations(batch);
+        ";
+
+        $result = pg_query($this->connection, $query);
+        if (!$result) {
+            throw new Exception("Failed to create migrations table: " . pg_last_error($this->connection));
+        }
+    }
+
+    /**
+     * Get list of applied migrations
+     */
+    public function getAppliedMigrations(): array
+    {
+        $this->ensureMigrationsTable();
+
+        $query = "SELECT migration, batch, executed_at FROM migrations ORDER BY id ASC";
+        $result = pg_query($this->connection, $query);
+
+        $migrations = [];
+        if ($result) {
+            while ($row = pg_fetch_assoc($result)) {
+                $migrations[] = $row;
+            }
+        }
+
+        return $migrations;
+    }
+
+    /**
+     * Get list of pending migrations from filesystem
+     */
+    public function getPendingMigrations(): array
+    {
+        $appliedMigrations = array_column($this->getAppliedMigrations(), 'migration');
+        $allMigrations = $this->scanMigrationFiles();
+
+        return array_diff($allMigrations, $appliedMigrations);
+    }
+
+    /**
+     * Scan filesystem for migration SQL files
+     */
+    private function scanMigrationFiles(): array
+    {
+        $migrationsPath = ROOT_PATH . 'migrations' . DIRECTORY_SEPARATOR;
+
+        if (!is_dir($migrationsPath)) {
+            return [];
+        }
+
+        $files = glob($migrationsPath . '*.sql');
+        $migrations = [];
+
+        foreach ($files as $file) {
+            $migrations[] = basename($file);
+        }
+
+        sort($migrations); // Ensure migrations run in order
+        return $migrations;
+    }
+
+    /**
+     * Run pending migrations
+     */
+    public function up(): array
+    {
+        $this->ensureMigrationsTable();
+        $pendingMigrations = $this->getPendingMigrations();
+
+        if (empty($pendingMigrations)) {
+            echo "No pending migrations to run.\n";
+            return [];
+        }
+
+        // Get next batch number
+        $batchQuery = "SELECT COALESCE(MAX(batch), 0) + 1 AS next_batch FROM migrations";
+        $result = pg_query($this->connection, $batchQuery);
+        $nextBatch = pg_fetch_assoc($result)['next_batch'];
+
+        $migrationsPath = ROOT_PATH . 'migrations' . DIRECTORY_SEPARATOR;
+        $executed = [];
+
+        echo "Running " . count($pendingMigrations) . " pending migration(s)...\n\n";
+
+        foreach ($pendingMigrations as $migration) {
+            $filePath = $migrationsPath . $migration;
+
+            if (!file_exists($filePath)) {
+                echo "❌ Migration file not found: $migration\n";
+                continue;
+            }
+
+            echo "→ Running: $migration\n";
+
+            // Read and execute migration SQL
+            $sql = file_get_contents($filePath);
+
+            // Begin transaction
+            pg_query($this->connection, "BEGIN");
+
+            try {
+                $result = pg_query($this->connection, $sql);
+
+                if (!$result) {
+                    throw new Exception(pg_last_error($this->connection));
+                }
+
+                // Record migration
+                $insertQuery = "INSERT INTO migrations (migration, batch) VALUES ($1, $2)";
+                $insertResult = pg_query_params($this->connection, $insertQuery, [$migration, $nextBatch]);
+
+                if (!$insertResult) {
+                    throw new Exception("Failed to record migration: " . pg_last_error($this->connection));
+                }
+
+                pg_query($this->connection, "COMMIT");
+                echo "  ✅ Executed successfully\n";
+                $executed[] = $migration;
+
+            } catch (Exception $e) {
+                pg_query($this->connection, "ROLLBACK");
+                echo "  ❌ Failed: " . $e->getMessage() . "\n";
+                echo "\nMigration rolled back. Fix the error and try again.\n";
+                break; // Stop on first error
+            }
+        }
+
+        echo "\n";
+        echo "Completed: " . count($executed) . "/" . count($pendingMigrations) . " migrations executed.\n";
+
+        return $executed;
+    }
+
+    /**
+     * Show migration status
+     */
+    public function status(): void
+    {
+        $this->ensureMigrationsTable();
+
+        $applied = $this->getAppliedMigrations();
+        $pending = $this->getPendingMigrations();
+
+        echo "Migration Status\n";
+        echo "================\n\n";
+
+        if (!empty($applied)) {
+            echo "Applied Migrations (" . count($applied) . "):\n";
+            foreach ($applied as $migration) {
+                echo "  ✅ {$migration['migration']} (batch {$migration['batch']}, {$migration['executed_at']})\n";
+            }
+            echo "\n";
+        }
+
+        if (!empty($pending)) {
+            echo "Pending Migrations (" . count($pending) . "):\n";
+            foreach ($pending as $migration) {
+                echo "  ⏳ $migration\n";
+            }
+            echo "\n";
+        }
+
+        if (empty($applied) && empty($pending)) {
+            echo "No migrations found.\n";
+        }
+    }
+
+    /**
+     * Rollback last batch of migrations
+     */
+    public function down(): array
+    {
+        $this->ensureMigrationsTable();
+
+        // Get last batch
+        $batchQuery = "SELECT MAX(batch) AS last_batch FROM migrations";
+        $result = pg_query($this->connection, $batchQuery);
+        $lastBatch = pg_fetch_assoc($result)['last_batch'];
+
+        if (!$lastBatch) {
+            echo "No migrations to rollback.\n";
+            return [];
+        }
+
+        // Get migrations in last batch
+        $migrationsQuery = "SELECT migration FROM migrations WHERE batch = $1 ORDER BY id DESC";
+        $result = pg_query_params($this->connection, $migrationsQuery, [$lastBatch]);
+
+        $rolledBack = [];
+
+        echo "Rolling back batch $lastBatch...\n\n";
+
+        while ($row = pg_fetch_assoc($result)) {
+            $migration = $row['migration'];
+            echo "→ Rolling back: $migration\n";
+
+            // Note: Down migrations not yet implemented (would need separate down files)
+            // For now, just remove from migrations table
+            $deleteQuery = "DELETE FROM migrations WHERE migration = $1";
+            $deleteResult = pg_query_params($this->connection, $deleteQuery, [$migration]);
+
+            if ($deleteResult) {
+                echo "  ✅ Removed from migrations log\n";
+                echo "  ⚠️  Note: Automatic rollback SQL not implemented yet. Manually revert changes if needed.\n";
+                $rolledBack[] = $migration;
+            } else {
+                echo "  ❌ Failed to remove from migrations log\n";
+            }
+        }
+
+        echo "\n";
+        echo "Rolled back " . count($rolledBack) . " migration(s).\n";
+
+        return $rolledBack;
+    }
 }
