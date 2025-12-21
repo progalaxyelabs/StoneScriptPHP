@@ -193,48 +193,64 @@ class Setup {
     {
         $envFile = '.env';
 
+        // If .env already exists, skip creation
         if (file_exists($envFile)) {
-            // Load existing .env values
-            $envData = parse_ini_file($envFile);
-            foreach ($envData as $key => $value) {
+            // Always show skip message, even in quiet mode (important info)
+            echo "ℹ️  .env file already exists, skipping creation\n";
+            echo "  To regenerate, delete .env and run setup again\n\n";
+
+            // Still load existing values into $this->env for key generation
+            $existingEnvData = parse_ini_file($envFile) ?: [];
+            foreach ($existingEnvData as $key => $value) {
                 $this->env->$key = $value;
             }
-        } else {
-            // Use defaults from schema
-            $this->env->APP_NAME = 'My API';
-            $this->env->APP_ENV = 'development';
-            $this->env->APP_PORT = 9100;
-
-            $this->env->DATABASE_HOST = 'localhost';
-            $this->env->DATABASE_PORT = 5432;
-            $this->env->DATABASE_DBNAME = 'stonescriptphp';
-            $this->env->DATABASE_USER = 'postgres';
-            $this->env->DATABASE_PASSWORD = '';
-
-            $this->env->JWT_ISSUER = 'example.com';
-            $this->env->JWT_ACCESS_TOKEN_EXPIRY = 900;
-            $this->env->JWT_REFRESH_TOKEN_EXPIRY = 15552000;
-            $this->env->JWT_PRIVATE_KEY_PATH = './keys/jwt-private.pem';
-            $this->env->JWT_PUBLIC_KEY_PATH = './keys/jwt-public.pem';
-            $this->env->JWT_PRIVATE_KEY_PASSPHRASE = '';
-
-            $this->env->ALLOWED_ORIGINS = 'http://localhost:3000,http://localhost:4200';
-
-            // Write default .env file
-            $envContent = $this->buildEnvContent();
-            file_put_contents('.env', $envContent);
+            return;
         }
+
+        // App\Env must exist - fail hard if it doesn't
+        if (!class_exists('App\\Env')) {
+            echo "❌ Error: App\\Env class not found!\n";
+            echo "Make sure you have src/App/Env.php in your project.\n";
+            exit(1);
+        }
+
+        // Use reflection to discover all public properties and their defaults
+        $reflectionClass = new \ReflectionClass('App\\Env');
+        $properties = $reflectionClass->getProperties(\ReflectionProperty::IS_PUBLIC);
+
+        // Populate $this->env with values from:
+        // Priority: 1) System environment variables, 2) Property defaults
+        foreach ($properties as $property) {
+            $propName = $property->getName();
+
+            // Get default value from property
+            $defaultValue = $property->getDefaultValue();
+
+            // Check system environment variable first (Docker-friendly)
+            $systemEnvValue = getenv($propName);
+
+            if ($systemEnvValue !== false) {
+                // System environment variable exists - use it
+                $this->env->$propName = $systemEnvValue;
+            } else {
+                // Use property default
+                $this->env->$propName = $defaultValue;
+            }
+        }
+
+        // Write .env file
+        $envContent = $this->buildEnvContent();
+        file_put_contents('.env', $envContent);
     }
 
     private function generateKeys(string $passphrase = '', string $privateKeyPath = 'keys/jwt-private.pem', string $publicKeyPath = 'keys/jwt-public.pem'): void
     {
         // Skip key generation if keys already exist
         if (file_exists($privateKeyPath) && file_exists($publicKeyPath)) {
-            if (!$this->quiet) {
-                echo "ℹ️  JWT keypair already exists, skipping generation\n";
-                echo "  Private key: $privateKeyPath\n";
-                echo "  Public key: $publicKeyPath\n\n";
-            }
+            // Always show skip message, even in quiet mode (important info)
+            echo "ℹ️  JWT keypair already exists, skipping generation\n";
+            echo "  Private key: $privateKeyPath\n";
+            echo "  Public key: $publicKeyPath\n\n";
             return;
         }
 
@@ -310,66 +326,26 @@ class Setup {
         return $answer ?: $default;
     }
 
-    private function buildRedisConfig(): string
-    {
-        if (isset($this->env->REDIS_ENABLED) && $this->env->REDIS_ENABLED === 'true') {
-            return "REDIS_HOST={$this->env->REDIS_HOST}\nREDIS_PORT={$this->env->REDIS_PORT}";
-        }
-        return "# REDIS_HOST=localhost\n# REDIS_PORT=6379";
-    }
-
     private function buildEnvContent(): string
     {
-        $passphraseLine = !empty($this->env->JWT_PRIVATE_KEY_PASSPHRASE)
-            ? "JWT_PRIVATE_KEY_PASSPHRASE={$this->env->JWT_PRIVATE_KEY_PASSPHRASE}"
-            : "# JWT_PRIVATE_KEY_PASSPHRASE=";
+        $lines = [];
 
-        return <<<ENV
-# Application
-APP_NAME="{$this->env->APP_NAME}"
-APP_ENV={$this->env->APP_ENV}
-APP_PORT={$this->env->APP_PORT}
+        // Simply iterate through all properties in $this->env
+        foreach ($this->env as $key => $value) {
+            // Skip null values
+            if ($value === null) {
+                continue;
+            }
 
-# Database
-DATABASE_HOST={$this->env->DATABASE_HOST}
-DATABASE_PORT={$this->env->DATABASE_PORT}
-DATABASE_DBNAME={$this->env->DATABASE_DBNAME}
-DATABASE_USER={$this->env->DATABASE_USER}
-DATABASE_PASSWORD={$this->env->DATABASE_PASSWORD}
-DATABASE_TIMEOUT=30
-DATABASE_APPNAME=StoneScriptPHP
+            // Quote string values that contain spaces
+            if (is_string($value) && strpos($value, ' ') !== false) {
+                $value = "\"$value\"";
+            }
 
-# JWT
-JWT_PRIVATE_KEY_PATH={$this->env->JWT_PRIVATE_KEY_PATH}
-JWT_PUBLIC_KEY_PATH={$this->env->JWT_PUBLIC_KEY_PATH}
-$passphraseLine
-JWT_ISSUER={$this->env->JWT_ISSUER}
-JWT_ACCESS_TOKEN_EXPIRY={$this->env->JWT_ACCESS_TOKEN_EXPIRY}
-JWT_REFRESH_TOKEN_EXPIRY={$this->env->JWT_REFRESH_TOKEN_EXPIRY}
+            $lines[] = "$key=$value";
+        }
 
-# CORS
-ALLOWED_ORIGINS={$this->env->ALLOWED_ORIGINS}
-
-# Redis Caching (optional)
-REDIS_ENABLED={$this->env->REDIS_ENABLED}
-{$this->buildRedisConfig()}
-
-# Security (optional)
-# CSRF_SECRET_KEY=
-# HCAPTCHA_SITE_KEY=
-# HCAPTCHA_SECRET_KEY=
-
-# Email (optional - configure if using email verification)
-# EMAIL_VERIFICATION_ENABLED=true
-# ZEPTOMAIL_BOUNCE_ADDRESS=
-# ZEPTOMAIL_SENDER_EMAIL=
-# ZEPTOMAIL_SENDER_NAME=
-# ZEPTOMAIL_SEND_MAIL_TOKEN=
-
-# Debug
-DEBUG_MODE=false
-TIMEZONE=UTC
-ENV;
+        return implode("\n", $lines);
     }
 }
 
