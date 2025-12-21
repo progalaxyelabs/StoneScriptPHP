@@ -69,7 +69,7 @@ $commands = [
     ],
     'generate' => [
         'description' => 'Generate code (route, model, migration, etc.)',
-        'file' => 'cli/generate-route.php', // Dispatcher
+        'file' => 'cli/generate-dispatcher.php',
     ],
     'migrate' => [
         'description' => 'Run database migrations',
