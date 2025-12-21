@@ -91,6 +91,14 @@ $commands = [
         'description' => 'Manage multi-tenant databases (create, list, migrate, etc.)',
         'file' => 'cli/tenant.php',
     ],
+    'seed' => [
+        'description' => 'Seed database with initial data (seed rbac, etc.)',
+        'file' => 'cli/seed.php',
+    ],
+    'create:admin' => [
+        'description' => 'Create system administrator user',
+        'file' => 'cli/create-admin.php',
+    ],
 ];
 
 // Parse command
