@@ -27,12 +27,13 @@
     ],
     "require": {
         "php": "^8.2",
+        "ext-json": "*",
         "ext-pdo": "*",
         "ext-pdo_pgsql": "*",
-        "ext-json": "*",
         "firebase/php-jwt": "^6.11",
+        "google/apiclient": "^2.0",
         "phpoffice/phpspreadsheet": "^5.0",
-        "google/apiclient": "^2.0"
+        "vlucas/phpdotenv": "^5.6"
     },
     "require-dev": {
         "phpunit/phpunit": "^11.0"

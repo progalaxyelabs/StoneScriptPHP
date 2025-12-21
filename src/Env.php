@@ -247,7 +247,12 @@ class Env
         $missing_keys = [];
         $type_errors = [];
 
-        $env = parse_ini_file($env_file_path);
+        // Load .env file using phpdotenv
+        $dotenv = \Dotenv\Dotenv::createImmutable(ROOT_PATH);
+        $dotenv->load();
+
+        // Get all loaded environment variables
+        $env = $_ENV;
 
         foreach ($schema as $key => $config) {
             if (array_key_exists($key, $env)) {
