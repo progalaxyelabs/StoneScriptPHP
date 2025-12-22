@@ -336,9 +336,15 @@ foreach ($routes as $httpMethod => $methodRoutes) {
             // New route we just added - use ::class notation
             $routesCode .= "        '$routePath' => {$routeData['class']}::class,\n";
         } else {
-            // Existing route - preserve as-is (already includes ::class or quoted string)
+            // Existing route - ensure it uses ::class notation
             $routeClass = is_array($routeData) ? $routeData['class'] : $routeData;
-            $routesCode .= "        '$routePath' => $routeClass,\n";
+
+            // If it doesn't already end with ::class, add it
+            if (!str_ends_with($routeClass, '::class')) {
+                $routesCode .= "        '$routePath' => {$routeClass}::class,\n";
+            } else {
+                $routesCode .= "        '$routePath' => $routeClass,\n";
+            }
         }
     }
     $routesCode .= "    ],\n";
