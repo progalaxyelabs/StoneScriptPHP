@@ -288,12 +288,11 @@ class Logger
      */
     private function get_log_directory(): string
     {
-        // In production Docker (APP_ENV=production), use /var/log/stonescriptphp
-        // In development Docker or non-Docker, use ROOT_PATH/logs
+        // In Docker environments, always use /var/log/stonescriptphp
+        // In non-Docker, use ROOT_PATH/logs
         $isDocker = file_exists('/.dockerenv') || getenv('DOCKER_CONTAINER') === 'true';
-        $isProduction = defined('APP_ENV') ? APP_ENV === 'production' : (getenv('APP_ENV') === 'production');
 
-        if ($isDocker && $isProduction) {
+        if ($isDocker) {
             return '/var/log/stonescriptphp';
         }
         return ROOT_PATH . 'logs';
