@@ -258,7 +258,7 @@ class Router
             $handler = new $handlerClass();
 
             // Check if handler implements IRouteHandler interface
-            if (!($handler instanceof \Framework\IRouteHandler)) {
+            if (!($handler instanceof \StoneScriptPHP\IRouteHandler)) {
                 log_debug("Handler does not implement IRouteHandler: $handlerClass");
                 return $this->error404('Handler not implemented correctly');
             }
