@@ -135,10 +135,22 @@ class HCaptchaVerifier
         ];
 
         $context = stream_context_create($options);
-        $result = @file_get_contents(self::VERIFY_URL, false, $context);
 
-        if ($result === false) {
-            throw new \RuntimeException('Failed to connect to hCaptcha API');
+        // Use custom error handler to get detailed error message
+        set_error_handler(function ($errno, $errstr) {
+            throw new \ErrorException($errstr, 0, $errno);
+        }, E_WARNING);
+
+        try {
+            $result = file_get_contents(self::VERIFY_URL, false, $context);
+            restore_error_handler();
+
+            if ($result === false) {
+                throw new \RuntimeException('Failed to connect to hCaptcha API');
+            }
+        } catch (\ErrorException $e) {
+            restore_error_handler();
+            throw new \RuntimeException('Failed to connect to hCaptcha API: ' . $e->getMessage(), 0, $e);
         }
 
         $response = json_decode($result, true);

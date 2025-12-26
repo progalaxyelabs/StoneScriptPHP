@@ -56,14 +56,29 @@ class Database
             ]);
 
             $env_start = microtime(true);
-            $this->connection = @pg_connect($connection_string);
-            $env_init = microtime(true) - $env_start;
 
-            if ($this->connection === false) {
-                $this->connection_error = 'Failed to connect to PostgreSQL database';
-                log_debug('Database connection failed: ' . $this->connection_error);
-            } else {
-                log_debug(' Database connection established in ' . ($env_init * 1000) . 'ms');
+            // Suppress warnings temporarily to get clean error message
+            set_error_handler(function ($errno, $errstr) {
+                // Convert warning to exception for proper error handling
+                throw new \ErrorException($errstr, 0, $errno);
+            }, E_WARNING);
+
+            try {
+                $this->connection = pg_connect($connection_string);
+                restore_error_handler();
+
+                if ($this->connection === false) {
+                    $this->connection_error = 'Failed to connect to PostgreSQL database';
+                    log_debug('Database connection failed: ' . $this->connection_error);
+                } else {
+                    $env_init = microtime(true) - $env_start;
+                    log_debug(' Database connection established in ' . ($env_init * 1000) . 'ms');
+                }
+            } catch (\ErrorException $e) {
+                restore_error_handler();
+                $this->connection = false;
+                $this->connection_error = 'Database connection failed: ' . $e->getMessage();
+                log_debug($this->connection_error);
             }
         } catch (\Throwable $e) {
             $this->connection = false;

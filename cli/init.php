@@ -220,7 +220,12 @@ PHP;
     private function recursiveCopy(string $src, string $dst, array $exclude = []): void
     {
         $dir = opendir($src);
-        @mkdir($dst, 0755, true);
+
+        if (!is_dir($dst)) {
+            if (!mkdir($dst, 0755, true) && !is_dir($dst)) {
+                throw new \RuntimeException("Failed to create directory: $dst");
+            }
+        }
 
         while (($file = readdir($dir)) !== false) {
             if ($file == '.' || $file == '..' || in_array($file, $exclude)) {
