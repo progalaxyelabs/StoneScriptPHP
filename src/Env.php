@@ -24,6 +24,12 @@ class Env
     public int $DATABASE_TIMEOUT = 30;
     public string $DATABASE_APPNAME = 'StoneScriptPHP';
 
+    // Database connection mode: 'direct' for pg_connect, 'gateway' for HTTP gateway
+    public string $DB_CONNECTION_MODE = 'direct';
+    public ?string $DB_GATEWAY_URL = null;
+    public ?string $DB_GATEWAY_PLATFORM = null;
+    public ?string $DB_GATEWAY_TENANT_ID = null;
+
     public ?string $ZEPTOMAIL_BOUNCE_ADDRESS = null;
     public ?string $ZEPTOMAIL_SENDER_EMAIL = null;
     public ?string $ZEPTOMAIL_SENDER_NAME = null;
@@ -76,17 +82,25 @@ class Env
             // If no env var set, property keeps its default value
         }
 
-        // Validate required properties (DATABASE_USER, DATABASE_PASSWORD, DATABASE_DBNAME)
-        $requiredNullable = ['DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_DBNAME'];
-        $missing = [];
-        foreach ($requiredNullable as $key) {
-            if ($this->$key === null) {
-                $missing[] = $key;
+        // Validate required properties based on connection mode
+        if ($this->DB_CONNECTION_MODE === 'gateway') {
+            // Gateway mode requires gateway URL
+            if (empty($this->DB_GATEWAY_URL)) {
+                throw new Exception('DB_GATEWAY_URL is required when DB_CONNECTION_MODE is "gateway". Run: php stone setup');
             }
-        }
+        } else {
+            // Direct mode requires database credentials
+            $requiredNullable = ['DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_DBNAME'];
+            $missing = [];
+            foreach ($requiredNullable as $key) {
+                if ($this->$key === null) {
+                    $missing[] = $key;
+                }
+            }
 
-        if (!empty($missing)) {
-            throw new Exception('Required environment variables missing: ' . implode(', ', $missing) . '. Run: php stone setup');
+            if (!empty($missing)) {
+                throw new Exception('Required environment variables missing: ' . implode(', ', $missing) . '. Run: php stone setup');
+            }
         }
     }
 

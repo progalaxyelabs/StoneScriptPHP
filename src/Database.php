@@ -9,16 +9,17 @@ use ReflectionClass;
 use ReflectionIntersectionType;
 use ReflectionProperty;
 use ReflectionUnionType;
+use StoneScriptPHP\Database\ConnectionInterface;
+use StoneScriptPHP\Database\DirectConnection;
+use StoneScriptPHP\Database\GatewayConnection;
 use Throwable;
 
 class Database
 {
     private static ?Database $_instance = null;
-    // private $log;
 
-    private \PgSql\Connection|false|null $connection = null;
-    private bool $connection_attempted = false;
-    private ?string $connection_error = null;
+    private ?ConnectionInterface $connection = null;
+    private ?string $connection_mode = null;
 
     private function __construct()
     {
@@ -26,81 +27,83 @@ class Database
         // Connection will be established lazily when first needed
     }
 
-    private function connect(): void
+    /**
+     * Initialize the connection based on environment configuration.
+     */
+    private function initConnection(): void
     {
-        if ($this->connection_attempted) {
-            return; // Already attempted connection (success or failure)
+        if ($this->connection !== null) {
+            return;
         }
 
-        $this->connection_attempted = true;
+        $env = Env::get_instance();
+        $this->connection_mode = $env->DB_CONNECTION_MODE;
 
-        try {
-            $env = Env::get_instance();
+        $start_time = microtime(true);
 
-            $host = $env->DATABASE_HOST;
-            $port = $env->DATABASE_PORT;
-            $user = $env->DATABASE_USER;
-            $password = $env->DATABASE_PASSWORD;
-            $dbname = $env->DATABASE_DBNAME;
-            // $timeout = $env->DATABASE_TIMEOUT;
-            $appname = $env->DATABASE_APPNAME;
-
-            $connection_string = join(' ', [
-                "host=$host",
-                "port=$port",
-                "user=$user",
-                "password=$password",
-                "dbname=$dbname",
-                // "connect_timeout=$timeout",
-                "options='--application_name=$appname'"
-            ]);
-
-            $env_start = microtime(true);
-
-            // Suppress warnings temporarily to get clean error message
-            set_error_handler(function ($errno, $errstr) {
-                // Convert warning to exception for proper error handling
-                throw new \ErrorException($errstr, 0, $errno);
-            }, E_WARNING);
-
-            try {
-                $this->connection = pg_connect($connection_string);
-                restore_error_handler();
-
-                if ($this->connection === false) {
-                    $this->connection_error = 'Failed to connect to PostgreSQL database';
-                    log_debug('Database connection failed: ' . $this->connection_error);
-                } else {
-                    $env_init = microtime(true) - $env_start;
-                    log_debug(' Database connection established in ' . ($env_init * 1000) . 'ms');
-                }
-            } catch (\ErrorException $e) {
-                restore_error_handler();
-                $this->connection = false;
-                $this->connection_error = 'Database connection failed: ' . $e->getMessage();
-                log_debug($this->connection_error);
-            }
-        } catch (\Throwable $e) {
-            $this->connection = false;
-            $this->connection_error = $e->getMessage();
-            log_debug('Database connection exception: ' . $this->connection_error);
+        if ($this->connection_mode === 'gateway') {
+            $this->connection = GatewayConnection::fromEnv();
+            log_debug('Database: Using gateway connection mode');
+        } else {
+            $this->connection = new DirectConnection();
+            log_debug('Database: Using direct connection mode');
         }
+
+        $elapsed_time = microtime(true) - $start_time;
+        log_debug(__METHOD__ . " Connection initialized in " . ($elapsed_time * 1000) . "ms");
     }
 
-    private function get_connection(): \PgSql\Connection|false
+    /**
+     * Get the connection instance.
+     *
+     * @return ConnectionInterface
+     */
+    private function getConnectionInstance(): ConnectionInterface
     {
-        if (!$this->connection_attempted) {
-            $this->connect();
-        }
+        $this->initConnection();
+        return $this->connection;
+    }
 
-        if ($this->connection === false || $this->connection === null) {
-            throw new \Exception(
-                'Database connection not available. ' .
-                ($this->connection_error ? 'Error: ' . $this->connection_error : 'Connection not established.')
-            );
+    /**
+     * Get the direct connection for raw SQL operations.
+     * Throws exception if not in direct mode.
+     *
+     * @return DirectConnection
+     * @throws Exception If not in direct connection mode
+     */
+    private function getDirectConnection(): DirectConnection
+    {
+        $this->initConnection();
+
+        if (!($this->connection instanceof DirectConnection)) {
+            throw new Exception('This operation requires direct database connection mode. Set DB_CONNECTION_MODE=direct');
         }
 
         return $this->connection;
+    }
+
+    /**
+     * Check if currently in gateway mode.
+     *
+     * @return bool
+     */
+    public static function isGatewayMode(): bool
+    {
+        $instance = self::get_instance();
+        $instance->initConnection();
+        return $instance->connection_mode === 'gateway';
+    }
+
+    /**
+     * Get the current connection mode.
+     *
+     * @return string 'direct' or 'gateway'
+     */
+    public static function getConnectionMode(): string
+    {
+        $instance = self::get_instance();
+        $instance->initConnection();
+        return $instance->connection_mode;
     }
 
     private static function get_instance(): Database
@@ -130,47 +133,22 @@ class Database
 
     private static function _fn(string $function_name, array $params): array
     {
-        $connection = self::get_instance()->get_connection();
-        $dynamic_params_str = '';
-        $dynamic_params_array = [];
-
-        for ($i = 1; $i <= count($params); $i++) {
-            $dynamic_params_array[] = ('$' . $i);
-        }
-        $dynamic_params_str = join(',', $dynamic_params_array);
-
-        $query = "select * from $function_name" . "($dynamic_params_str)";
-
-        // log_debug(__METHOD__ . ' query is ' . var_export($query, true));
-        // log_debug(__METHOD__ . ' params are ' . var_export($dynamic_params_str, true));
-
-        try {
-            $result = pg_query_params($connection, $query, $params);
-        } catch (Exception $exception) {
-            log_debug(__METHOD__ . ' Exception: ' . $exception->getMessage());
-        } catch (Error $error) {
-            log_debug(__METHOD__ . ' Error: ' . $error->getMessage());
-        } catch (Throwable $throwable) {
-            log_debug(__METHOD__ . ' Throws: ' . $throwable->getMessage());
-        }
-
-        $data = [];
-
-        if ($result === false) {
-            $error_message = pg_last_error($connection);
-            log_debug(__METHOD__ . ' query failed: ' . $error_message);
-            return $data;
-        }
-
-        $rows = pg_fetch_all($result);
-        // log_debug(__METHOD__ . ' data is ' . var_export($data, true);
-
-        return $rows;
+        $connection = self::get_instance()->getConnectionInstance();
+        return $connection->callFunction($function_name, $params);
     }
 
+    /**
+     * Execute a raw SQL query and return results as array.
+     * Only available in direct connection mode.
+     *
+     * @param string $sql The SQL query to execute
+     * @return array The result rows
+     * @throws Exception If in gateway mode
+     */
     public static function internal_query($sql): array
     {
-        $connection = self::get_instance()->get_connection();
+        $directConnection = self::get_instance()->getDirectConnection();
+        $connection = $directConnection->getConnection();
 
         $result = pg_query($connection, $sql);
         if ($result === false) {
@@ -221,9 +199,18 @@ class Database
         return $data;
     }
 
+    /**
+     * Execute a raw SQL query and return status string.
+     * Only available in direct connection mode.
+     *
+     * @param string $sql The SQL query to execute
+     * @return string The result status or data
+     * @throws Exception If in gateway mode
+     */
     public static function query($sql): string
     {
-        $connection = self::get_instance()->get_connection();
+        $directConnection = self::get_instance()->getDirectConnection();
+        $connection = $directConnection->getConnection();
 
         $result = pg_query($connection, $sql);
         if ($result === false) {
@@ -259,15 +246,6 @@ class Database
                 $message =  pg_last_error($connection);
                 return 'Unknown result status ' . $message;
         }
-
-        // $message =  pg_last_error($connection);
-        // return $message;
-        // return var_export($result, true);
-        // if ($status === PGSQL_TUPLES_OK) {
-        //     $rows = pg_fetch_all($result);
-        //     return var_export($rows, true);
-        // }
-        // return $status;
     }
 
 
@@ -278,6 +256,24 @@ class Database
         }
 
         return self::array_to_class_object($function_name, $rows[0], $class, true);
+    }
+
+    /**
+     * Convert PostgreSQL function result to a single model object.
+     * Use this for functions that return exactly one row (get by ID, create, update).
+     *
+     * @param string $function_name Name of the database function (for error context)
+     * @param array $rows Result rows from Database::fn()
+     * @param string $class Fully qualified class name for mapping
+     * @return object|null Single instance of $class or null if no rows
+     */
+    public static function result_as_single(string $function_name, array $rows, string $class): ?object
+    {
+        if (empty($rows)) {
+            return null;
+        }
+
+        return self::array_to_class_object($function_name, $rows[0], $class);
     }
 
     public static function result_as_table(string $function_name, array $rows, string $class): array
@@ -351,10 +347,30 @@ class Database
         return $instance;
     }
 
+    /**
+     * Copy data from an array to a table using COPY FROM.
+     * Only available in direct connection mode.
+     *
+     * @param array $rows The rows to copy
+     * @param string $tablename The target table name
+     * @param string $delimiter The field delimiter
+     * @return bool True on success, false on failure
+     * @throws Exception If in gateway mode
+     */
     public static function copy_from(array $rows, string $tablename, string $delimiter): bool
     {
-        $connection = self::get_instance()->get_connection();
-        $result = pg_copy_from($connection, $tablename, $rows, $delimiter);
-        return $result;
+        $directConnection = self::get_instance()->getDirectConnection();
+        return $directConnection->copyFrom($rows, $tablename, $delimiter);
+    }
+
+    /**
+     * Get the underlying connection object.
+     * Useful for advanced operations or testing.
+     *
+     * @return ConnectionInterface
+     */
+    public static function getConnection(): ConnectionInterface
+    {
+        return self::get_instance()->getConnectionInstance();
     }
 }

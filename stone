@@ -99,6 +99,18 @@ $commands = [
         'description' => 'Create system administrator user',
         'file' => 'cli/create-admin.php',
     ],
+    'schema:export' => [
+        'description' => 'Export postgresql folder as tar.gz for db-gateway',
+        'file' => 'cli/schema-export.php',
+    ],
+    'gateway:register' => [
+        'description' => 'Register platform with db-gateway on container startup',
+        'file' => 'cli/gateway-register.php',
+    ],
+    'gateway:migrate' => [
+        'description' => 'Hot migrate schema to running db-gateway',
+        'file' => 'cli/gateway-migrate.php',
+    ],
 ];
 
 // Parse command
@@ -151,6 +163,8 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone migrate verify                # Check database drift\n";
     echo "  php stone tenant:create \"Acme\" acme    # Create new tenant\n";
     echo "  php stone tenant:list                   # List all tenants\n";
+    echo "  php stone gateway:register              # Register with db-gateway\n";
+    echo "  php stone gateway:migrate               # Hot migrate to db-gateway\n";
     echo "\n";
     echo "Run 'php stone <command> --help' for detailed help on any command.\n";
     echo "\n";

@@ -42,10 +42,11 @@ if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))
     echo "  php generate route get /items/{itemId}/view\n";
     echo "  php generate route put /users/{userId}/update\n\n";
     echo "This will create:\n";
-    echo "  - Route handler class in src/App/Routes/\n";
-    echo "  - Interface contract in src/App/Contracts/\n";
-    echo "  - Request DTO in src/App/DTO/\n";
-    echo "  - Response DTO in src/App/DTO/\n";
+    echo "  - Route handler class in src/App/Routes/ (extends BaseRoute)\n";
+    echo "  - Service class in src/App/Services/ (business logic)\n";
+    echo "  - Interface contract in src/App/Contracts/ (I{Name}Service)\n";
+    echo "  - Request DTO in src/App/DTO/ (implements IRequest)\n";
+    echo "  - Response DTO in src/App/DTO/ (implements IResponse)\n";
     echo "  - Updates src/config/routes.php\n";
     exit(0);
 }
@@ -147,7 +148,8 @@ $path = normalizePathParams($path);
 // Generate class names
 $baseClassName = pathToClassName($path, $method);
 $routeClassName = $baseClassName . 'Route';
-$interfaceName = 'I' . $baseClassName . 'Route';
+$serviceClassName = $baseClassName . 'Service';
+$interfaceName = 'I' . $baseClassName . 'Service';
 $requestClassName = $baseClassName . 'Request';
 $responseClassName = $baseClassName . 'Response';
 
@@ -157,6 +159,7 @@ $pathParams = extractPathParams($path);
 // Create directories
 $dirs = [
     'routes' => SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Routes',
+    'services' => SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Services',
     'contracts' => SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Contracts',
     'dto' => SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'DTO',
 ];
@@ -173,6 +176,7 @@ foreach ($dirs as $name => $dir) {
 
 // File paths
 $routeFilePath = $dirs['routes'] . DIRECTORY_SEPARATOR . $routeClassName . '.php';
+$serviceFilePath = $dirs['services'] . DIRECTORY_SEPARATOR . $serviceClassName . '.php';
 $interfaceFilePath = $dirs['contracts'] . DIRECTORY_SEPARATOR . $interfaceName . '.php';
 $requestFilePath = $dirs['dto'] . DIRECTORY_SEPARATOR . $requestClassName . '.php';
 $responseFilePath = $dirs['dto'] . DIRECTORY_SEPARATOR . $responseClassName . '.php';
@@ -193,7 +197,7 @@ if (!empty($pathParams)) {
     }
 }
 
-// Generate interface content
+// Generate interface content (now for Service)
 $interfaceContent = "<?php
 
 namespace App\\Contracts;
@@ -207,13 +211,34 @@ interface $interfaceName
 }
 ";
 
+// Generate Service class content
+$serviceContent = "<?php
+
+namespace App\\Services;
+
+use App\\Contracts\\$interfaceName;
+use App\\DTO\\$requestClassName;
+use App\\DTO\\$responseClassName;
+
+class $serviceClassName implements $interfaceName
+{
+    public function execute($requestClassName \$request): $responseClassName
+    {
+        // TODO: Implement business logic
+        throw new \\Exception('Not Implemented');
+    }
+}
+";
+
 // Generate Request DTO content
 $requestContent = <<<EOD
 <?php
 
 namespace App\DTO;
 
-class $requestClassName
+use StoneScriptPHP\IRequest;
+
+class $requestClassName implements IRequest
 {
     public function __construct(
         // TODO: Add request properties
@@ -229,7 +254,9 @@ $responseContent = <<<EOD
 
 namespace App\DTO;
 
-class $responseClassName
+use StoneScriptPHP\IResponse;
+
+class $responseClassName implements IResponse
 {
     public function __construct(
         // TODO: Add response properties
@@ -245,14 +272,23 @@ $routeContent = <<<'EOD'
 
 namespace App\Routes;
 
-use StoneScriptPHP\IRouteHandler;
-use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\BaseRoute;
+use StoneScriptPHP\IRequest;
+use StoneScriptPHP\IResponse;
 use App\Contracts\{INTERFACE_NAME};
+use App\Services\{SERVICE_CLASS};
 use App\DTO\{REQUEST_CLASS};
 use App\DTO\{RESPONSE_CLASS};
 
-class {ROUTE_CLASS} implements IRouteHandler, {INTERFACE_NAME}
+class {ROUTE_CLASS} extends BaseRoute
 {{PATH_PARAMS}
+    private {INTERFACE_NAME} $service;
+
+    public function __construct()
+    {
+        $this->service = new {SERVICE_CLASS}();
+    }
+
     public function validation_rules(): array
     {
         return [
@@ -261,22 +297,17 @@ class {ROUTE_CLASS} implements IRouteHandler, {INTERFACE_NAME}
         ];
     }
 
-    public function process(): ApiResponse
+    protected function buildRequest(): IRequest
     {
         // TODO: Build request DTO from input
-        $request = new {REQUEST_CLASS}(
+        return new {REQUEST_CLASS}(
             // Map properties here
         );
-
-        $response = $this->execute($request);
-
-        return res_ok($response);
     }
 
-    public function execute({REQUEST_CLASS} $request): {RESPONSE_CLASS}
+    protected function execute(IRequest $request): IResponse
     {
-        // TODO: Implement route logic
-        throw new \Exception('Not Implemented');
+        return $this->service->execute($request);
     }
 }
 
@@ -284,6 +315,7 @@ EOD;
 
 // Replace placeholders
 $routeContent = str_replace('{ROUTE_CLASS}', $routeClassName, $routeContent);
+$routeContent = str_replace('{SERVICE_CLASS}', $serviceClassName, $routeContent);
 $routeContent = str_replace('{INTERFACE_NAME}', $interfaceName, $routeContent);
 $routeContent = str_replace('{REQUEST_CLASS}', $requestClassName, $routeContent);
 $routeContent = str_replace('{RESPONSE_CLASS}', $responseClassName, $routeContent);
@@ -291,14 +323,16 @@ $routeContent = str_replace('{PATH_PARAMS}', $pathParamProperties, $routeContent
 
 // Write files
 file_put_contents($interfaceFilePath, $interfaceContent);
+file_put_contents($serviceFilePath, $serviceContent);
 file_put_contents($requestFilePath, $requestContent);
 file_put_contents($responseFilePath, $responseContent);
 file_put_contents($routeFilePath, $routeContent);
 
-echo "✓ Created interface: src/App/Contracts/$interfaceName.php\n";
-echo "✓ Created request DTO: src/App/DTO/$requestClassName.php\n";
-echo "✓ Created response DTO: src/App/DTO/$responseClassName.php\n";
-echo "✓ Created route handler: src/App/Routes/$routeClassName.php\n";
+echo "Created interface: src/App/Contracts/$interfaceName.php\n";
+echo "Created service: src/App/Services/$serviceClassName.php\n";
+echo "Created request DTO: src/App/DTO/$requestClassName.php\n";
+echo "Created response DTO: src/App/DTO/$responseClassName.php\n";
+echo "Created route handler: src/App/Routes/$routeClassName.php\n";
 
 // Update routes.php
 $routesConfigPath = SRC_PATH . 'config' . DIRECTORY_SEPARATOR . 'routes.php';
@@ -360,6 +394,7 @@ echo "✓ Updated src/config/routes.php with $method $path\n";
 // Validate PHP syntax of generated files
 $filesToValidate = [
     $routeFilePath,
+    $serviceFilePath,
     $interfaceFilePath,
     $requestFilePath,
     $responseFilePath,
@@ -393,5 +428,6 @@ if (!empty($syntaxErrors)) {
 echo "\nNext steps:\n";
 echo "1. Edit src/App/DTO/$requestClassName.php to define request properties\n";
 echo "2. Edit src/App/DTO/$responseClassName.php to define response properties\n";
-echo "3. Implement logic in src/App/Routes/$routeClassName.php\n";
-echo "4. Run: php generate client (to generate TypeScript client)\n";
+echo "3. Edit src/App/Routes/$routeClassName.php to build request from input\n";
+echo "4. Implement business logic in src/App/Services/$serviceClassName.php\n";
+echo "5. Run: php generate client (to generate TypeScript client)\n";

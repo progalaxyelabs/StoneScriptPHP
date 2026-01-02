@@ -20,12 +20,24 @@ use StoneScriptPHP\Auth\JwtHandlerInterface;
  * Access authenticated user in route handlers:
  *   $user = auth()->user();
  *   $userId = auth()->id();
+ *
+ * URL Prefix Auto-Detection:
+ *   When using nginx URL rewriting (e.g., /api/user/access → /user/access internally),
+ *   you can specify excluded paths using EITHER the external URL or internal route path.
+ *   The middleware auto-detects the URL prefix and normalizes paths accordingly.
+ *
+ *   Example with nginx rewrite "/api/* → /*":
+ *     excludedPaths: ['/api/user/access']  // Works - external URL
+ *     excludedPaths: ['/user/access']      // Works - internal route
+ *     Both will correctly exclude the /user/access route.
  */
 class JwtAuthMiddleware implements MiddlewareInterface
 {
     private JwtHandlerInterface $jwtHandler;
     private array $excludedPaths;
+    private array $normalizedExcludedPaths;
     private string $headerName;
+    private ?string $detectedUrlPrefix = null;
 
     /**
      * @param JwtHandlerInterface $jwtHandler JWT handler instance (JwtHandler or RsaJwtHandler)
@@ -40,16 +52,75 @@ class JwtAuthMiddleware implements MiddlewareInterface
         $this->jwtHandler = $jwtHandler;
         $this->excludedPaths = $excludedPaths;
         $this->headerName = $headerName;
+
+        // Detect URL prefix and normalize excluded paths
+        $this->detectedUrlPrefix = $this->detectUrlPrefix();
+        $this->normalizedExcludedPaths = $this->normalizeExcludedPaths($excludedPaths);
+    }
+
+    /**
+     * Detect URL prefix by comparing REQUEST_URI with SCRIPT_NAME.
+     * Handles nginx rewrites like /api/* → /index.php
+     */
+    private function detectUrlPrefix(): ?string
+    {
+        $requestUri = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
+        $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
+
+        // If script is /index.php and request is /api/something, prefix is /api
+        if ($scriptName === '/index.php' || str_ends_with($scriptName, '/index.php')) {
+            // Check common prefixes
+            foreach (['/api', '/v1', '/v2'] as $prefix) {
+                if (str_starts_with($requestUri, $prefix . '/') || $requestUri === $prefix) {
+                    log_debug("JWT middleware: Detected URL prefix '$prefix'");
+                    return $prefix;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Normalize excluded paths to match both with and without URL prefix.
+     */
+    private function normalizeExcludedPaths(array $paths): array
+    {
+        $normalized = [];
+
+        foreach ($paths as $path) {
+            // Always add the original path
+            $normalized[] = $path;
+
+            if ($this->detectedUrlPrefix !== null) {
+                // If path starts with prefix, also add without prefix
+                if (str_starts_with($path, $this->detectedUrlPrefix)) {
+                    $withoutPrefix = substr($path, strlen($this->detectedUrlPrefix));
+                    if ($withoutPrefix !== '' && !in_array($withoutPrefix, $normalized)) {
+                        $normalized[] = $withoutPrefix;
+                    }
+                }
+                // If path doesn't start with prefix, also add with prefix
+                else if (!str_starts_with($path, $this->detectedUrlPrefix)) {
+                    $withPrefix = $this->detectedUrlPrefix . $path;
+                    if (!in_array($withPrefix, $normalized)) {
+                        $normalized[] = $withPrefix;
+                    }
+                }
+            }
+        }
+
+        return $normalized;
     }
 
     public function handle(array $request, callable $next): ?ApiResponse
     {
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
 
-        // Check if path is excluded from authentication
-        foreach ($this->excludedPaths as $excludedPath) {
+        // Check if path is excluded from authentication (uses normalized paths)
+        foreach ($this->normalizedExcludedPaths as $excludedPath) {
             if ($this->matchesPath($path, $excludedPath)) {
-                log_debug("JWT middleware: Path $path is excluded from authentication");
+                log_debug("JWT middleware: Path $path is excluded from authentication (matched: $excludedPath)");
                 return $next($request);
             }
         }
