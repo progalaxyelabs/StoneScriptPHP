@@ -68,15 +68,39 @@ class Logger
     private bool $enable_console = true;
     private bool $enable_file = true;
     private bool $enable_json = false;
+    private ?string $custom_log_directory = null;
 
     /**
      * Configure logger outputs
+     *
+     * @param bool $console Enable console output (auto-disabled in web contexts)
+     * @param bool $file Enable file output
+     * @param bool $json Enable JSON format for file output
+     * @param string|null $log_directory Custom log directory path (optional)
      */
-    public function configure(bool $console = true, bool $file = true, bool $json = false): void
+    public function configure(bool $console = true, bool $file = true, bool $json = false, ?string $log_directory = null): void
     {
+        // Auto-detect web context and disable console logging to prevent header interference
+        if ($console === true && PHP_SAPI !== 'cli') {
+            // Running in web context (php-fpm, apache, nginx, cgi)
+            // Console output would interfere with HTTP headers
+            $console = false;
+
+            // Log a one-time notice about this auto-correction to file if file logging is enabled
+            if ($file && $this->enable_file === true && $this->custom_log_directory === null) {
+                // Only log this notice once during initial configuration
+                error_log(
+                    "StoneScriptPHP Logger: Auto-disabled console logging in web context (PHP_SAPI=" .
+                    PHP_SAPI . "). This prevents output from interfering with HTTP headers. " .
+                    "To suppress this notice, explicitly set console: false in configure()."
+                );
+            }
+        }
+
         $this->enable_console = $console;
         $this->enable_file = $file;
         $this->enable_json = $json;
+        $this->custom_log_directory = $log_directory;
     }
 
     /**
@@ -285,10 +309,27 @@ class Logger
 
     /**
      * Get the appropriate log directory based on environment
+     *
+     * Priority order:
+     * 1. Custom directory from configure() method
+     * 2. STONESCRIPTPHP_LOG_DIR environment variable
+     * 3. /var/log/stonescriptphp in Docker
+     * 4. ROOT_PATH/logs (default)
      */
     private function get_log_directory(): string
     {
-        // In Docker environments, always use /var/log/stonescriptphp
+        // Use custom directory if provided via configure()
+        if ($this->custom_log_directory !== null) {
+            return $this->custom_log_directory;
+        }
+
+        // Check for environment variable override
+        $envLogDir = getenv('STONESCRIPTPHP_LOG_DIR');
+        if ($envLogDir !== false && !empty($envLogDir)) {
+            return $envLogDir;
+        }
+
+        // In Docker environments, use /var/log/stonescriptphp
         // In non-Docker, use ROOT_PATH/logs
         $isDocker = file_exists('/.dockerenv') || getenv('DOCKER_CONTAINER') === 'true';
 
@@ -300,43 +341,82 @@ class Logger
 
     /**
      * Write plain text to log file
+     *
+     * Gracefully handles permission errors to prevent interfering with HTTP responses
      */
     private function write_to_file(string $level, $message, string $timestamp, array $context): void
     {
-        $log_dir = $this->get_log_directory();
+        try {
+            $log_dir = $this->get_log_directory();
 
-        // Create logs directory if it doesn't exist
-        if (!is_dir($log_dir)) {
-            mkdir($log_dir, 0755, true);
+            // Create logs directory if it doesn't exist
+            if (!is_dir($log_dir)) {
+                @mkdir($log_dir, 0755, true);
+            }
+
+            $file_path = $log_dir . DIRECTORY_SEPARATOR . date('Y-m-d') . '.log';
+
+            $line = sprintf('[%s] %-9s %s', $timestamp, $level, $message);
+
+            if (!empty($context)) {
+                $line .= ' ' . json_encode($context, JSON_UNESCAPED_SLASHES);
+            }
+
+            // Try to write, suppress warnings to prevent header interference
+            if (@file_put_contents($file_path, $line . PHP_EOL, FILE_APPEND | LOCK_EX) === false) {
+                // Permission denied or other error - fail silently
+                // Only log to error_log if we're in CLI context to avoid header issues
+                if (PHP_SAPI === 'cli') {
+                    error_log("StoneScriptPHP Logger: Unable to write to $file_path - check permissions");
+                }
+                return;
+            }
+        } catch (\Throwable $e) {
+            // Fail silently - logging should never break the application
+            // Only report in CLI context
+            if (PHP_SAPI === 'cli') {
+                error_log("StoneScriptPHP Logger: Exception while writing to file - " . $e->getMessage());
+            }
+            return;
         }
-
-        $file_path = $log_dir . DIRECTORY_SEPARATOR . date('Y-m-d') . '.log';
-
-        $line = sprintf('[%s] %-9s %s', $timestamp, $level, $message);
-
-        if (!empty($context)) {
-            $line .= ' ' . json_encode($context, JSON_UNESCAPED_SLASHES);
-        }
-
-        file_put_contents($file_path, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
 
     /**
      * Write structured JSON to log file
+     *
+     * Gracefully handles permission errors to prevent interfering with HTTP responses
      */
     private function write_json_to_file(array $log_entry): void
     {
-        $log_dir = $this->get_log_directory();
+        try {
+            $log_dir = $this->get_log_directory();
 
-        // Create logs directory if it doesn't exist
-        if (!is_dir($log_dir)) {
-            mkdir($log_dir, 0755, true);
+            // Create logs directory if it doesn't exist
+            if (!is_dir($log_dir)) {
+                @mkdir($log_dir, 0755, true);
+            }
+
+            $file_path = $log_dir . DIRECTORY_SEPARATOR . date('Y-m-d') . '.json.log';
+
+            $json_line = json_encode($log_entry, JSON_UNESCAPED_SLASHES) . PHP_EOL;
+
+            // Try to write, suppress warnings to prevent header interference
+            if (@file_put_contents($file_path, $json_line, FILE_APPEND | LOCK_EX) === false) {
+                // Permission denied or other error - fail silently
+                // Only log to error_log if we're in CLI context to avoid header issues
+                if (PHP_SAPI === 'cli') {
+                    error_log("StoneScriptPHP Logger: Unable to write to $file_path - check permissions");
+                }
+                return;
+            }
+        } catch (\Throwable $e) {
+            // Fail silently - logging should never break the application
+            // Only report in CLI context
+            if (PHP_SAPI === 'cli') {
+                error_log("StoneScriptPHP Logger: Exception while writing to JSON file - " . $e->getMessage());
+            }
+            return;
         }
-
-        $file_path = $log_dir . DIRECTORY_SEPARATOR . date('Y-m-d') . '.json.log';
-
-        $json_line = json_encode($log_entry, JSON_UNESCAPED_SLASHES) . PHP_EOL;
-        file_put_contents($file_path, $json_line, FILE_APPEND | LOCK_EX);
     }
 
     /**

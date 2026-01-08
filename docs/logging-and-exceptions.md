@@ -18,6 +18,18 @@ StoneScriptPHP includes a robust, production-ready logging and exception handlin
 
 The `Framework\Logger` class provides a singleton logger that outputs to both console (STDOUT/STDERR) and log files simultaneously.
 
+### Important: Web vs CLI Context
+
+**The logger automatically detects web contexts (PHP-FPM, Apache, Nginx) and disables console output to prevent interfering with HTTP headers.**
+
+In web contexts, console output writes to the HTTP response body stream **before** headers are sent, which breaks CORS and other critical headers. The logger now:
+
+- ✅ **CLI context** (PHP_SAPI = 'cli'): Console logging enabled by default
+- ✅ **Web context** (PHP-FPM, Apache, etc.): Console logging auto-disabled
+- ✅ **Explicit configuration**: You can still override with `configure(console: false)`
+
+**For web entry points (public/index.php), you don't need to configure anything - it just works.**
+
 ### Basic Usage
 
 ```php
@@ -162,6 +174,30 @@ This creates `logs/YYYY-MM-DD.json.log` with structured entries:
   "pid": 12345
 }
 ```
+
+### Custom Log Directory
+
+You can customize the log directory for different execution contexts:
+
+```php
+// Method 1: Via configure() method (recommended)
+Logger::get_instance()->configure(
+    console: false,
+    file: true,
+    json: false,
+    log_directory: '/var/log/stonescriptphp-cli'
+);
+
+// Method 2: Via environment variable
+// Set in Dockerfile or docker-compose.yml:
+ENV STONESCRIPTPHP_LOG_DIR=/var/log/stonescriptphp
+```
+
+**Priority order:**
+1. Custom directory from `configure()` method
+2. `STONESCRIPTPHP_LOG_DIR` environment variable
+3. `/var/log/stonescriptphp` in Docker environments
+4. `ROOT_PATH/logs` (default)
 
 ### HTTP Request Logging
 
@@ -475,6 +511,106 @@ if ($duration > 1000) {
 
 ---
 
+## Docker Deployment Best Practices
+
+### The Problem: Multi-User Contexts
+
+In Docker environments, you often have:
+- **Entrypoint scripts** running as `root` (migrations, initialization)
+- **Web server** running as `www-data` (PHP-FPM, Apache)
+- **Background jobs** running as various users
+
+This creates permission conflicts when different users try to write to the same log files.
+
+### Solution 1: Separate Log Directories (Recommended)
+
+Use different log directories for different execution contexts:
+
+**Dockerfile:**
+```dockerfile
+# Create separate log directories with proper permissions
+RUN mkdir -p /var/log/stonescriptphp && \
+    chown www-data:www-data /var/log/stonescriptphp && \
+    chmod 775 /var/log/stonescriptphp
+
+RUN mkdir -p /var/log/stonescriptphp-cli && \
+    chmod 777 /var/log/stonescriptphp-cli
+```
+
+**CLI scripts (migrations, etc.):**
+```php
+// In cli/migrate.php or entrypoint scripts
+Logger::get_instance()->configure(
+    console: true,                              // OK in CLI
+    file: true,
+    log_directory: '/var/log/stonescriptphp-cli'  // Separate directory
+);
+```
+
+**Web entry point (public/index.php):**
+```php
+// No configuration needed - auto-detects web context
+// Uses /var/log/stonescriptphp by default in Docker
+```
+
+### Solution 2: Environment Variables
+
+Use environment variables for flexible configuration:
+
+**docker-compose.yml:**
+```yaml
+services:
+  api:
+    environment:
+      STONESCRIPTPHP_LOG_DIR: /var/log/stonescriptphp
+      DEBUG_MODE: "false"
+```
+
+**Dockerfile entrypoint:**
+```bash
+#!/bin/bash
+
+# For CLI/migration context, use separate log directory
+export STONESCRIPTPHP_LOG_DIR=/var/log/stonescriptphp-cli
+php stone migrate
+
+# For web context, unset to use default
+unset STONESCRIPTPHP_LOG_DIR
+exec php-fpm
+```
+
+### Solution 3: Fix Permissions in Entrypoint
+
+**docker-entrypoint.sh:**
+```bash
+#!/bin/bash
+
+# Ensure log directories exist with proper permissions
+mkdir -p /var/log/stonescriptphp
+chown -R www-data:www-data /var/log/stonescriptphp
+chmod -R 775 /var/log/stonescriptphp
+
+# Run migrations as root
+php stone migrate
+
+# Fix ownership of any log files created during startup
+chown -R www-data:www-data /var/log/stonescriptphp/*.log 2>/dev/null || true
+
+# Start web server as www-data
+exec gosu www-data php-fpm
+```
+
+### Graceful Failure Handling
+
+The logger now handles permission errors gracefully:
+- **Web context**: Fails silently - no warnings that would break HTTP headers
+- **CLI context**: Logs error to `error_log()` for debugging
+- **No application crashes** due to logging failures
+
+This means even if permissions are wrong, your application continues to work.
+
+---
+
 ## Production Configuration
 
 ### Environment Variables
@@ -483,6 +619,7 @@ if ($duration > 1000) {
 # .env
 DEBUG_MODE=false          # Disable debug output in production
 TIMEZONE=America/New_York # Set your timezone
+STONESCRIPTPHP_LOG_DIR=/custom/log/path  # Optional: custom log directory
 ```
 
 ### Log Rotation
