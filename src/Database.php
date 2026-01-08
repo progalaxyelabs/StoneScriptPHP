@@ -9,17 +9,15 @@ use ReflectionClass;
 use ReflectionIntersectionType;
 use ReflectionProperty;
 use ReflectionUnionType;
-use StoneScriptPHP\Database\ConnectionInterface;
-use StoneScriptPHP\Database\DirectConnection;
-use StoneScriptPHP\Database\GatewayConnection;
+use StoneScriptDB\GatewayClient;
+use StoneScriptDB\GatewayException;
 use Throwable;
 
 class Database
 {
     private static ?Database $_instance = null;
 
-    private ?ConnectionInterface $connection = null;
-    private ?string $connection_mode = null;
+    private ?GatewayClient $client = null;
 
     private function __construct()
     {
@@ -28,82 +26,71 @@ class Database
     }
 
     /**
-     * Initialize the connection based on environment configuration.
+     * Initialize the gateway client from environment configuration.
      */
     private function initConnection(): void
     {
-        if ($this->connection !== null) {
+        if ($this->client !== null) {
             return;
         }
 
         $env = Env::get_instance();
-        $this->connection_mode = $env->DB_CONNECTION_MODE;
+
+        // Validate gateway configuration
+        if (empty($env->DB_GATEWAY_URL)) {
+            throw new Exception('DB_GATEWAY_URL is required. StoneScriptPHP v3+ uses gateway-only mode. Run: php stone setup');
+        }
+
+        if (empty($env->DB_GATEWAY_PLATFORM)) {
+            throw new Exception('DB_GATEWAY_PLATFORM is required. Run: php stone setup');
+        }
 
         $start_time = microtime(true);
 
-        if ($this->connection_mode === 'gateway') {
-            $this->connection = GatewayConnection::fromEnv();
-            log_debug('Database: Using gateway connection mode');
-        } else {
-            $this->connection = new DirectConnection();
-            log_debug('Database: Using direct connection mode');
-        }
+        $this->client = new GatewayClient(
+            $env->DB_GATEWAY_URL,
+            $env->DB_GATEWAY_PLATFORM,
+            $env->DB_GATEWAY_TENANT_ID ?? null
+        );
+
+        log_debug('Database: Gateway client initialized');
 
         $elapsed_time = microtime(true) - $start_time;
         log_debug(__METHOD__ . " Connection initialized in " . ($elapsed_time * 1000) . "ms");
     }
 
     /**
-     * Get the connection instance.
+     * Get the gateway client instance.
      *
-     * @return ConnectionInterface
+     * @return GatewayClient
      */
-    private function getConnectionInstance(): ConnectionInterface
+    private function getClient(): GatewayClient
     {
         $this->initConnection();
-        return $this->connection;
+        return $this->client;
     }
 
     /**
-     * Get the direct connection for raw SQL operations.
-     * Throws exception if not in direct mode.
-     *
-     * @return DirectConnection
-     * @throws Exception If not in direct connection mode
-     */
-    private function getDirectConnection(): DirectConnection
-    {
-        $this->initConnection();
-
-        if (!($this->connection instanceof DirectConnection)) {
-            throw new Exception('This operation requires direct database connection mode. Set DB_CONNECTION_MODE=direct');
-        }
-
-        return $this->connection;
-    }
-
-    /**
-     * Check if currently in gateway mode.
+     * Check if gateway client is initialized.
      *
      * @return bool
      */
-    public static function isGatewayMode(): bool
+    public static function isConnected(): bool
     {
         $instance = self::get_instance();
         $instance->initConnection();
-        return $instance->connection_mode === 'gateway';
+        return $instance->client !== null && $instance->client->isConnected();
     }
 
     /**
-     * Get the current connection mode.
+     * Get the gateway client for advanced operations.
      *
-     * @return string 'direct' or 'gateway'
+     * @return GatewayClient
      */
-    public static function getConnectionMode(): string
+    public static function getGatewayClient(): GatewayClient
     {
         $instance = self::get_instance();
-        $instance->initConnection();
-        return $instance->connection_mode;
+        return $instance->getClient();
     }
 
     private static function get_instance(): Database
@@ -133,70 +120,30 @@ class Database
 
     private static function _fn(string $function_name, array $params): array
     {
-        $connection = self::get_instance()->getConnectionInstance();
-        return $connection->callFunction($function_name, $params);
+        try {
+            $client = self::get_instance()->getClient();
+            return $client->callFunction($function_name, $params);
+        } catch (GatewayException $e) {
+            log_debug(__METHOD__ . " Gateway error: " . $e->getMessage());
+            throw new Exception("Database function call failed: " . $e->getMessage(), $e->getCode(), $e);
+        }
     }
 
     /**
-     * Execute a raw SQL query and return results as array.
-     * Only available in direct connection mode.
+     * Execute a raw SQL query (DEPRECATED - Gateway mode only).
      *
+     * @deprecated StoneScriptPHP v3+ uses gateway-only mode. Use PostgreSQL functions instead.
      * @param string $sql The SQL query to execute
      * @return array The result rows
-     * @throws Exception If in gateway mode
+     * @throws Exception Always throws in gateway mode
      */
     public static function internal_query($sql): array
     {
-        $directConnection = self::get_instance()->getDirectConnection();
-        $connection = $directConnection->getConnection();
-
-        $result = pg_query($connection, $sql);
-        if ($result === false) {
-            $message = pg_last_error($connection);
-            log_debug($message);
-            return [];
-        }
-
-        $data = [];
-        $status = pg_result_status($result);
-        switch ($status) {
-            case PGSQL_EMPTY_QUERY:
-                $message = 'Empty Query';
-                break;
-            case PGSQL_COMMAND_OK:
-                $message = 'Ok';
-                break;
-            case PGSQL_TUPLES_OK:
-                $rows = pg_fetch_all($result);
-                $message = 'Fetched ' . count($rows) . ' rows';
-                $data = $rows;
-                break;
-            case PGSQL_COPY_OUT:
-                $message = 'Copy OUT';
-                break;
-            case PGSQL_COPY_IN:
-                $message = 'Copy IN';
-                break;
-            case PGSQL_BAD_RESPONSE:
-                $message =  pg_last_error($connection);
-                $message = 'Bad Response: ' . $message;
-                break;
-            case PGSQL_NONFATAL_ERROR:
-                $message =  pg_last_error($connection);
-                $message = 'Non Fatal Error:'  . $message;
-                break;
-            case PGSQL_FATAL_ERROR:
-                $message =  pg_last_error($connection);
-                $message = 'Fatal Error: ' . $message;
-                break;
-            default:
-                $message =  pg_last_error($connection);
-                $message = 'Unknown result status ' . $message;
-                break;
-        }
-
-        log_debug($message);
-        return $data;
+        throw new Exception(
+            'internal_query() is not available in gateway mode. ' .
+            'StoneScriptPHP v3+ uses gateway-only architecture. ' .
+            'Please create PostgreSQL functions in src/postgresql/functions/ instead.'
+        );
     }
 
     /**

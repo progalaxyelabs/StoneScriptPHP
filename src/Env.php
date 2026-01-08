@@ -16,18 +16,9 @@ class Env
     public string $APP_ENV = 'development';
     public int $APP_PORT = 9100;
 
-    public string $DATABASE_HOST = 'localhost';
-    public int $DATABASE_PORT = 5432;
-    public ?string $DATABASE_USER = null;
-    public ?string $DATABASE_PASSWORD = null;
-    public ?string $DATABASE_DBNAME = null;
-    public int $DATABASE_TIMEOUT = 30;
-    public string $DATABASE_APPNAME = 'StoneScriptPHP';
-
-    // Database connection mode: 'direct' for pg_connect, 'gateway' for HTTP gateway
-    public string $DB_CONNECTION_MODE = 'direct';
-    public ?string $DB_GATEWAY_URL = null;
-    public ?string $DB_GATEWAY_PLATFORM = null;
+    // Database - Gateway Connection (Required in v3+)
+    public string $DB_GATEWAY_URL;
+    public string $DB_GATEWAY_PLATFORM;
     public ?string $DB_GATEWAY_TENANT_ID = null;
 
     public ?string $ZEPTOMAIL_BOUNCE_ADDRESS = null;
@@ -82,25 +73,12 @@ class Env
             // If no env var set, property keeps its default value
         }
 
-        // Validate required properties based on connection mode
-        if ($this->DB_CONNECTION_MODE === 'gateway') {
-            // Gateway mode requires gateway URL
-            if (empty($this->DB_GATEWAY_URL)) {
-                throw new Exception('DB_GATEWAY_URL is required when DB_CONNECTION_MODE is "gateway". Run: php stone setup');
-            }
-        } else {
-            // Direct mode requires database credentials
-            $requiredNullable = ['DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_DBNAME'];
-            $missing = [];
-            foreach ($requiredNullable as $key) {
-                if ($this->$key === null) {
-                    $missing[] = $key;
-                }
-            }
-
-            if (!empty($missing)) {
-                throw new Exception('Required environment variables missing: ' . implode(', ', $missing) . '. Run: php stone setup');
-            }
+        // Validate required gateway configuration (v3+ gateway-only)
+        if (empty($this->DB_GATEWAY_URL)) {
+            throw new Exception('DB_GATEWAY_URL is required. StoneScriptPHP v3+ uses gateway-only mode. Run: php stone setup');
+        }
+        if (empty($this->DB_GATEWAY_PLATFORM)) {
+            throw new Exception('DB_GATEWAY_PLATFORM is required. Run: php stone setup');
         }
     }
 

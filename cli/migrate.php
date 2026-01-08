@@ -1,14 +1,15 @@
 <?php
 
 /**
- * Migration CLI Tool
+ * Migration CLI Tool (Gateway Mode - v3+)
  *
- * Commands:
- *   php migrate.php verify    - Check for database drift
- *   php migrate.php status    - Show migration status (coming soon)
- *   php migrate.php up        - Apply pending migrations (coming soon)
- *   php migrate.php down      - Rollback last migration (coming soon)
- *   php migrate.php generate  - Generate migration from changes (coming soon)
+ * In StoneScriptPHP v3+, migrations are handled via gateway registration.
+ * This command registers your schema with the gateway, which automatically
+ * applies migrations and deploys functions.
+ *
+ * Usage:
+ *   php stone migrate          - Register/update schema with gateway
+ *   php stone migrate status   - Show gateway connection status
  */
 
 // Set up paths
@@ -19,20 +20,15 @@ date_default_timezone_set('UTC');
 if (!defined('ROOT_PATH')) {
     define('ROOT_PATH', dirname(__DIR__) . DIRECTORY_SEPARATOR);
 }
-// Ensure ROOT_PATH has trailing separator
 $rootPath = rtrim(ROOT_PATH, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
-if (!defined('SRC_PATH')) {
-    define('SRC_PATH', $rootPath . 'src' . DIRECTORY_SEPARATOR);
-}
-if (!defined('CONFIG_PATH')) {
-    define('CONFIG_PATH', $rootPath . 'src' . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR);
-}
 
 // Load composer autoloader
 require_once $rootPath . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
 
-use StoneScriptPHP\Migrations;
 use StoneScriptPHP\Env;
+use StoneScriptPHP\Database;
+use StoneScriptDB\GatewayClient;
+use StoneScriptDB\GatewayException;
 
 // Define DEBUG_MODE for CLI (defaults to false)
 if (!defined('DEBUG_MODE')) {
@@ -44,65 +40,80 @@ $argv = $_SERVER['argv'];
 $argc = $_SERVER['argc'];
 
 // Parse command line arguments
-$command = $argv[1] ?? 'help';
+$command = $argv[1] ?? 'register';
 
 // Allow help command without .env file
 if ($command !== 'help' && !file_exists($rootPath . '.env')) {
-    echo "Error: .env file not found. Please create it from the 'env' template.\n";
-    echo "Run 'php migrate.php help' for usage information.\n";
+    echo "Error: .env file not found. Run: php stone setup\n";
     exit(1);
 }
 
 try {
     switch ($command) {
-        case 'verify':
-            $migrations = new Migrations();
-            $migrations->verify();
-            exit($migrations->getExitCode());
+        case 'register':
+        case '':
+            // Default: Register schema with gateway
+            echo "=== StoneScriptPHP Schema Registration ===\n\n";
+
+            $env = Env::get_instance();
+            echo "Gateway URL: {$env->DB_GATEWAY_URL}\n";
+            echo "Platform: {$env->DB_GATEWAY_PLATFORM}\n";
+            echo "Tenant ID: " . ($env->DB_GATEWAY_TENANT_ID ?? '<main>') . "\n\n";
+
+            // Call gateway:register script
+            echo "Registering schema with gateway...\n\n";
+            $registerScript = $rootPath . 'vendor/progalaxyelabs/stonescriptphp/cli/gateway-register.php';
+
+            if (!file_exists($registerScript)) {
+                throw new Exception("gateway-register.php not found. Please run: composer install");
+            }
+
+            // Include and execute the registration script
+            require $registerScript;
             break;
 
         case 'status':
-            $migrations = new Migrations();
-            $migrations->status();
-            exit(0);
-            break;
+            // Show gateway connection status
+            echo "=== Gateway Connection Status ===\n\n";
 
-        case 'up':
-            $migrations = new Migrations();
-            $executed = $migrations->up();
-            exit(empty($executed) ? 1 : 0);
-            break;
+            $env = Env::get_instance();
+            echo "Gateway URL: {$env->DB_GATEWAY_URL}\n";
+            echo "Platform: {$env->DB_GATEWAY_PLATFORM}\n";
+            echo "Tenant ID: " . ($env->DB_GATEWAY_TENANT_ID ?? '<main>') . "\n\n";
 
-        case 'down':
-            $migrations = new Migrations();
-            $rolledBack = $migrations->down();
-            exit(empty($rolledBack) ? 1 : 0);
-            break;
+            $client = Database::getGatewayClient();
 
-        case 'generate':
-            echo "Migration generate command - Coming soon!\n";
-            echo "This will:\n";
-            echo "  1. Run verify to detect changes\n";
-            echo "  2. Generate timestamped migration file\n";
-            echo "  3. Create both up and down migrations\n";
+            echo "Health Check: ";
+            if ($client->healthCheck()) {
+                echo "✓ Gateway is reachable\n";
+            } else {
+                echo "✗ Gateway unavailable\n";
+                echo "Error: " . ($client->getLastError() ?? 'Connection failed') . "\n";
+                exit(1);
+            }
+
+            echo "Connected: " . ($client->isConnected() ? 'Yes' : 'Not yet') . "\n\n";
+
+            echo "To register/update schema, run: php stone migrate\n";
             exit(0);
             break;
 
         case 'help':
         default:
-            echo "StoneScriptPHP Migration Tool\n";
-            echo "==============================\n\n";
-            echo "Usage: php migrate.php <command>\n\n";
+            echo "StoneScriptPHP Migration Tool (v3+ Gateway Mode)\n";
+            echo "=================================================\n\n";
+            echo "Usage: php stone migrate [command]\n\n";
             echo "Available commands:\n";
-            echo "  verify     Check for database drift (compares DB with source files)\n";
-            echo "  status     Show migration status [COMING SOON]\n";
-            echo "  up         Apply pending migrations [COMING SOON]\n";
-            echo "  down       Rollback last migration [COMING SOON]\n";
-            echo "  generate   Generate migration from detected changes [COMING SOON]\n";
+            echo "  (default)  Register schema with gateway (applies migrations & deploys functions)\n";
+            echo "  status     Show gateway connection status\n";
             echo "  help       Show this help message\n";
             echo "\n";
             echo "Examples:\n";
-            echo "  php migrate.php verify     # Check if database matches source files\n";
+            echo "  php stone migrate          # Register/update schema with gateway\n";
+            echo "  php stone migrate status   # Check gateway connection\n";
+            echo "\n";
+            echo "Note: StoneScriptPHP v3+ uses gateway-only mode.\n";
+            echo "Migrations are applied automatically when you register your schema.\n";
             echo "\n";
             exit(0);
     }

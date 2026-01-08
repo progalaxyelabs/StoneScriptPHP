@@ -50,3 +50,11 @@ Thumbs.db
 # Build artifacts
 /dist/
 /build/
+
+# Internal docs (not for public repo)
+/HLD.md
+/project-info.yaml
+/HANDOFF*.md
+/PENDING*.md
+/RELEASE-NOTES*.md
+/release-*.sh
