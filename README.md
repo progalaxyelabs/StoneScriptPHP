@@ -103,7 +103,7 @@ php stone serve
 # Your API is running at http://localhost:9100
 ```
 
-**👉 [View Full Getting Started Guide](https://stonescriptphp.org/docs/getting-started)**
+**👉 [View Full Documentation](https://stonescriptphp.org/docs)**
 
 ## Upgrading
 
@@ -123,7 +123,7 @@ php stone upgrade
 php stone upgrade --check
 ```
 
-See [docs/UPGRADE.md](docs/UPGRADE.md) for version-specific migration guides.
+See [online upgrade guide](https://stonescriptphp.org/docs/upgrade) for version-specific migration guides.
 
 ## Development Workflow
 
@@ -202,12 +202,12 @@ class GetUsersRoute implements IRouteHandler
 php stone migrate verify
 ```
 
-## CLI Tools (v2.0.13+)
+## CLI Tools
 
 **Location:** `cli/` directory in this package
 **Usage:** Via `php stone` command from [stonescriptphp-server](https://github.com/progalaxyelabs/StoneScriptPHP-Server)
 
-The framework now bundles all CLI code generators. When you run `composer update`, the CLI tools automatically update along with the framework.
+The framework bundles all CLI code generators. When you run `composer update`, the CLI tools automatically update along with the framework.
 
 ```bash
 # Run from stonescriptphp-server project:
@@ -252,39 +252,35 @@ This approach:
 
 ### 📖 Main Documentation
 
-* **[📑 Documentation Index](docs/INDEX.md)** - Complete documentation with navigation
-* **[🏗️ High Level Design (HLD)](HLD.md)** - System architecture and company work-management
-* **[📋 Release Notes](docs/releases.md)** - Version history
+* **[📚 Complete Documentation](https://stonescriptphp.org/docs)** - Full documentation site
+* **[🏗️ High Level Design (HLD)](HLD.md)** - System architecture and design
+* **[📦 Server Package](https://github.com/progalaxyelabs/StoneScriptPHP-Server)** - Application skeleton
 
 ### 🚀 Getting Started
 
-* [Getting Started Guide](docs/guides/getting-started.md)
-* [CLI Usage Guide](docs/reference/cli-usage.md)
-* [Environment Configuration](docs/reference/environment-configuration.md)
-* [Setup Quiet Mode](docs/guides/setup-quiet-mode.md) - CI/CD and Docker automation
+* [Getting Started Guide](https://stonescriptphp.org/docs/getting-started)
+* [CLI Usage Guide](https://stonescriptphp.org/docs/cli-usage)
+* [Environment Configuration](https://stonescriptphp.org/docs/environment)
 
 ### 🔧 Core Features
 
-* [API Reference](docs/reference/api-reference.md)
-* [Logging & Exceptions](docs/logging-and-exceptions.md)
-* [Request Validation](docs/validation.md)
-* [Middleware Guide](docs/reference/middleware.md)
-* [Caching System](docs/reference/caching.md)
+* [API Reference](https://stonescriptphp.org/docs/api-reference)
+* [Logging & Exceptions](https://stonescriptphp.org/docs/logging)
+* [Request Validation](https://stonescriptphp.org/docs/validation)
+* [Middleware Guide](https://stonescriptphp.org/docs/middleware)
+* [Caching System](https://stonescriptphp.org/docs/caching)
 
 ### 🔐 Security
 
-* [Authentication](docs/guides/authentication.md)
-* [JWT Configuration](docs/guides/jwt-configuration.md)
-* [RBAC (Access Control)](docs/reference/rbac.md)
-* [RBAC Quickstart](docs/guides/rbac-quickstart.md)
-* [Security Best Practices](docs/security/security-best-practices.md)
-* [CSRF Protection](docs/security/csrf-protection.md)
-* [Bot Protection](docs/security/bot-protection-strategy.md)
+* [Authentication](https://stonescriptphp.org/docs/authentication)
+* [JWT Configuration](https://stonescriptphp.org/docs/jwt)
+* [RBAC (Access Control)](https://stonescriptphp.org/docs/rbac)
+* [Security Best Practices](https://stonescriptphp.org/docs/security)
 
 ### ⚡ Performance
 
-* [Redis Caching Guide](docs/reference/caching.md)
-* [Performance Guidelines](docs/performance-guidelines.md)
+* [Redis Caching Guide](https://stonescriptphp.org/docs/caching)
+* [Performance Guidelines](https://stonescriptphp.org/docs/performance)
 
 ## Contributing to the Framework
 
@@ -334,7 +330,7 @@ StoneScriptPHP follows [Semantic Versioning](https://semver.org/):
 * **Minor versions (2.x.0)**: New features, backward-compatible. Update when needed.
 * **Major versions (x.0.0)**: Breaking changes. Review migration guide first.
 
-**Current stable:** v2.0.x - Production-ready with ongoing bug fixes
+**Current stable:** v2.4.2 - Production-ready with ongoing improvements
 
 ## Related Packages
 
