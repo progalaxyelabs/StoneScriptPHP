@@ -12,7 +12,7 @@ This repository contains the **core framework library**. Most developers should 
 # ✅ RECOMMENDED: Create a new project with the application skeleton
 composer create-project progalaxyelabs/stonescriptphp-server my-api
 cd my-api
-php stone serve
+composer serve
 ```
 
 **Why use stonescriptphp-server?**
@@ -98,8 +98,8 @@ Built for developers who value clean architecture and rapid API development, Sto
 composer create-project progalaxyelabs/stonescriptphp-server my-api
 cd my-api
 
-# Start development server
-php stone serve
+# Start development server (via composer script)
+composer serve
 # Your API is running at http://localhost:9100
 ```
 
@@ -124,6 +124,46 @@ php stone upgrade --check
 ```
 
 See [online upgrade guide](https://stonescriptphp.org/docs/upgrade) for version-specific migration guides.
+
+## Running Development Server
+
+### Using Composer Scripts (Recommended)
+
+The application skeleton ([stonescriptphp-server](https://github.com/progalaxyelabs/StoneScriptPHP-Server)) includes composer scripts for running a development server:
+
+```bash
+# Start development server
+composer serve
+# Server runs on http://localhost:9100
+```
+
+Press `Ctrl+C` to stop the server.
+
+### Manual Server Start
+
+You can also run PHP's built-in development server directly:
+
+```bash
+# Basic usage
+php -S localhost:9100 -t public
+
+# Custom host and port
+php -S 0.0.0.0:8080 -t public
+
+# With router script (if needed for URL rewriting)
+php -S localhost:9100 -t public public/index.php
+```
+
+**Note:** PHP's built-in server is for development only. Use Nginx, Apache, or Caddy in production.
+
+### Production Deployment
+
+For production environments, configure your web server (Nginx/Apache/Caddy) to:
+- Set document root to `public/`
+- Route all requests to `public/index.php`
+- Enable FastCGI with PHP-FPM
+
+See [deployment documentation](https://stonescriptphp.org/docs/deployment) for production setup guides.
 
 ## Development Workflow
 

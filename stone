@@ -59,14 +59,6 @@ $commands = [
         'description' => 'Interactive project setup (run after composer create-project). Use --quiet to skip prompts',
         'file' => 'cli/setup.php',
     ],
-    'serve' => [
-        'description' => 'Start development server',
-        'handler' => 'serve',
-    ],
-    'stop' => [
-        'description' => 'Stop development server',
-        'handler' => 'stop',
-    ],
     'generate' => [
         'description' => 'Generate code (route, model, migration, etc.)',
         'file' => 'cli/generate-dispatcher.php',
@@ -154,7 +146,6 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "Examples:\n";
     echo "  php stone new my-api                    # Create new project\n";
     echo "  php stone setup                         # Interactive setup\n";
-    echo "  php stone serve                         # Start dev server\n";
     echo "  php stone generate route login          # Generate login route\n";
     echo "  php stone generate model get_user.pgsql # Generate model from PostgreSQL function\n";
     echo "  php stone generate auth:google          # Generate Google OAuth\n";
@@ -183,73 +174,6 @@ $cmdInfo = $commands[$command];
 // Handle built-in commands
 if (isset($cmdInfo['handler'])) {
     switch ($cmdInfo['handler']) {
-        case 'serve':
-            $port = $args[0] ?? 9100;
-            $pidFile = ROOT_PATH . "/.stone-server-$port.pid";
-
-            // Check if server is already running on this port
-            if (file_exists($pidFile)) {
-                $pid = (int) trim(file_get_contents($pidFile));
-                if (posix_kill($pid, 0)) {
-                    echo Color::yellow("Server is already running on port $port (PID $pid)") . "\n";
-                    echo "Run 'php stone stop $port' to stop it first\n";
-                    exit(1);
-                }
-            }
-
-            echo Color::green("Starting server on http://127.0.0.1:$port") . "\n";
-            echo "Run 'php stone stop $port' to stop the server\n\n";
-
-            // Start server in background and save PID and port
-            $command = sprintf('php -S 127.0.0.1:%d -t public > /dev/null 2>&1 & echo $!', $port);
-            $pid = (int) trim(shell_exec($command));
-            file_put_contents($pidFile, "$pid\n$port");
-
-            echo Color::green("Server started with PID $pid on port $port") . "\n";
-            break;
-
-        case 'stop':
-            $port = $args[0] ?? 9100;
-            $pidFile = ROOT_PATH . "/.stone-server-$port.pid";
-
-            if (!file_exists($pidFile)) {
-                echo Color::yellow("No server is running on port $port") . "\n";
-                exit(0);
-            }
-
-            $data = trim(file_get_contents($pidFile));
-            list($pid, $savedPort) = explode("\n", $data);
-            $pid = (int) $pid;
-
-            // Check if process is actually running
-            if (!posix_kill($pid, 0)) {
-                echo Color::yellow("Server process (PID $pid) is not running") . "\n";
-                unlink($pidFile);
-                exit(0);
-            }
-
-            // Verify it's a PHP server process on the correct port
-            $cmdline = file_get_contents("/proc/$pid/cmdline");
-            if (strpos($cmdline, "php") === false || strpos($cmdline, "$port") === false) {
-                echo Color::yellow("PID $pid doesn't match expected server on port $port") . "\n";
-                unlink($pidFile);
-                exit(1);
-            }
-
-            // Kill the process
-            posix_kill($pid, SIGTERM);
-
-            // Wait a bit and check if it stopped
-            usleep(500000); // 0.5 seconds
-            if (posix_kill($pid, 0)) {
-                // Still running, force kill
-                posix_kill($pid, SIGKILL);
-            }
-
-            unlink($pidFile);
-            echo Color::green("Server stopped (PID $pid on port $port)") . "\n";
-            break;
-
         case 'test':
             if (!file_exists('vendor/bin/phpunit')) {
                 echo Color::red("PHPUnit not installed. Run: composer require --dev phpunit/phpunit") . "\n";
