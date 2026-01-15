@@ -70,4 +70,38 @@ if (file_exists($envFile)) {
 
     // Initialize timings array for performance tracking
     $timings = [];
+
+    // Load auth configuration
+    $authConfig = [];
+    $authConfigFile = ROOT_PATH . 'config/auth.php';
+    if (file_exists($authConfigFile)) {
+        $authConfig = require $authConfigFile;
+    }
+
+    // Registry for singleton services
+    $GLOBALS['__stonescript_services'] = [];
+
+    // Register TokenValidator as singleton
+    $GLOBALS['__stonescript_services']['TokenValidator'] = function() use ($authConfig) {
+        static $instance = null;
+        if ($instance === null) {
+            $gatewayUrl = $authConfig['gateway_url'] ?? 'http://192.168.122.173:9000';
+            $jwksEndpoint = $authConfig['jwks_endpoint'] ?? '/auth/jwks';
+            $jwksCacheTtl = $authConfig['jwks_cache_ttl'] ?? 3600;
+            $instance = new \StoneScriptDB\GatewayClient\Auth\TokenValidator(
+                $gatewayUrl,
+                $jwksEndpoint,
+                $jwksCacheTtl
+            );
+        }
+        return $instance;
+    };
+
+    // Middleware alias registry
+    $GLOBALS['__stonescript_middleware_aliases'] = [
+        'auth' => \StoneScriptPHP\Auth\Middleware\ValidateJwtMiddleware::class,
+        'auth.required' => \StoneScriptPHP\Auth\Middleware\RequireAuthMiddleware::class,
+        'tenant.required' => \StoneScriptPHP\Auth\Middleware\RequireTenantMiddleware::class,
+        'role' => \StoneScriptPHP\Auth\Middleware\RequireRoleMiddleware::class,
+    ];
 }

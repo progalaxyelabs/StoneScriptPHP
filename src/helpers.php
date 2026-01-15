@@ -417,3 +417,68 @@ function db_pool_stats(): array
         'databases' => $pool->getActiveConnections()
     ];
 }
+
+// ===========================
+// Service Container Functions
+// ===========================
+
+/**
+ * Get a singleton service from the service registry
+ *
+ * @param string $name Service name
+ * @return mixed
+ * @throws Exception if service not found
+ */
+function service(string $name): mixed
+{
+    if (!isset($GLOBALS['__stonescript_services'][$name])) {
+        throw new Exception("Service not found: $name");
+    }
+
+    $factory = $GLOBALS['__stonescript_services'][$name];
+    return $factory();
+}
+
+/**
+ * Register a singleton service
+ *
+ * @param string $name Service name
+ * @param callable $factory Factory function that returns the service instance
+ * @return void
+ */
+function register_service(string $name, callable $factory): void
+{
+    $GLOBALS['__stonescript_services'][$name] = $factory;
+}
+
+// ===========================
+// Middleware Functions
+// ===========================
+
+/**
+ * Get middleware class by alias
+ *
+ * @param string $alias Middleware alias
+ * @return string Middleware class name
+ * @throws Exception if middleware alias not found
+ */
+function middleware(string $alias): string
+{
+    if (!isset($GLOBALS['__stonescript_middleware_aliases'][$alias])) {
+        throw new Exception("Middleware alias not found: $alias");
+    }
+
+    return $GLOBALS['__stonescript_middleware_aliases'][$alias];
+}
+
+/**
+ * Register a middleware alias
+ *
+ * @param string $alias Middleware alias
+ * @param string $className Middleware class name
+ * @return void
+ */
+function register_middleware(string $alias, string $className): void
+{
+    $GLOBALS['__stonescript_middleware_aliases'][$alias] = $className;
+}

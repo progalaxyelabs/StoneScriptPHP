@@ -1,11 +1,11 @@
 # StoneScriptPHP - High Level Design (HLD)
 
-**[← Back to README](README.md)** | **[📑 Documentation Index](docs/INDEX.md)** | **[🚀 Getting Started](docs/getting-started.md)**
+**[← Back to README](README.md)** | **[🌐 Website](https://stonescriptphp.org)** | **[📖 Documentation](https://stonescriptphp.org/docs)**
 
-**Version:** 1.0.0
-**Document Version:** 1.2
-**Last Updated:** December 5, 2025
-**Status:** Production Release Candidate
+**Version:** 2.4.2
+**Document Version:** 1.3
+**Last Updated:** January 13, 2026
+**Status:** Production
 
 ---
 
@@ -724,9 +724,10 @@ StoneScriptPHP/
 
 - **Website:** https://stonescriptphp.org
 - **GitHub:** https://github.com/progalaxyelabs/StoneScriptPHP
-- **Documentation:** [docs/INDEX.md](docs/INDEX.md)
-- **API Reference:** [docs/api-reference.md](docs/api-reference.md)
-- **Security Guide:** [docs/security-best-practices.md](docs/security-best-practices.md)
+- **Documentation:** https://stonescriptphp.org/docs
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **API Reference:** https://stonescriptphp.org/docs/api-reference
+- **Security Guide:** https://stonescriptphp.org/docs/security
 
 ---
 
@@ -737,16 +738,17 @@ StoneScriptPHP/
 | 1.0 | 2025-01-01 | Initial HLD | Team |
 | 1.1 | 2025-11-30 | Added RBAC, Caching | Team |
 | 1.2 | 2025-12-05 | Logging & Exception Handling | Team |
+| 1.3 | 2026-01-13 | Updated to v2.4.2, Fixed broken documentation links | Team |
 
 ---
 
 ## Related Documentation
 
 - **[← Back to README](README.md)** - Main project overview
-- **[📑 Documentation Index](docs/INDEX.md)** - Complete documentation navigation
-- **[🚀 Getting Started Guide](docs/getting-started.md)** - Complete tutorial
-- **[🔐 Security Best Practices](docs/security-best-practices.md)** - Security guide
-- **[📋 Release Notes](RELEASE.md)** - Current roadmap
+- **[🌐 StoneScriptPHP Website](https://stonescriptphp.org)** - Official website
+- **[📖 Online Documentation](https://stonescriptphp.org/docs)** - Complete documentation
+- **[🚀 Getting Started](https://stonescriptphp.org/docs/getting-started)** - Quick start guide
+- **[📦 Application Skeleton](https://github.com/progalaxyelabs/StoneScriptPHP-Server)** - Ready-to-use project template
 
 ---
 
