@@ -243,23 +243,48 @@ function generateTsInterface(string $className, array &$processedClasses = []): 
 }
 
 /**
- * Convert route path to function name
- * /login -> login
- * /items/{itemId}/view -> getItemView
- * /users/{userId}/posts -> getUserPosts
+ * Extract resource name from path (first segment)
+ * /projects/create -> projects
+ * /users/{id} -> users
+ * /auth/login -> auth
  */
-function pathToFunctionName(string $path, string $method): string {
-    // Remove leading/trailing slashes
+function extractResourceName(string $path): string {
     $path = trim($path, '/');
-
-    // Split by /
     $parts = explode('/', $path);
+    return $parts[0] ?? 'default';
+}
+
+/**
+ * Convert route path to method name within a resource
+ * /projects/create + POST -> create
+ * /projects/{id} + GET -> get
+ * /projects/{id} + PUT -> update
+ * /projects/{id} + DELETE -> delete
+ * /projects -> GET -> list
+ */
+function pathToMethodName(string $path, string $method): string {
+    $path = trim($path, '/');
+    $parts = explode('/', $path);
+
+    // Remove the first segment (resource name)
+    array_shift($parts);
 
     // Remove parameter parts
     $parts = array_filter($parts, fn($part) => !preg_match('/^\{.+\}$/', $part));
 
-    // Convert to camelCase
-    $functionName = '';
+    // If no parts left, use method-based name
+    if (empty($parts)) {
+        return match(strtoupper($method)) {
+            'GET' => 'list',
+            'POST' => 'create',
+            'PUT' => 'update',
+            'DELETE' => 'delete',
+            default => strtolower($method)
+        };
+    }
+
+    // Convert remaining parts to camelCase
+    $methodName = '';
     foreach ($parts as $i => $part) {
         $part = str_replace(['-', '_'], ' ', $part);
         $part = ucwords($part);
@@ -269,20 +294,10 @@ function pathToFunctionName(string $path, string $method): string {
             $part = lcfirst($part);
         }
 
-        $functionName .= $part;
+        $methodName .= $part;
     }
 
-    // If empty, use a default based on method
-    if (empty($functionName)) {
-        $functionName = strtolower($method);
-    }
-
-    // Prefix with method for non-GET requests
-    if ($method !== 'GET' && !str_starts_with($functionName, strtolower($method))) {
-        $functionName = strtolower($method) . ucfirst($functionName);
-    }
-
-    return $functionName;
+    return $methodName;
 }
 
 /**
@@ -294,12 +309,12 @@ function extractPathParams(string $path): array {
 }
 
 /**
- * Generate TypeScript API client
+ * Generate TypeScript API client (v2.0 - with ApiConnectionService)
  */
 function generateClient(array $routes): string {
     $interfaces = '';
-    $functions = '';
     $processedClasses = [];
+    $resourceMethods = []; // Group methods by resource
 
     foreach ($routes as $route) {
         $handlerClass = $route['handler'];
@@ -321,77 +336,46 @@ function generateClient(array $routes): string {
         $interfaces .= generateTsInterface($types['request'], $processedClasses);
         $interfaces .= generateTsInterface($types['response'], $processedClasses);
 
-        // Generate API function
-        $functionName = pathToFunctionName($route['path'], $route['method']);
+        // Get resource and method names
+        $resourceName = extractResourceName($route['path']);
+        $methodName = pathToMethodName($route['path'], $route['method']);
         $requestTypeName = substr($types['request'], strrpos($types['request'], '\\') + 1);
         $responseTypeName = substr($types['response'], strrpos($types['response'], '\\') + 1);
 
         $pathParams = extractPathParams($route['path']);
-        $pathParamsStr = '';
-        $pathParamsInUrl = '';
-
-        if (!empty($pathParams)) {
-            $pathParamsInUrl = $route['path'];
-            foreach ($pathParams as $param) {
-                $pathParamsInUrl = str_replace("{{$param}}", "\${$param}", $pathParamsInUrl);
-            }
-            $pathParamsInUrl = "`$pathParamsInUrl`";
-        } else {
-            $pathParamsInUrl = "'{$route['path']}'";
-        }
-
         $method = strtoupper($route['method']);
 
-        if ($method === 'GET') {
-            // GET requests don't have a body, path params are the only params
-            if (!empty($pathParams)) {
-                $pathParamsStr = implode(': string, ', $pathParams) . ': string';
-            }
-            $functions .= <<<TS
-  async $functionName($pathParamsStr): Promise<$responseTypeName> {
-    const response = await fetch($pathParamsInUrl, {
-      method: '$method',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+        // Build method code
+        $methodCode = generateResourceMethod(
+            $methodName,
+            $route['path'],
+            $method,
+            $requestTypeName,
+            $responseTypeName,
+            $pathParams
+        );
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: \${response.status}`);
-    }
-
-    const json = await response.json();
-    return json.data;
-  },
-
-
-TS;
-        } else {
-            // POST, PUT, DELETE, etc. have a body, path params come after
-            if (!empty($pathParams)) {
-                $pathParamsStr = ', ' . implode(': string, ', $pathParams) . ': string';
-            }
-            $functions .= <<<TS
-  async $functionName(data: $requestTypeName$pathParamsStr): Promise<$responseTypeName> {
-    const response = await fetch($pathParamsInUrl, {
-      method: '$method',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: \${response.status}`);
-    }
-
-    const json = await response.json();
-    return json.data;
-  },
-
-
-TS;
+        // Group by resource
+        if (!isset($resourceMethods[$resourceName])) {
+            $resourceMethods[$resourceName] = [];
         }
+        $resourceMethods[$resourceName][] = $methodCode;
+    }
+
+    // Generate resource objects
+    $resourcesCode = '';
+    foreach ($resourceMethods as $resourceName => $methods) {
+        $methodsStr = implode("\n\n", $methods);
+        $resourcesCode .= <<<TS
+
+  /**
+   * $resourceName endpoints
+   */
+  $resourceName = {
+$methodsStr
+  };
+
+TS;
     }
 
     $output = <<<TS
@@ -399,8 +383,10 @@ TS;
  * Auto-generated TypeScript API Client
  * Generated from PHP routes
  *
- * DO NOT EDIT MANUALLY - Regenerate using: php generate client
+ * DO NOT EDIT MANUALLY - Regenerate using: php stone generate client
  */
+
+import { ApiConnectionService, ApiResponse } from '@progalaxyelabs/ngx-stonescriptphp-client';
 
 // ============================================================================
 // Type Definitions
@@ -411,14 +397,83 @@ $interfaces
 // API Client
 // ============================================================================
 
-export const api = {
-$functions};
-
-export default api;
+export class ApiClient {
+  constructor(private connection: ApiConnectionService) {}
+$resourcesCode}
 
 TS;
 
     return $output;
+}
+
+/**
+ * Generate a single method for a resource
+ */
+function generateResourceMethod(
+    string $methodName,
+    string $path,
+    string $httpMethod,
+    string $requestTypeName,
+    string $responseTypeName,
+    array $pathParams
+): string {
+    // Build path template
+    $pathTemplate = $path;
+    if (!empty($pathParams)) {
+        foreach ($pathParams as $param) {
+            $pathTemplate = str_replace("{{$param}}", "\${$param}", $pathTemplate);
+        }
+        $pathTemplate = "`$pathTemplate`";
+    } else {
+        $pathTemplate = "'$path'";
+    }
+
+    // Determine connection method
+    $connectionMethod = strtolower($httpMethod);
+
+    // Build parameters
+    if ($httpMethod === 'GET' || $httpMethod === 'DELETE') {
+        // GET/DELETE: only path params
+        if (!empty($pathParams)) {
+            $paramsStr = implode(': number, ', $pathParams) . ': number';
+        } else {
+            $paramsStr = '';
+        }
+
+        // Generate method
+        return <<<TS
+    $methodName: async ($paramsStr): Promise<$responseTypeName> => {
+      const response = await this.connection.$connectionMethod<$responseTypeName>($pathTemplate);
+
+      return new Promise((resolve, reject) => {
+        response
+          .onOk((result) => resolve(result))
+          .onNotOk((message) => reject(new Error(message)))
+          .onError(() => reject(new Error('Server error')));
+      });
+    },
+TS;
+    } else {
+        // POST/PUT/PATCH: data param + path params
+        if (!empty($pathParams)) {
+            $pathParamsStr = ', ' . implode(': number, ', $pathParams) . ': number';
+        } else {
+            $pathParamsStr = '';
+        }
+
+        return <<<TS
+    $methodName: async (data: $requestTypeName$pathParamsStr): Promise<$responseTypeName> => {
+      const response = await this.connection.$connectionMethod<$responseTypeName>($pathTemplate, data);
+
+      return new Promise((resolve, reject) => {
+        response
+          .onOk((result) => resolve(result))
+          .onNotOk((message) => reject(new Error(message)))
+          .onError(() => reject(new Error('Server error')));
+      });
+    },
+TS;
+    }
 }
 
 // Main execution
@@ -438,7 +493,7 @@ if (!is_dir($srcDir)) {
     }
 }
 
-// Generate package.json
+// Generate package.json (v2.0 - with peerDependencies)
 $packageJson = json_encode([
     'name' => $packageName,
     'version' => $apiVersion,
@@ -447,13 +502,17 @@ $packageJson = json_encode([
     'types' => 'dist/index.d.ts',
     'scripts' => [
         'build' => 'tsc',
-        'prepublishOnly' => 'npm run build'
+        'watch' => 'tsc --watch'
     ],
     'keywords' => ['api', 'client', 'typescript', 'stonescript'],
     'author' => '',
     'license' => 'MIT',
+    'peerDependencies' => [
+        '@progalaxyelabs/ngx-stonescriptphp-client' => '^2.0.0'
+    ],
     'devDependencies' => [
-        'typescript' => '^5.0.0'
+        'typescript' => '^5.8.0',
+        '@progalaxyelabs/ngx-stonescriptphp-client' => '^2.0.0'
     ],
     'files' => [
         'dist',
@@ -481,56 +540,134 @@ $tsConfig = json_encode([
     'exclude' => ['node_modules', 'dist']
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
-// Generate README.md
+// Generate README.md (v2.0 - with Angular DI setup)
 $readme = <<<MD
 # API Client
 
 Auto-generated TypeScript API client for StoneScriptPHP backend.
 
-**DO NOT EDIT MANUALLY** - Regenerate using: `php generate client`
+**DO NOT EDIT MANUALLY** - Regenerate using: `php stone generate client`
 
 ## Installation
 
-### For Angular Projects
+### In Angular Project
 
 ```bash
-npm install file:../client
+npm install file:./src/api-client
 ```
 
-### Import and Use
+### Setup in app.config.ts
 
 ```typescript
-import { api } from '@stonescript/api-client';
+import { ApiClient } from '$packageName';
+import { ApiConnectionService } from '@progalaxyelabs/ngx-stonescriptphp-client';
 
-// Use the typed API client
-const result = await api.postLogin({
-  email: 'user@example.com',
-  password: 'secret'
-});
-
-console.log(result.token);
+export const appConfig: ApplicationConfig = {
+  providers: [
+    // ... other providers
+    {
+      provide: ApiClient,
+      useFactory: (connection: ApiConnectionService) => new ApiClient(connection),
+      deps: [ApiConnectionService]
+    }
+  ]
+};
 ```
 
-## Development
+## Usage
 
-### Build
+### In Angular Services
 
-```bash
-npm run build
+```typescript
+import { Injectable } from '@angular/core';
+import { ApiClient } from '$packageName';
+
+@Injectable({ providedIn: 'root' })
+export class ProjectService {
+  constructor(private api: ApiClient) {}
+
+  async createProject(name: string, description: string) {
+    try {
+      const project = await this.api.projects.create({
+        name,
+        description
+      });
+
+      console.log('Created:', project);
+      return project;
+    } catch (error) {
+      console.error('Failed to create project:', error.message);
+      throw error;
+    }
+  }
+
+  async listProjects() {
+    const response = await this.api.projects.list();
+    return response.projects;
+  }
+}
 ```
 
-This compiles TypeScript to JavaScript in the `dist/` directory.
+### In Components
+
+```typescript
+export class ProjectListComponent implements OnInit {
+  projects: Project[] = [];
+
+  constructor(private projectService: ProjectService) {}
+
+  async ngOnInit() {
+    this.projects = await this.projectService.listProjects();
+  }
+
+  async createNew() {
+    await this.projectService.createProject('New Project', 'Description');
+    this.projects = await this.projectService.listProjects(); // Refresh
+  }
+}
+```
 
 ## Regenerating
 
-When routes change on the backend:
+When backend routes change:
 
 ```bash
 cd /path/to/backend
-php generate client
+php stone generate client --output=../portal/src/api-client
 ```
 
-This will update all types and API functions automatically.
+Frontend will automatically see new types (no reinstall needed with \`file:\` protocol).
+
+## Type Safety
+
+All request and response types are generated from PHP DTOs:
+
+```typescript
+// TypeScript knows the exact shape
+const request: CreateProjectRequest = {
+  name: 'My Project',        // ✅ string
+  description: 'Desc',       // ✅ string
+  start_date: '2026-01-14'   // ✅ string | null
+  // tenant_id is optional
+};
+
+const response: CreateProjectResponse = await api.projects.create(request);
+// response.project_id is number
+// response.name is string
+// response.created_at is string
+```
+
+## Error Handling
+
+Errors are automatically wrapped in standard Error objects:
+
+```typescript
+try {
+  await api.projects.create(data);
+} catch (error) {
+  console.error(error.message); // User-friendly message from API
+}
+```
 
 MD;
 
@@ -559,5 +696,5 @@ echo "\nInstall in your Angular project:\n";
 echo "  cd /path/to/angular-project\n";
 echo "  npm install file:" . str_replace(ROOT_PATH, '../', $outputDir) . "\n";
 echo "\nThen import in your Angular code:\n";
-echo "  import { api } from '$packageName';\n";
-echo "  const result = await api.postLogin({ email: '...', password: '...' });\n";
+echo "  import { ApiClient } from '$packageName';\n";
+echo "  const api = new ApiClient(connection); // Pass ApiConnectionService instance\n";
