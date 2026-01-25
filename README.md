@@ -74,6 +74,8 @@ Built for developers who value clean architecture and rapid API development, Sto
 ### Security & Auth
 
 * **JWT Authentication** - RSA & HMAC support, built-in OAuth (Google)
+* **Auth Service Integration** - HTTP clients for ProGalaxy Auth Service (memberships, invitations)
+* **Token Validation** - Middleware for validating JWT tokens
 * **RBAC** - Role-Based Access Control with permissions
 * **Security Middleware** - CORS, rate limiting, security headers
 
@@ -287,6 +289,74 @@ This approach:
 
 * Redis server (for caching support)
 * PHP Extension: `redis` (for Redis caching)
+
+## Auth Service Integration
+
+### ProGalaxy Auth Service Clients
+
+StoneScriptPHP includes HTTP clients for backend-to-backend operations with the ProGalaxy Auth Service.
+
+**Use these for:**
+- System automation (e.g., auto-create membership after payment)
+- Webhook handlers
+- Backend CLI tools
+- Bulk operations
+
+#### Membership Client
+
+```php
+use StoneScriptPHP\Auth\Client\MembershipClient;
+use StoneScriptPHP\Auth\Client\AuthServiceException;
+
+$client = new MembershipClient('http://auth-service:3139');
+
+try {
+    // Create membership after payment webhook
+    $membership = $client->createMembership([
+        'identity_id' => $userId,
+        'tenant_id' => $tenantId,
+        'role' => 'premium_member'
+    ], $systemAdminToken);
+
+    // Update role
+    $client->updateMembership($membershipId, [
+        'role' => 'admin'
+    ], $adminToken);
+
+    // Get user's memberships
+    $memberships = $client->getUserMemberships($userId, 'myapp', $token);
+
+} catch (AuthServiceException $e) {
+    log_error("Auth service error: " . $e->getMessage());
+}
+```
+
+#### Invitation Client
+
+```php
+use StoneScriptPHP\Auth\Client\InvitationClient;
+
+$invitations = new InvitationClient('http://auth-service:3139');
+
+// Invite user
+$invitation = $invitations->inviteUser(
+    email: 'user@example.com',
+    tenantId: $tenantId,
+    role: 'member',
+    authToken: $adminToken
+);
+
+// Bulk invite (system automation)
+$invitations->bulkInvite([
+    ['email' => 'user1@example.com', 'tenant_id' => $tid, 'role' => 'member'],
+    ['email' => 'user2@example.com', 'tenant_id' => $tid, 'role' => 'admin'],
+], $adminToken);
+
+// Cancel invitation
+$invitations->cancelInvitation($invitationId, $adminToken);
+```
+
+**Note:** For frontend operations (user login, token validation), use the auth service directly from Angular or use JWT validation middleware.
 
 ## Documentation
 
