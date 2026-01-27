@@ -10,7 +10,7 @@ function e500($message = 'Server error'): ApiResponse
 
 function e405($message = 'Method not allowed'): ApiResponse
 {
-    http_response_code(500);
+    http_response_code(405);
     return res_error($message);
 }
 

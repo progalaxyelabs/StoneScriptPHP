@@ -48,6 +48,7 @@
         },
         "files": [
             "src/helpers.php",
+            "src/error_handler.php",
             "src/bootstrap.php"
         ]
     },
