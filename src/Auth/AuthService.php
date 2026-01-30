@@ -396,6 +396,7 @@ class StandaloneAuth
 /**
  * Centralized Authentication Implementation
  * For ProGalaxy platforms with external auth service
+ * Supports both single-issuer (legacy) and multi-issuer modes
  */
 class CentralizedAuth
 {
@@ -403,13 +404,21 @@ class CentralizedAuth
     private ?array $jwksCache = null;
     private int $jwksCacheTime = 0;
     private int $jwksCacheTTL = 3600; // 1 hour
+    private ?MultiAuthJwtValidator $multiAuthValidator = null;
+    private bool $multiAuthMode = false;
 
     public function __construct(array $config = [])
     {
-        // Internal swarm service URL
+        // Internal swarm service URL (for legacy single-issuer mode)
         $this->authServiceUrl = $config['auth_service_url'] ??
             getenv('AUTH_SERVICE_URL') ??
             'http://progalaxyelabs-auth_auth:3139';
+
+        // Initialize multi-auth if configured
+        if (isset($config['auth_servers']) && is_array($config['auth_servers'])) {
+            $this->multiAuthValidator = new MultiAuthJwtValidator($config['auth_servers']);
+            $this->multiAuthMode = true;
+        }
     }
 
     /**
@@ -424,6 +433,15 @@ class CentralizedAuth
         }
 
         return $this->validateJWT($jwt);
+    }
+
+    /**
+     * Check if multi-auth mode is enabled
+     * @return bool
+     */
+    public function isMultiAuthMode(): bool
+    {
+        return $this->multiAuthMode;
     }
 
     /**
@@ -453,6 +471,12 @@ class CentralizedAuth
      */
     public function validateJWT(string $jwt): ?array
     {
+        // Use multi-auth validator if configured
+        if ($this->multiAuthMode) {
+            return $this->multiAuthValidator->validateJWT($jwt);
+        }
+
+        // Fallback to legacy single-issuer validation
         try {
             $jwks = $this->getJWKS();
 
@@ -505,12 +529,20 @@ class CentralizedAuth
             return null;
         }
 
-        return [
+        // Include issuer_type for multi-auth authorization rules
+        $user = [
             'id' => $claims['sub'] ?? null,
             'email' => $claims['email'] ?? null,
             'tenant_id' => $claims['tenant_id'] ?? null,
             'tenant_role' => $claims['tenant_role'] ?? null,
         ];
+
+        // Add issuer type if in multi-auth mode
+        if (isset($claims['issuer_type'])) {
+            $user['issuer_type'] = $claims['issuer_type'];
+        }
+
+        return $user;
     }
 
     /**
