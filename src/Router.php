@@ -158,6 +158,25 @@ class GetRequestParser extends RequestParser
 
     public function respond(): ApiResponse
     {
+        // Built-in health check endpoint - can be overridden by user routes
+        if ($this->request_path === '/health') {
+            $class_name = $this->identify_route();
+            if (!$class_name) {
+                // No user-defined /health route, return default health check
+                header('Content-Type: application/json');
+                http_response_code(200);
+                return new ApiResponse(
+                    'ok',
+                    '',
+                    [
+                        'status' => 'ok',
+                        'service' => 'stonescriptphp-api',
+                        'timestamp' => gmdate('Y-m-d\TH:i:s\Z')
+                    ]
+                );
+            }
+        }
+
         return parent::_process();
     }
 }
