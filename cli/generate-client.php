@@ -114,9 +114,10 @@ function getRouteContract(string $handlerClass): ?ReflectionClass {
     $reflection = new ReflectionClass($handlerClass);
     $interfaces = $reflection->getInterfaces();
 
-    // Find the contract interface (not IRouteHandler)
+    // Find the contract interface (skip IRouteHandler regardless of namespace)
     foreach ($interfaces as $interface) {
-        if ($interface->getName() !== 'Framework\\IRouteHandler') {
+        $name = $interface->getName();
+        if ($name !== 'Framework\\IRouteHandler' && $name !== 'StoneScriptPHP\\IRouteHandler') {
             return $interface;
         }
     }
@@ -162,7 +163,7 @@ function phpTypeToTs(string $phpType): string {
         'string' => 'string',
         'array' => 'any[]',
         'mixed' => 'any',
-        default => $phpType // Keep class names as-is for now
+        default => substr($phpType, strrpos($phpType, '\\') + 1) // Extract short class name
     };
 }
 
@@ -257,10 +258,11 @@ function extractResourceName(string $path): string {
 /**
  * Convert route path to method name within a resource
  * /projects/create + POST -> create
- * /projects/{id} + GET -> get
- * /projects/{id} + PUT -> update
- * /projects/{id} + DELETE -> delete
+ * /projects/:id + GET -> getById
+ * /projects/:id + PUT -> update
+ * /projects/:id + DELETE -> delete
  * /projects -> GET -> list
+ * /payments/reference/:reference_type/:reference_id + GET -> getByReference
  */
 function pathToMethodName(string $path, string $method): string {
     $path = trim($path, '/');
@@ -269,11 +271,58 @@ function pathToMethodName(string $path, string $method): string {
     // Remove the first segment (resource name)
     array_shift($parts);
 
-    // Remove parameter parts
-    $parts = array_filter($parts, fn($part) => !preg_match('/^\{.+\}$/', $part));
+    // Check if path has parameters
+    $hasParams = false;
+    $paramNames = [];
+    foreach ($parts as $part) {
+        if (preg_match('/^\{.+\}$/', $part) || preg_match('/^\:(.+)$/', $part, $matches)) {
+            $hasParams = true;
+            if (isset($matches[1])) {
+                $paramNames[] = $matches[1];
+            }
+        }
+    }
 
-    // If no parts left, use method-based name
-    if (empty($parts)) {
+    // Remove parameter parts (both {param} and :param notation)
+    $nonParamParts = array_filter($parts, fn($part) => !preg_match('/^\{.+\}$/', $part) && !preg_match('/^\:.+$/', $part));
+
+    // If no non-param parts left but has params, generate method name based on HTTP method + param context
+    if (empty($nonParamParts) && $hasParams) {
+        $httpMethod = strtoupper($method);
+
+        // For single :id parameter, use conventional CRUD names
+        if (count($paramNames) === 1 && $paramNames[0] === 'id') {
+            return match($httpMethod) {
+                'GET' => 'getById',
+                'PUT' => 'update',
+                'DELETE' => 'delete',
+                'POST' => 'create',
+                default => strtolower($method)
+            };
+        }
+
+        // For other parameters, create descriptive names
+        // e.g., :reference_type/:reference_id -> getByReference
+        if (!empty($paramNames)) {
+            $paramContext = $paramNames[0];
+            // Remove common suffixes like _id, _type
+            $paramContext = preg_replace('/_(id|type|key|code)$/', '', $paramContext);
+            $paramContext = str_replace('_', ' ', $paramContext);
+            $paramContext = ucwords($paramContext);
+            $paramContext = str_replace(' ', '', $paramContext);
+
+            return match($httpMethod) {
+                'GET' => 'getBy' . $paramContext,
+                'PUT' => 'updateBy' . $paramContext,
+                'DELETE' => 'deleteBy' . $paramContext,
+                'POST' => 'createBy' . $paramContext,
+                default => strtolower($method) . 'By' . $paramContext
+            };
+        }
+    }
+
+    // If no parts left and no params, use method-based name
+    if (empty($nonParamParts)) {
         return match(strtoupper($method)) {
             'GET' => 'list',
             'POST' => 'create',
@@ -283,9 +332,9 @@ function pathToMethodName(string $path, string $method): string {
         };
     }
 
-    // Convert remaining parts to camelCase
+    // Convert remaining non-param parts to camelCase
     $methodName = '';
-    foreach ($parts as $i => $part) {
+    foreach ($nonParamParts as $i => $part) {
         $part = str_replace(['-', '_'], ' ', $part);
         $part = ucwords($part);
         $part = str_replace(' ', '', $part);
@@ -304,7 +353,7 @@ function pathToMethodName(string $path, string $method): string {
  * Extract path parameter names
  */
 function extractPathParams(string $path): array {
-    preg_match_all('/\{([^}]+)\}/', $path, $matches);
+    preg_match_all('/\:([a-zA-Z_]+)/', $path, $matches);
     return $matches[1] ?? [];
 }
 
@@ -421,7 +470,8 @@ function generateResourceMethod(
     $pathTemplate = $path;
     if (!empty($pathParams)) {
         foreach ($pathParams as $param) {
-            $pathTemplate = str_replace("{{$param}}", "\${$param}", $pathTemplate);
+            // Replace :param with ${param} for template literal interpolation
+            $pathTemplate = str_replace(":{$param}", '${' . $param . '}', $pathTemplate);
         }
         $pathTemplate = "`$pathTemplate`";
     } else {
