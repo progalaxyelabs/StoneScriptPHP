@@ -24,7 +24,7 @@ $config = [
     'host' => getenv('DB_HOST') ?: 'localhost',
     'port' => (int) (getenv('DB_PORT') ?: 5432),
     'user' => getenv('DB_USER') ?: 'stone',
-    'password' => getenv('DB_PASSWORD') ?: 'stone@123',
+    'password' => getenv('DB_PASSWORD') ?: 'changeme',
 ];
 
 db_set_config($config);

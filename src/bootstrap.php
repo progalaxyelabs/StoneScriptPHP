@@ -85,7 +85,7 @@ if (file_exists($envFile)) {
     $GLOBALS['__stonescript_services']['TokenValidator'] = function() use ($authConfig) {
         static $instance = null;
         if ($instance === null) {
-            $gatewayUrl = $authConfig['gateway_url'] ?? 'http://192.168.122.173:9000';
+            $gatewayUrl = $authConfig['gateway_url'] ?? 'http://localhost:9000';
             $jwksEndpoint = $authConfig['jwks_endpoint'] ?? '/auth/jwks';
             $jwksCacheTtl = $authConfig['jwks_cache_ttl'] ?? 3600;
             $instance = new \StoneScriptDB\GatewayClient\Auth\TokenValidator(
