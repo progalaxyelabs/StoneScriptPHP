@@ -5,6 +5,7 @@ namespace StoneScriptPHP\Auth\Routes;
 use StoneScriptPHP\IRouteHandler;
 use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\Auth\RsaJwtHandler;
+use StoneScriptPHP\Auth\JwtHandlerInterface;
 use StoneScriptPHP\Auth\CookieHelper;
 use StoneScriptPHP\Auth\CsrfHelper;
 use StoneScriptPHP\Auth\AuthRoutes;
@@ -39,11 +40,14 @@ use StoneScriptPHP\Auth\AuthRoutes;
  */
 class RefreshRoute implements IRouteHandler
 {
-    private RsaJwtHandler $jwtHandler;
+    private JwtHandlerInterface $jwtHandler;
 
-    public function __construct()
+    /**
+     * @param JwtHandlerInterface|null $jwtHandler Optional JWT handler (defaults to RsaJwtHandler)
+     */
+    public function __construct(?JwtHandlerInterface $jwtHandler = null)
     {
-        $this->jwtHandler = new RsaJwtHandler();
+        $this->jwtHandler = $jwtHandler ?? new RsaJwtHandler();
     }
 
     public function validation_rules(): array

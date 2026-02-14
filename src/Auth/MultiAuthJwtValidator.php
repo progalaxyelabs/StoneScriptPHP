@@ -61,8 +61,15 @@ class MultiAuthJwtValidator
     {
         // First decode without verification to get the issuer claim
         try {
-            $unverified = JWT::decode($jwt, new \Firebase\JWT\Key('', 'none'));
-            $issuer = $unverified->iss ?? null;
+            // Manually decode JWT payload to extract issuer (avoids "empty key" error in jwt v6+)
+            $parts = explode('.', $jwt);
+            if (count($parts) !== 3) {
+                error_log("JWT validation failed: Invalid JWT format");
+                return null;
+            }
+
+            $payload = JWT::jsonDecode(JWT::urlsafeB64Decode($parts[1]));
+            $issuer = $payload->iss ?? null;
 
             if (!$issuer) {
                 error_log("JWT validation failed: Token has no 'iss' claim");

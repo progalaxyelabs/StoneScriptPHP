@@ -6,6 +6,7 @@ use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Auth\Routes\RefreshRoute;
 use StoneScriptPHP\Auth\Routes\LogoutRoute;
 use StoneScriptPHP\Auth\TokenStorageInterface;
+use StoneScriptPHP\Auth\JwtHandlerInterface;
 
 /**
  * Auth Routes Registration
@@ -46,6 +47,7 @@ class AuthRoutes
      * @param array $options Configuration options
      *   - prefix: string (default: '/auth') - URL prefix for auth routes
      *   - token_storage: TokenStorageInterface|null - Optional token storage for blacklisting
+     *   - jwt_handler: JwtHandlerInterface|null - Optional JWT handler (defaults to RsaJwtHandler)
      *   - refresh: bool (default: true) - Enable refresh route
      *   - logout: bool (default: true) - Enable logout route
      *   - middleware: array (default: []) - Route-specific middleware
@@ -56,6 +58,7 @@ class AuthRoutes
         // Extract options with defaults
         $prefix = $options['prefix'] ?? '/auth';
         $tokenStorage = $options['token_storage'] ?? null;
+        $jwtHandler = $options['jwt_handler'] ?? null;
         $enableRefresh = $options['refresh'] ?? true;
         $enableLogout = $options['logout'] ?? true;
         $middleware = $options['middleware'] ?? [];
@@ -76,7 +79,9 @@ class AuthRoutes
         // Register refresh route
         if ($enableRefresh) {
             $refreshPath = "$prefix/refresh";
-            $router->post($refreshPath, RefreshRoute::class, $middleware);
+            // Pass JWT handler to RefreshRoute if provided
+            $refreshRoute = $jwtHandler ? new RefreshRoute($jwtHandler) : RefreshRoute::class;
+            $router->post($refreshPath, $refreshRoute, $middleware);
             log_debug("AuthRoutes: Registered POST $refreshPath");
         }
 

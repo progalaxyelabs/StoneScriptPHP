@@ -39,6 +39,11 @@ class Env
     public int $JWT_ACCESS_TOKEN_EXPIRY = 900;
     public int $JWT_REFRESH_TOKEN_EXPIRY = 15552000;
 
+    // Authentication Mode (v2.2.0+) - Supports microservices architecture
+    // Modes: 'builtin' (local RSA), 'external' (JWKS), 'hybrid' (validate external + issue own)
+    public string $AUTH_MODE = 'builtin';
+    public string $AUTH_SERVICE_URL = 'http://localhost:3139';
+
     public string $AUTH_COOKIE_DOMAIN = '';
     public ?bool $AUTH_COOKIE_SECURE = null;
 
