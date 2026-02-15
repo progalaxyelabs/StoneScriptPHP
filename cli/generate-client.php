@@ -148,9 +148,67 @@ function extractContractTypes(ReflectionClass $interface): ?array {
     }
 
     return [
-        'request' => $requestType->getName(),
-        'response' => $responseType->getName()
+        'request' => getReflectionTypeName($requestType),
+        'response' => getReflectionTypeName($responseType)
     ];
+}
+
+/**
+ * Safely extract type name from any ReflectionType (named, union, intersection)
+ */
+function getReflectionTypeName(?ReflectionType $type): string {
+    if ($type === null) {
+        return 'mixed';
+    }
+
+    if ($type instanceof ReflectionNamedType) {
+        return $type->getName();
+    }
+
+    if ($type instanceof ReflectionUnionType) {
+        // Pick the first non-null type
+        foreach ($type->getTypes() as $subType) {
+            if ($subType instanceof ReflectionNamedType && $subType->getName() !== 'null') {
+                return $subType->getName();
+            }
+        }
+        // All types are null? Shouldn't happen, but fallback
+        return 'mixed';
+    }
+
+    if ($type instanceof ReflectionIntersectionType) {
+        // Use the first type
+        $types = $type->getTypes();
+        if (!empty($types) && $types[0] instanceof ReflectionNamedType) {
+            return $types[0]->getName();
+        }
+        return 'mixed';
+    }
+
+    return 'mixed';
+}
+
+/**
+ * Check if a ReflectionType is a builtin type (safe for union types)
+ */
+function isReflectionTypeBuiltin(?ReflectionType $type): bool {
+    if ($type === null) return true;
+
+    if ($type instanceof ReflectionNamedType) {
+        return $type->isBuiltin();
+    }
+
+    // Union/intersection types with class components are not considered builtin
+    if ($type instanceof ReflectionUnionType) {
+        foreach ($type->getTypes() as $subType) {
+            if ($subType instanceof ReflectionNamedType && !$subType->isBuiltin() && $subType->getName() !== 'null') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return true;
 }
 
 /**
@@ -162,8 +220,13 @@ function phpTypeToTs(string $phpType): string {
         'bool', 'boolean' => 'boolean',
         'string' => 'string',
         'array' => 'any[]',
-        'mixed' => 'any',
-        default => substr($phpType, strrpos($phpType, '\\') + 1) // Extract short class name
+        'object' => 'Record<string, any>',
+        'mixed', 'any' => 'any',
+        'void' => 'void',
+        'null' => 'null',
+        default => str_contains($phpType, '\\')
+            ? substr($phpType, strrpos($phpType, '\\') + 1)  // Extract short class name
+            : $phpType  // Already a short name, return as-is
     };
 }
 
@@ -185,11 +248,12 @@ function reflectDto(string $className): array {
     $properties = [];
     foreach ($constructor->getParameters() as $param) {
         $type = $param->getType();
-        $typeName = $type ? $type->getName() : 'any';
+        $typeName = getReflectionTypeName($type);
+        if ($typeName === 'mixed') $typeName = 'any';
         $isNullable = $type && $type->allowsNull();
 
         // Check if this is a class type (nested DTO)
-        $isClassType = $type && !$type->isBuiltin() && class_exists($typeName);
+        $isClassType = $type && !isReflectionTypeBuiltin($type) && class_exists($typeName);
 
         $properties[] = [
             'name' => $param->getName(),
@@ -218,7 +282,9 @@ function generateTsInterface(string $className, array &$processedClasses = []): 
         return '';
     }
 
-    $shortName = substr($className, strrpos($className, '\\') + 1);
+    $shortName = str_contains($className, '\\')
+        ? substr($className, strrpos($className, '\\') + 1)
+        : $className;
     $output = "export interface $shortName {\n";
 
     $nestedInterfaces = '';
@@ -229,7 +295,7 @@ function generateTsInterface(string $className, array &$processedClasses = []): 
         // If this is a nested class, generate its interface too
         if ($prop['isClass']) {
             $nestedInterfaces .= generateTsInterface($prop['type'], $processedClasses);
-            $tsType = substr($prop['type'], strrpos($prop['type'], '\\') + 1);
+            $tsType = phpTypeToTs($prop['type']);
         }
 
         $optional = $prop['optional'] ? '?' : '';
@@ -388,8 +454,8 @@ function generateClient(array $routes): string {
         // Get resource and method names
         $resourceName = extractResourceName($route['path']);
         $methodName = pathToMethodName($route['path'], $route['method']);
-        $requestTypeName = substr($types['request'], strrpos($types['request'], '\\') + 1);
-        $responseTypeName = substr($types['response'], strrpos($types['response'], '\\') + 1);
+        $requestTypeName = phpTypeToTs($types['request']);
+        $responseTypeName = phpTypeToTs($types['response']);
 
         $pathParams = extractPathParams($route['path']);
         $method = strtoupper($route['method']);
