@@ -212,9 +212,17 @@ function isReflectionTypeBuiltin(?ReflectionType $type): bool {
 }
 
 /**
+ * Track types that are referenced but can't be reflected (class doesn't exist)
+ */
+$GLOBALS['unresolvedTypes'] = [];
+
+/**
  * PHP type to TypeScript type mapping
  */
 function phpTypeToTs(string $phpType): string {
+    // Strip leading backslash (e.g., \object → object, \App\Dto → App\Dto)
+    $phpType = ltrim($phpType, '\\');
+
     return match ($phpType) {
         'int', 'integer', 'float', 'double' => 'number',
         'bool', 'boolean' => 'boolean',
@@ -296,6 +304,11 @@ function generateTsInterface(string $className, array &$processedClasses = []): 
         if ($prop['isClass']) {
             $nestedInterfaces .= generateTsInterface($prop['type'], $processedClasses);
             $tsType = phpTypeToTs($prop['type']);
+        } elseif (!in_array($tsType, ['number', 'boolean', 'string', 'any[]', 'Record<string, any>', 'any', 'void', 'null'])) {
+            // Type is not a built-in TS type and not a reflectable class — track as unresolved
+            if (!in_array($tsType, $GLOBALS['unresolvedTypes'])) {
+                $GLOBALS['unresolvedTypes'][] = $tsType;
+            }
         }
 
         $optional = $prop['optional'] ? '?' : '';
@@ -318,7 +331,15 @@ function generateTsInterface(string $className, array &$processedClasses = []): 
 function extractResourceName(string $path): string {
     $path = trim($path, '/');
     $parts = explode('/', $path);
-    return $parts[0] ?? 'default';
+    $name = $parts[0] ?? 'default';
+
+    // Convert hyphenated/underscored names to camelCase (e.g. customer-bills → customerBills)
+    if (str_contains($name, '-') || str_contains($name, '_')) {
+        $name = str_replace(['-', '_'], ' ', $name);
+        $name = lcfirst(str_replace(' ', '', ucwords($name)));
+    }
+
+    return $name;
 }
 
 /**
@@ -470,17 +491,72 @@ function generateClient(array $routes): string {
             $pathParams
         );
 
-        // Group by resource
+        // Group by resource — track method names for deduplication
         if (!isset($resourceMethods[$resourceName])) {
             $resourceMethods[$resourceName] = [];
+            $resourceMethodNames[$resourceName] = [];
         }
-        $resourceMethods[$resourceName][] = $methodCode;
+        $resourceMethods[$resourceName][] = [
+            'code' => $methodCode,
+            'name' => $methodName,
+            'httpMethod' => strtoupper($route['method']),
+        ];
+        $resourceMethodNames[$resourceName][] = $methodName;
     }
+
+    // Deduplicate method names within each resource
+    foreach ($resourceMethods as $resourceName => &$methods) {
+        // First pass: prefix duplicates with HTTP method
+        $nameCounts = array_count_values(array_column($methods, 'name'));
+        foreach ($methods as &$methodEntry) {
+            $name = $methodEntry['name'];
+            if ($nameCounts[$name] > 1) {
+                $httpPrefix = strtolower($methodEntry['httpMethod']);
+                $newName = $httpPrefix . ucfirst($name);
+                $methodEntry['code'] = str_replace(
+                    "{$name}: async (",
+                    "{$newName}: async (",
+                    $methodEntry['code']
+                );
+                $methodEntry['name'] = $newName;
+            }
+        }
+        unset($methodEntry);
+
+        // Second pass: if still duplicates (same HTTP method), add numeric suffix
+        $nameCounts = array_count_values(array_column($methods, 'name'));
+        $nameOccurrence = [];
+        foreach ($methods as &$methodEntry) {
+            $name = $methodEntry['name'];
+            if ($nameCounts[$name] > 1) {
+                if (!isset($nameOccurrence[$name])) {
+                    $nameOccurrence[$name] = 0;
+                }
+                $nameOccurrence[$name]++;
+                // First occurrence keeps the name, subsequent get ById suffix or numeric
+                if ($nameOccurrence[$name] > 1) {
+                    $newName = $name . 'ById';
+                    // If more than 2 duplicates, add number
+                    if ($nameOccurrence[$name] > 2) {
+                        $newName = $name . $nameOccurrence[$name];
+                    }
+                    $methodEntry['code'] = str_replace(
+                        "{$name}: async (",
+                        "{$newName}: async (",
+                        $methodEntry['code']
+                    );
+                    $methodEntry['name'] = $newName;
+                }
+            }
+        }
+        unset($methodEntry);
+    }
+    unset($methods);
 
     // Generate resource objects
     $resourcesCode = '';
     foreach ($resourceMethods as $resourceName => $methods) {
-        $methodsStr = implode("\n\n", $methods);
+        $methodsStr = implode("\n\n", array_column($methods, 'code'));
         $resourcesCode .= <<<TS
 
   /**
@@ -491,6 +567,16 @@ $methodsStr
   };
 
 TS;
+    }
+
+    // Generate type aliases for unresolved types (referenced but not reflectable)
+    $unresolvedAliases = '';
+    if (!empty($GLOBALS['unresolvedTypes'])) {
+        $unresolvedAliases .= "// Unresolved types (class not found during generation)\n";
+        foreach ($GLOBALS['unresolvedTypes'] as $typeName) {
+            $unresolvedAliases .= "export type $typeName = Record<string, any>;\n";
+        }
+        $unresolvedAliases .= "\n";
     }
 
     $output = <<<TS
@@ -507,7 +593,7 @@ import { ApiConnectionService, ApiResponse } from '@progalaxyelabs/ngx-stonescri
 // Type Definitions
 // ============================================================================
 
-$interfaces
+$unresolvedAliases$interfaces
 // ============================================================================
 // API Client
 // ============================================================================
@@ -624,11 +710,11 @@ $packageJson = json_encode([
     'author' => '',
     'license' => 'MIT',
     'peerDependencies' => [
-        '@progalaxyelabs/ngx-stonescriptphp-client' => '^2.0.0'
+        '@progalaxyelabs/ngx-stonescriptphp-client' => '^1.6.0'
     ],
     'devDependencies' => [
         'typescript' => '^5.8.0',
-        '@progalaxyelabs/ngx-stonescriptphp-client' => '^2.0.0'
+        '@progalaxyelabs/ngx-stonescriptphp-client' => '^1.6.0'
     ],
     'files' => [
         'dist',
