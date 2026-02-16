@@ -24,7 +24,7 @@ if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))
     echo "===============\n\n";
     echo "Usage: php generate model <filename>\n\n";
     echo "Arguments:\n";
-    echo "  filename    PostgreSQL function file in src/postgresql/functions/\n";
+    echo "  filename    PostgreSQL function file (searches functions/, tenant/postgresql/functions/, main/postgresql/functions/)\n";
     echo "              Extension is optional (.pgsql, .pssql, .sql supported)\n\n";
     echo "Examples:\n";
     echo "  php generate model get_user.pgsql\n";
@@ -43,36 +43,59 @@ if ($argc !== 2) {
 
 // Get the base filename (without path separators for security)
 $filename = str_replace('..', '.', $argv[1]);
-$functions_dir = ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR;
+
+// Search directories in priority order (supports gateway-compatible directory structure)
+$search_dirs = [
+    ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR,
+    ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'tenant' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR,
+    ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'main' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR,
+];
+
+// Filter to only existing directories
+$search_dirs = array_filter($search_dirs, 'is_dir');
 
 // Check if user provided extension
 if (preg_match('/\.(pgsql|pssql|sql)$/i', $filename)) {
-    // User specified extension - use exactly what they provided
-    $src_filepath = $functions_dir . $filename;
+    // User specified extension - search all directories
+    $src_filepath = null;
+    foreach ($search_dirs as $dir) {
+        $test_path = $dir . $filename;
+        if (file_exists($test_path)) {
+            $src_filepath = $test_path;
+            break;
+        }
+    }
 
-    if (!file_exists($src_filepath)) {
+    if ($src_filepath === null) {
         echo "Error: PostgreSQL function file not found\n\n";
-        echo "Looked for: $src_filepath\n";
+        echo "Searched in:\n";
+        foreach ($search_dirs as $dir) {
+            echo "  - {$dir}{$filename}\n";
+        }
         echo "\nPlease ensure the file exists with the exact name you specified.\n";
         exit(1);
     }
 } else {
-    // No extension provided - try to auto-detect
+    // No extension provided - try to auto-detect across all directories
     $found_files = [];
-    foreach (['pgsql', 'pssql', 'sql'] as $ext) {
-        $test_path = $functions_dir . $filename . '.' . $ext;
-        if (file_exists($test_path)) {
-            $found_files[] = $test_path;
+    foreach ($search_dirs as $dir) {
+        foreach (['pgsql', 'pssql', 'sql'] as $ext) {
+            $test_path = $dir . $filename . '.' . $ext;
+            if (file_exists($test_path)) {
+                $found_files[] = $test_path;
+            }
         }
     }
 
     if (count($found_files) === 0) {
         echo "Error: PostgreSQL function file not found\n\n";
-        echo "Searched for:\n";
-        echo "  - {$functions_dir}{$filename}.pgsql\n";
-        echo "  - {$functions_dir}{$filename}.pssql\n";
-        echo "  - {$functions_dir}{$filename}.sql\n";
-        echo "\nPlease ensure the file exists in src/postgresql/functions/\n";
+        echo "Searched in:\n";
+        foreach ($search_dirs as $dir) {
+            foreach (['pgsql', 'pssql', 'sql'] as $ext) {
+                echo "  - {$dir}{$filename}.{$ext}\n";
+            }
+        }
+        echo "\nPlease ensure the file exists in one of the postgresql/functions/ directories.\n";
         echo "Or specify the exact filename with extension.\n";
         exit(1);
     }
@@ -81,7 +104,7 @@ if (preg_match('/\.(pgsql|pssql|sql)$/i', $filename)) {
         echo "Error: Multiple files found with the same base name\n\n";
         echo "Found:\n";
         foreach ($found_files as $file) {
-            echo "  - " . basename($file) . "\n";
+            echo "  - " . str_replace(ROOT_PATH, '', $file) . "\n";
         }
         echo "\nPlease specify the exact filename with extension to avoid ambiguity.\n";
         echo "Example: php stone generate model {$filename}.pgsql\n";
@@ -111,10 +134,54 @@ if (!preg_match($regex, $content, $matches)) {
     die(0);
 }
 
+/**
+ * Split parameter string by commas, respecting parenthesized groups (e.g., numeric(15,2))
+ *
+ * @param string $str Parameter string to split
+ * @return array Array of parameter strings
+ */
+function split_parameters(string $str): array
+{
+    $params = [];
+    $current_param = '';
+    $paren_depth = 0;
+
+    for ($i = 0; $i < strlen($str); $i++) {
+        $char = $str[$i];
+
+        if ($char === '(') {
+            $paren_depth++;
+            $current_param .= $char;
+        } elseif ($char === ')') {
+            $paren_depth--;
+            $current_param .= $char;
+        } elseif ($char === ',' && $paren_depth === 0) {
+            // This comma is a parameter separator
+            if (trim($current_param) !== '') {
+                $params[] = trim($current_param);
+            }
+            $current_param = '';
+            // Skip the space after comma if present
+            if ($i + 1 < strlen($str) && $str[$i + 1] === ' ') {
+                $i++;
+            }
+        } else {
+            $current_param .= $char;
+        }
+    }
+
+    // Don't forget the last parameter
+    if (trim($current_param) !== '') {
+        $params[] = trim($current_param);
+    }
+
+    return $params;
+}
+
 function get_input_params(string $str, array $type_map): array
 {
     $params_str = strtolower(trim(preg_replace('#[\s]+#', ' ', $str)));
-    $lines = explode(', ', $params_str);
+    $lines = split_parameters($params_str);
     $typed_input_params = [];
     $input_params = [];
     foreach ($lines as $line) {
@@ -131,7 +198,8 @@ function get_input_params(string $str, array $type_map): array
 
         $parts = explode(' ', trim($trimmed_line));
         $name = preg_replace('#^i_#', '', $parts[0]);
-        $type = $type_map[$parts[1]] ?? 'mixed';
+        $raw_type = preg_replace('/\(.*\)/', '', $parts[1] ?? ''); // Strip precision e.g. numeric(15,2) -> numeric
+        $type = $type_map[$raw_type] ?? 'mixed';
         $typed_input_params[] = "$type $$name";
         $input_params[] = "$$name";
     }
@@ -149,17 +217,18 @@ function get_output_params(string $input_str, string $returns_str, array $type_m
     if (!empty($returns_str_clean)) {
         $is_return_table = true;
         $params_str = rtrim(preg_replace('#^returns table[\s]*\(#', '', $returns_str_clean), ')');
-        $lines = explode(', ', $params_str);
+        $lines = split_parameters($params_str);
         foreach ($lines as $line) {
             $trimmed_line = trim($line);
             $parts = explode(' ', $trimmed_line);
             $name = preg_replace('#^o_#', '', $parts[0]);
-            $type = $type_map[$parts[1]];
+            $raw_type = preg_replace('/\(.*\)/', '', $parts[1] ?? '');
+            $type = $type_map[$raw_type] ?? 'mixed';
             $output_params[$name] = $type;
         }
     } else {
         $is_return_table = false;
-        $lines = explode(', ', $input_str_clean);
+        $lines = split_parameters($input_str_clean);
         foreach ($lines as $line) {
             $trimmed_line = trim($line);
             if (!str_starts_with($trimmed_line, 'out ')) {
@@ -167,7 +236,8 @@ function get_output_params(string $input_str, string $returns_str, array $type_m
             }
             $parts = explode(' ', $trimmed_line);
             $name = preg_replace('#^o_#', '', $parts[1]);
-            $type = $type_map[$parts[2]];
+            $raw_type = preg_replace('/\(.*\)/', '', $parts[2] ?? '');
+            $type = $type_map[$raw_type] ?? 'mixed';
             $output_params[$name] = $type;
         }
     }
@@ -178,11 +248,26 @@ function get_output_params(string $input_str, string $returns_str, array $type_m
 $type_map = [
     'integer' => 'int',
     'int' => 'int',
+    'bigint' => 'int',
+    'smallint' => 'int',
+    'serial' => 'int',
     'text' => 'string',
+    'varchar' => 'string',
+    'char' => 'string',
+    'uuid' => 'string',
+    'json' => 'mixed',
+    'jsonb' => 'mixed',
     'boolean' => 'bool',
     'bool' => 'bool',
     'timestamptz' => 'string',
-    'date' => 'string'
+    'timestamp' => 'string',
+    'date' => 'string',
+    'time' => 'string',
+    'numeric' => 'float',
+    'decimal' => 'float',
+    'real' => 'float',
+    'float' => 'float',
+    'double' => 'float',
 ];
 
 list($typed_input_params, $input_params) = get_input_params($matches[4], $type_map);

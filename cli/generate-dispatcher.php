@@ -23,8 +23,9 @@ if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))
     echo "Available subcommands:\n";
     echo "  route <method> <path>        Generate route handler\n";
     echo "  model <function.pgsql>       Generate model from PostgreSQL function\n";
-    echo "  jwt                          Generate JWT RSA keypair\n";
+    echo "  contract [ClassName]         Generate contracts from route handlers\n";
     echo "  client                       Generate TypeScript client\n";
+    echo "  jwt                          Generate JWT RSA keypair\n";
     echo "  auth:email-password          Generate email/password authentication\n";
     echo "  auth:google                  Generate Google OAuth authentication\n";
     echo "  auth:linkedin                Generate LinkedIn OAuth authentication\n";
@@ -33,6 +34,7 @@ if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))
     echo "  cache:redis                  Generate Redis caching support\n\n";
     echo "Examples:\n";
     echo "  php stone generate route post /login\n";
+    echo "  php stone generate contract\n";
     echo "  php stone generate auth:email-password\n";
     echo "  php stone generate cache:redis\n";
     exit(0);
@@ -45,8 +47,9 @@ $subcommand = $argv[1] ?? '';
 $generators = [
     'route' => 'cli/generate-route.php',
     'model' => 'cli/generate-model.php',
-    'jwt' => 'cli/generate-jwt-keys.php',
+    'contract' => 'cli/generate-contract.php',
     'client' => 'cli/generate-client.php',
+    'jwt' => 'cli/generate-jwt-keys.php',
     'auth:email-password' => 'cli/generate-auth.php',
     'auth:google' => 'cli/generate-auth.php',
     'auth:linkedin' => 'cli/generate-auth.php',

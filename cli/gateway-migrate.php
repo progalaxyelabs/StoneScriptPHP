@@ -20,6 +20,8 @@
  *   --delay=<s>       Delay between retries in seconds (default: 5)
  *   --quiet           Suppress output
  *   --tenant=<id>     Override TENANT_ID environment variable
+ *   --main            Migrate main DB schema instead of tenant schema (nested layouts only)
+ *   --force           Send force=true to bypass schema validation (use with caution)
  *
  * Example:
  *   # Migrate all tenants
@@ -27,7 +29,12 @@
  *
  *   # Migrate specific tenant
  *   php stone gateway:migrate --tenant=clinic_001
+ *
+ *   # Migrate main database (nested layout)
+ *   php stone gateway:migrate --main
  */
+
+require_once __DIR__ . '/helpers/schema-archive-builder.php';
 
 // Configuration from environment
 $gatewayUrl = getenv('DB_GATEWAY_URL');
@@ -38,6 +45,8 @@ $tenantId = getenv('TENANT_ID') ?: null;
 $retryCount = 3;
 $retryDelay = 5;
 $quiet = in_array('--quiet', $argv);
+$migrateMain = in_array('--main', $argv);
+$force = in_array('--force', $argv);
 
 foreach ($argv as $arg) {
     if (strpos($arg, '--retry=') === 0) {
@@ -71,6 +80,8 @@ if (!is_dir($postgresqlPath)) {
     exit(1);
 }
 
+$target = $migrateMain ? 'main' : 'tenant';
+
 if (!$quiet) {
     echo "=== DB Gateway Schema Migration ===\n";
     echo "Platform: {$platformId}\n";
@@ -79,7 +90,11 @@ if (!$quiet) {
     } else {
         echo "Tenant: ALL (will migrate all tenant databases)\n";
     }
+    echo "Target: {$target}\n";
     echo "Gateway: {$gatewayUrl}\n";
+    if ($force) {
+        echo "Force: enabled (bypassing schema validation)\n";
+    }
     echo "\n";
 }
 
@@ -117,28 +132,17 @@ if (!$quiet) {
 }
 
 try {
-    $tarPath = preg_replace('/\.gz$/', '', $tarFile);
-
-    // Remove existing files
-    if (file_exists($tarFile)) unlink($tarFile);
-    if (file_exists($tarPath)) unlink($tarPath);
-
-    $phar = new PharData($tarPath);
-    $phar->buildFromDirectory(dirname($postgresqlPath), '/postgresql/');
-    $phar->compress(Phar::GZ);
-
-    if (file_exists($tarPath)) unlink($tarPath);
+    $stats = buildSchemaArchive($postgresqlPath, $tarFile, $target, $quiet);
 
     $size = round(filesize($tarFile) / 1024, 1);
 
-    // Count files
-    $funcCount = count(glob("{$postgresqlPath}/functions/*.pssql"));
-    $migrationCount = count(glob("{$postgresqlPath}/migrations/*.pssql"));
-
     if (!$quiet) {
         echo "Created: {$tarFile} ({$size} KB)\n";
-        echo "  Functions: {$funcCount} files\n";
-        echo "  Migrations: {$migrationCount} files\n\n";
+        echo "  Tables:     {$stats['tables']} files\n";
+        echo "  Functions:  {$stats['functions']} files\n";
+        echo "  Views:      {$stats['views']} files\n";
+        echo "  Migrations: {$stats['migrations']} files\n";
+        echo "  Total:      {$stats['total_files']} files\n\n";
     }
 } catch (Exception $e) {
     fwrite(STDERR, "ERROR: Failed to create archive: " . $e->getMessage() . "\n");
@@ -173,6 +177,13 @@ while ($attempt <= $retryCount && !$success) {
         $body .= "--{$boundary}\r\n";
         $body .= "Content-Disposition: form-data; name=\"tenant_id\"\r\n\r\n";
         $body .= "{$tenantId}\r\n";
+    }
+
+    // Add force flag if set
+    if ($force) {
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"force\"\r\n\r\n";
+        $body .= "true\r\n";
     }
 
     // Add schema file

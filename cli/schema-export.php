@@ -10,16 +10,21 @@
  * Options:
  *   --output=<path>   Output file path (default: .cache/postgresql_<timestamp>.tar.gz)
  *   --quiet           Suppress output
+ *   --main            Export main DB schema instead of tenant schema (nested layouts only)
  *
  * Example:
  *   php stone schema:export
  *   php stone schema:export --output=/tmp/schema.tar.gz
+ *   php stone schema:export --main
  */
+
+require_once __DIR__ . '/helpers/schema-archive-builder.php';
 
 // Configuration
 $postgresqlPath = ROOT_PATH . '/src/postgresql';
 $cacheDir = ROOT_PATH . '/.cache';
 $quiet = in_array('--quiet', $argv);
+$migrateMain = in_array('--main', $argv);
 
 // Parse options
 $outputPath = null;
@@ -50,57 +55,29 @@ if (!is_dir($outputDir)) {
     }
 }
 
-// Count files
-$funcCount = count(glob("{$postgresqlPath}/functions/*.pssql"));
-$migrationCount = count(glob("{$postgresqlPath}/migrations/*.pssql"));
-$tableCount = count(glob("{$postgresqlPath}/tables/*.pssql"));
-$seederCount = count(glob("{$postgresqlPath}/seeders/*.pssql"));
+$target = $migrateMain ? 'main' : 'tenant';
 
 if (!$quiet) {
     echo "=== StoneScriptPHP Schema Export ===\n";
     echo "Source: {$postgresqlPath}\n";
     echo "Output: {$outputPath}\n";
-    echo "\nFiles:\n";
-    echo "  Functions:  {$funcCount}\n";
-    echo "  Migrations: {$migrationCount}\n";
-    echo "  Tables:     {$tableCount}\n";
-    echo "  Seeders:    {$seederCount}\n";
-    echo "\n";
+    echo "Target: {$target}\n\n";
 }
 
-// Create tar.gz using PharData
+// Create tar.gz using shared archive builder
 try {
-    // Remove existing file if present
-    if (file_exists($outputPath)) {
-        unlink($outputPath);
-    }
+    $stats = buildSchemaArchive($postgresqlPath, $outputPath, $target, $quiet);
 
-    // Also remove intermediate .tar if it exists
-    $tarPath = preg_replace('/\.gz$/', '', $outputPath);
-    if (file_exists($tarPath)) {
-        unlink($tarPath);
-    }
-
-    // Create tar archive
-    $phar = new PharData($tarPath);
-
-    // Add postgresql folder recursively
-    $phar->buildFromDirectory(dirname($postgresqlPath), '/postgresql/');
-
-    // Compress to gzip
-    $phar->compress(Phar::GZ);
-
-    // Remove intermediate .tar file
-    if (file_exists($tarPath)) {
-        unlink($tarPath);
-    }
-
-    // Get file size
     $size = filesize($outputPath);
     $sizeKb = round($size / 1024, 1);
 
     if (!$quiet) {
         echo "Created: {$outputPath} ({$sizeKb} KB)\n";
+        echo "  Tables:     {$stats['tables']} files\n";
+        echo "  Functions:  {$stats['functions']} files\n";
+        echo "  Views:      {$stats['views']} files\n";
+        echo "  Migrations: {$stats['migrations']} files\n";
+        echo "  Total:      {$stats['total_files']} files\n";
     }
 
     // Output the path for scripting

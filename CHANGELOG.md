@@ -5,6 +5,18 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- New `php stone generate contract` CLI command for auto-generating contract interfaces and DTOs from route handlers
+- Uses PHP Reflection to extract public properties from route classes without requiring AI
+- Automatically infers required/optional fields from `validation_rules()` method
+- Generates typed Request/Response DTOs with `readonly` constructor parameters
+- Supports `--dry-run` flag for previewing generated files
+- Supports `--force` flag for overwriting existing contracts
+- Can generate for a single route or all routes at once
+- Skips routes that already have contracts unless `--force` is used
+
 ## [2.9.0] - 2026-02-11
 
 ### Added
