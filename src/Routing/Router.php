@@ -46,11 +46,11 @@ class Router
      * Register a GET route
      *
      * @param string $path
-     * @param string $handler Handler class name
+     * @param string|object $handler Handler class name or pre-instantiated handler object
      * @param array $middleware Route-specific middleware
      * @return self
      */
-    public function get(string $path, string $handler, array $middleware = []): self
+    public function get(string $path, string|object $handler, array $middleware = []): self
     {
         return $this->addRoute('GET', $path, $handler, $middleware);
     }
@@ -59,11 +59,11 @@ class Router
      * Register a POST route
      *
      * @param string $path
-     * @param string $handler Handler class name
+     * @param string|object $handler Handler class name or pre-instantiated handler object
      * @param array $middleware Route-specific middleware
      * @return self
      */
-    public function post(string $path, string $handler, array $middleware = []): self
+    public function post(string $path, string|object $handler, array $middleware = []): self
     {
         return $this->addRoute('POST', $path, $handler, $middleware);
     }
@@ -73,11 +73,11 @@ class Router
      *
      * @param string $method HTTP method
      * @param string $path Route path
-     * @param string $handler Handler class name
+     * @param string|object $handler Handler class name or pre-instantiated handler object
      * @param array $middleware Route-specific middleware
      * @return self
      */
-    public function addRoute(string $method, string $path, string $handler, array $middleware = []): self
+    public function addRoute(string $method, string $path, string|object $handler, array $middleware = []): self
     {
         $method = strtoupper($method);
 
@@ -145,7 +145,8 @@ class Router
 
             $handler = $match['handler'];
             $request['params'] = $match['params'];
-            $request['handler_class'] = $handler; // Add handler class to request for attribute checking
+            // Normalize handler_class to string for middleware attribute checking
+            $request['handler_class'] = is_object($handler) ? get_class($handler) : $handler;
             $this->routeParams = $match['params'];
 
             // Get route-specific middleware
@@ -243,19 +244,25 @@ class Router
     /**
      * Execute the route handler
      *
-     * @param string $handlerClass
+     * @param string|object $handlerClass Handler class name or pre-instantiated handler object
      * @param array $request
      * @return ApiResponse
      */
-    private function executeHandler(string $handlerClass, array $request): ApiResponse
+    private function executeHandler(string|object $handlerClass, array $request): ApiResponse
     {
         try {
-            if (!class_exists($handlerClass)) {
-                log_debug("Handler class not found: $handlerClass");
-                return $this->error404('Handler not found');
-            }
+            if (is_object($handlerClass)) {
+                // Pre-instantiated handler object (e.g. RefreshRoute with jwtHandler injected)
+                $handler = $handlerClass;
+                $handlerClass = get_class($handler);
+            } else {
+                if (!class_exists($handlerClass)) {
+                    log_debug("Handler class not found: $handlerClass");
+                    return $this->error404('Handler not found');
+                }
 
-            $handler = new $handlerClass();
+                $handler = new $handlerClass();
+            }
 
             // Check if handler implements IRouteHandler interface
             if (!($handler instanceof \StoneScriptPHP\IRouteHandler)) {
