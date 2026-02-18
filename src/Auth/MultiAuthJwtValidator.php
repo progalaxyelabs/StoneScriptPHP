@@ -12,22 +12,22 @@ use Firebase\JWT\JWK;
  * Each issuer has its own JWKS endpoint and configuration.
  *
  * Use case: Shared platform APIs accepting tokens from:
- * - Customer auth server (progalaxyelabs-auth)
- * - Employee auth server (pel-admin-auth)
+ * - Customer auth server
+ * - Employee/admin auth server
  *
  * Configuration:
  * ```php
  * 'auth_servers' => [
  *     'customer' => [
- *         'issuer' => 'https://auth.progalaxyelabs.com',
- *         'jwks_url' => 'https://auth.progalaxyelabs.com/auth/jwks',
- *         'audience' => 'progalaxyelabs-api',
+ *         'issuer' => 'https://auth.example.com',
+ *         'jwks_url' => 'https://auth.example.com/auth/jwks',
+ *         'audience' => 'my-api',
  *         'cache_ttl' => 3600,
  *     ],
  *     'employee' => [
- *         'issuer' => 'https://admin-auth.progalaxyelabs.com',
- *         'jwks_url' => 'https://admin-auth.progalaxyelabs.com/auth/jwks',
- *         'audience' => 'pel-admin-api',
+ *         'issuer' => 'https://admin-auth.example.com',
+ *         'jwks_url' => 'https://admin-auth.example.com/auth/jwks',
+ *         'audience' => 'my-admin-api',
  *         'cache_ttl' => 3600,
  *     ],
  * ]

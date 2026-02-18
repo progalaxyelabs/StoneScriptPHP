@@ -10,7 +10,7 @@
  *
  * Environment variables (required):
  *   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
- *   PLATFORM_ID       - Platform identifier (e.g., medstoreapp)
+ *   PLATFORM_ID       - Platform identifier (e.g., myapp)
  *
  * Environment variables (optional):
  *   TENANT_ID         - Tenant identifier (omit for main DB)
@@ -22,7 +22,7 @@
  *   --main            Register main DB schema instead of tenant schema (nested layouts only)
  *
  * Example:
- *   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=btechrecruiter php stone gateway:register
+ *   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myapp php stone gateway:register
  */
 
 require_once __DIR__ . '/helpers/schema-archive-builder.php';

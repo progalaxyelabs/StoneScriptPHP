@@ -60,7 +60,7 @@ class Tenant
         $dbName = $payload['tenant_db'] ?? $payload['tdb'] ?? null;
 
         // Derive database name from UUID if not explicitly provided
-        // Follows medstoreapp pattern: tenant_{uuid_without_hyphens}
+        // Derive DB name: tenant_{uuid_without_hyphens}
         if (!$dbName && $uuid) {
             $dbName = 'tenant_' . str_replace('-', '', $uuid);
         }

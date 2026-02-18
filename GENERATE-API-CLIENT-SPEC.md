@@ -133,8 +133,8 @@ Options:
 Examples:
   php stone generate client
   php stone generate client --output=../portal/src/api-client
-  php stone generate client --name=@progalaxy/api --output=../www/src/api-client
-  php stone generate client --base-url=https://api.progalaxy.in
+  php stone generate client --name=@myorg/api --output=../www/src/api-client
+  php stone generate client --base-url=https://api.example.com
 ```
 
 ---

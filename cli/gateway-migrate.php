@@ -10,7 +10,7 @@
  *
  * Environment variables (required):
  *   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
- *   PLATFORM_ID       - Platform identifier (e.g., medstoreapp)
+ *   PLATFORM_ID       - Platform identifier (e.g., myapp)
  *
  * Environment variables (optional):
  *   TENANT_ID         - Specific tenant (omit to migrate ALL tenants)
@@ -25,7 +25,7 @@
  *
  * Example:
  *   # Migrate all tenants
- *   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=medstoreapp php stone gateway:migrate
+ *   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myapp php stone gateway:migrate
  *
  *   # Migrate specific tenant
  *   php stone gateway:migrate --tenant=clinic_001

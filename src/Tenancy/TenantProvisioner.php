@@ -440,7 +440,7 @@ class TenantProvisioner
     /**
      * Generate database name from UUID
      *
-     * Follows medstoreapp pattern: tenant_{uuid_without_hyphens}
+     * Default format: {prefix}{uuid_without_hyphens}
      *
      * @param string $uuid
      * @return string

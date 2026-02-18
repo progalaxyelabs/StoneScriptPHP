@@ -5,8 +5,8 @@ StoneScriptPHP supports validating JWT tokens from multiple authentication serve
 ## Use Case
 
 Shared platform APIs that need to accept tokens from:
-- **Customer auth server** (`progalaxyelabs-auth`) - Standard customer access
-- **Employee auth server** (`pel-admin-auth`) - Elevated admin/support access
+- **Customer auth server** - Standard customer access
+- **Employee auth server** - Elevated admin/support access
 
 Different authorization rules can be applied based on the token issuer.
 
@@ -23,15 +23,15 @@ return [
     // Multi-auth server configuration
     'auth_servers' => [
         'customer' => [
-            'issuer' => 'https://auth.progalaxyelabs.com',
-            'jwks_url' => 'https://auth.progalaxyelabs.com/auth/jwks',
-            'audience' => 'progalaxyelabs-api',
+            'issuer' => 'https://auth.example.com',
+            'jwks_url' => 'https://auth.example.com/auth/jwks',
+            'audience' => 'my-api',
             'cache_ttl' => 3600,
         ],
         'employee' => [
-            'issuer' => 'https://admin-auth.progalaxyelabs.com',
-            'jwks_url' => 'https://admin-auth.progalaxyelabs.com/auth/jwks',
-            'audience' => 'pel-admin-api',
+            'issuer' => 'https://admin-auth.example.com',
+            'jwks_url' => 'https://admin-auth.example.com/auth/jwks',
+            'audience' => 'my-admin-api',
             'cache_ttl' => 3600,
         ],
     ],
@@ -204,14 +204,14 @@ class CentralizedAuth
 return [
     'auth_servers' => [
         'customer' => [
-            'issuer' => 'https://auth.progalaxyelabs.com',
-            'jwks_url' => 'https://auth.progalaxyelabs.com/auth/jwks',
-            'audience' => 'progalaxyelabs-api',
+            'issuer' => 'https://auth.example.com',
+            'jwks_url' => 'https://auth.example.com/auth/jwks',
+            'audience' => 'my-api',
         ],
         'employee' => [
-            'issuer' => 'https://admin-auth.progalaxyelabs.com',
-            'jwks_url' => 'https://admin-auth.progalaxyelabs.com/auth/jwks',
-            'audience' => 'pel-admin-api',
+            'issuer' => 'https://admin-auth.example.com',
+            'jwks_url' => 'https://admin-auth.example.com/auth/jwks',
+            'audience' => 'my-admin-api',
         ],
     ],
 ];

@@ -14,7 +14,7 @@ use Firebase\JWT\Key;
  * - Generates JWT locally
  * - Perfect for OSS users
  *
- * CENTRALIZED MODE (ProGalaxy):
+ * CENTRALIZED MODE (external auth):
  * - Proxies to external auth service
  * - Validates JWT using JWKS
  * - Shared identity across platforms
@@ -395,7 +395,7 @@ class StandaloneAuth
 
 /**
  * Centralized Authentication Implementation
- * For ProGalaxy platforms with external auth service
+ * For platforms with an external auth service
  * Supports both single-issuer (legacy) and multi-issuer modes
  */
 class CentralizedAuth
@@ -409,10 +409,10 @@ class CentralizedAuth
 
     public function __construct(array $config = [])
     {
-        // Internal swarm service URL (for legacy single-issuer mode)
+        // Auth service URL (for legacy single-issuer mode)
         $this->authServiceUrl = $config['auth_service_url'] ??
             getenv('AUTH_SERVICE_URL') ??
-            'http://progalaxyelabs-auth_auth:3139';
+            'http://localhost:3139';
 
         // Initialize multi-auth if configured
         if (isset($config['auth_servers']) && is_array($config['auth_servers'])) {
