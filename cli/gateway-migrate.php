@@ -203,7 +203,7 @@ $resp = httpRequest('POST', "{$gatewayUrl}/platform/{$platformId}/schema", [
     'Content-Length: ' . strlen($body),
 ], $body, 60);
 
-if ($resp['code'] === 200) {
+if (in_array($resp['code'], [200, 201])) {
     if (!$quiet) {
         echo "  Schema uploaded\n\n";
     }
@@ -238,7 +238,7 @@ while ($attempt <= $retryCount && !$success) {
         'Content-Length: ' . strlen($payload),
     ], $payload, 120);
 
-    if ($resp['code'] === 200) {
+    if (in_array($resp['code'], [200, 201])) {
         $success = true;
         $response = json_decode($resp['body'], true);
 

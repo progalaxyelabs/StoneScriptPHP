@@ -177,7 +177,7 @@ $resp = httpRequest('POST', "{$gatewayUrl}/platform/register", [
     'Content-Length: ' . strlen($payload),
 ], $payload, 30);
 
-if ($resp['code'] === 200 || $resp['code'] === 409) {
+if (in_array($resp['code'], [200, 201, 409])) {
     if (!$quiet) {
         echo "  Platform registered (or already exists)\n\n";
     }
@@ -213,7 +213,7 @@ $resp = httpRequest('POST', "{$gatewayUrl}/platform/{$platformId}/schema", [
     'Content-Length: ' . strlen($body),
 ], $body, 60);
 
-if ($resp['code'] === 200) {
+if (in_array($resp['code'], [200, 201])) {
     if (!$quiet) {
         $schemaInfo = json_decode($resp['body'], true);
         echo "  Schema uploaded\n";
@@ -259,7 +259,7 @@ while ($attempt <= $retryCount && !$success) {
 
     $resp = httpRequest('POST', "{$gatewayUrl}/admin/database/create", $headers, $payload, 60);
 
-    if ($resp['code'] === 200) {
+    if (in_array($resp['code'], [200, 201])) {
         $success = true;
         $response = json_decode($resp['body'], true);
 
