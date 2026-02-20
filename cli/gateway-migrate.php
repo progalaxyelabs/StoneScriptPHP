@@ -1,9 +1,10 @@
 <?php
 /**
- * StoneScriptPHP CLI - Gateway Migrate
+ * StoneScriptPHP CLI - Gateway Migrate (V2 API)
  *
- * Hot migration of schema to db-gateway without container restart.
- * Updates all tenant databases or a specific tenant.
+ * Two-step migration flow:
+ *   1. Upload schema archive (stores new version)
+ *   2. Migrate database using stored schema (JSON body)
  *
  * Usage:
  *   php stone gateway:migrate [options]
@@ -11,27 +12,25 @@
  * Environment variables (required):
  *   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
  *   PLATFORM_ID       - Platform identifier (e.g., myapp)
- *
- * Environment variables (optional):
- *   TENANT_ID         - Specific tenant (omit to migrate ALL tenants)
+ *   SCHEMA_NAME       - Schema version name (e.g., v1.0, latest)
+ *   DATABASE_ID       - Database to migrate (e.g., main, tenant_abc123)
  *
  * Options:
  *   --retry=<n>       Number of retry attempts (default: 3)
  *   --delay=<s>       Delay between retries in seconds (default: 5)
  *   --quiet           Suppress output
- *   --tenant=<id>     Override TENANT_ID environment variable
  *   --main            Migrate main DB schema instead of tenant schema (nested layouts only)
- *   --force           Send force=true to bypass schema validation (use with caution)
+ *   --force           Bypass DATALOSS schema validation (use with caution)
+ *   --database-id=<id> Override DATABASE_ID
+ *   --schema-name=<n>  Override SCHEMA_NAME
  *
  * Example:
- *   # Migrate all tenants
- *   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myapp php stone gateway:migrate
+ *   # Migrate main database
+ *   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myapp SCHEMA_NAME=v1.0 \
+ *     DATABASE_ID=main php stone gateway:migrate
  *
  *   # Migrate specific tenant
- *   php stone gateway:migrate --tenant=clinic_001
- *
- *   # Migrate main database (nested layout)
- *   php stone gateway:migrate --main
+ *   php stone gateway:migrate --database-id=tenant_abc123 --schema-name=v1.0
  */
 
 require_once __DIR__ . '/helpers/schema-archive-builder.php';
@@ -39,7 +38,8 @@ require_once __DIR__ . '/helpers/schema-archive-builder.php';
 // Configuration from environment
 $gatewayUrl = getenv('DB_GATEWAY_URL');
 $platformId = getenv('PLATFORM_ID');
-$tenantId = getenv('TENANT_ID') ?: null;
+$schemaName = getenv('SCHEMA_NAME') ?: null;
+$databaseId = getenv('DATABASE_ID') ?: null;
 
 // Parse options
 $retryCount = 3;
@@ -55,8 +55,11 @@ foreach ($argv as $arg) {
     if (strpos($arg, '--delay=') === 0) {
         $retryDelay = (int) substr($arg, 8);
     }
-    if (strpos($arg, '--tenant=') === 0) {
-        $tenantId = substr($arg, 9);
+    if (strpos($arg, '--database-id=') === 0) {
+        $databaseId = substr($arg, 14);
+    }
+    if (strpos($arg, '--schema-name=') === 0) {
+        $schemaName = substr($arg, 14);
     }
 }
 
@@ -68,6 +71,17 @@ if (!$gatewayUrl) {
 
 if (!$platformId) {
     fwrite(STDERR, "ERROR: PLATFORM_ID environment variable is required\n");
+    exit(1);
+}
+
+if (!$schemaName) {
+    fwrite(STDERR, "ERROR: SCHEMA_NAME environment variable is required (or use --schema-name=...)\n");
+    exit(1);
+}
+
+if (!$databaseId) {
+    fwrite(STDERR, "ERROR: DATABASE_ID environment variable is required (or use --database-id=...)\n");
+    fwrite(STDERR, "  Use 'main' for main database, or a tenant ID for tenant databases.\n");
     exit(1);
 }
 
@@ -83,17 +97,14 @@ if (!is_dir($postgresqlPath)) {
 $target = $migrateMain ? 'main' : 'tenant';
 
 if (!$quiet) {
-    echo "=== DB Gateway Schema Migration ===\n";
-    echo "Platform: {$platformId}\n";
-    if ($tenantId) {
-        echo "Tenant: {$tenantId} (single tenant)\n";
-    } else {
-        echo "Tenant: ALL (will migrate all tenant databases)\n";
-    }
-    echo "Target: {$target}\n";
-    echo "Gateway: {$gatewayUrl}\n";
+    echo "=== DB Gateway Schema Migration (V2) ===\n";
+    echo "Platform:    {$platformId}\n";
+    echo "Schema:      {$schemaName}\n";
+    echo "Database ID: {$databaseId}\n";
+    echo "Target:      {$target}\n";
+    echo "Gateway:     {$gatewayUrl}\n";
     if ($force) {
-        echo "Force: enabled (bypassing schema validation)\n";
+        echo "Force:       enabled (bypassing schema validation)\n";
     }
     echo "\n";
 }
@@ -107,28 +118,20 @@ if (!is_dir($cacheDir)) {
 $timestamp = date('Ymd_His_') . substr(microtime(), 2, 6);
 $tarFile = "{$cacheDir}/postgresql_{$platformId}_migrate_{$timestamp}.tar.gz";
 
-// Cleanup function
-function cleanup($file) {
-    if (file_exists($file)) {
-        unlink($file);
-        $tarPath = preg_replace('/\.gz$/', '', $file);
-        if (file_exists($tarPath)) {
-            unlink($tarPath);
-        }
-    }
-}
-
 // Register shutdown handler for cleanup
-register_shutdown_function(function() use ($tarFile, $quiet) {
-    cleanup($tarFile);
-    if (!$quiet) {
-        echo "Cleaned up: {$tarFile}\n";
+register_shutdown_function(function() use ($tarFile) {
+    if (file_exists($tarFile)) {
+        unlink($tarFile);
+    }
+    $tarPath = preg_replace('/\.gz$/', '', $tarFile);
+    if (file_exists($tarPath)) {
+        unlink($tarPath);
     }
 });
 
-// Step 1: Create tar.gz
+// ─── Build schema archive ────────────────────────────────────────────────────
 if (!$quiet) {
-    echo "Creating schema archive...\n";
+    echo "Building schema archive...\n";
 }
 
 try {
@@ -149,68 +152,19 @@ try {
     exit(1);
 }
 
-// Step 2: Send to gateway with retry logic
-if (!$quiet) {
-    echo "Sending migration to gateway...\n";
-}
-
-$attempt = 1;
-$success = false;
-$response = null;
-
-while ($attempt <= $retryCount && !$success) {
-    if (!$quiet) {
-        echo "Attempt {$attempt} of {$retryCount}...\n";
-    }
-
-    // Build multipart request
-    $boundary = uniqid();
-    $body = '';
-
-    // Add platform field
-    $body .= "--{$boundary}\r\n";
-    $body .= "Content-Disposition: form-data; name=\"platform\"\r\n\r\n";
-    $body .= "{$platformId}\r\n";
-
-    // Add tenant_id if present
-    if ($tenantId) {
-        $body .= "--{$boundary}\r\n";
-        $body .= "Content-Disposition: form-data; name=\"tenant_id\"\r\n\r\n";
-        $body .= "{$tenantId}\r\n";
-    }
-
-    // Add force flag if set
-    if ($force) {
-        $body .= "--{$boundary}\r\n";
-        $body .= "Content-Disposition: form-data; name=\"force\"\r\n\r\n";
-        $body .= "true\r\n";
-    }
-
-    // Add schema file
-    $fileContent = file_get_contents($tarFile);
-    $body .= "--{$boundary}\r\n";
-    $body .= "Content-Disposition: form-data; name=\"schema\"; filename=\"postgresql.tar.gz\"\r\n";
-    $body .= "Content-Type: application/gzip\r\n\r\n";
-    $body .= $fileContent . "\r\n";
-    $body .= "--{$boundary}--\r\n";
-
-    // Send request
+// Helper: make HTTP request using stream context
+function httpRequest(string $method, string $url, array $headers, ?string $body, int $timeout): array {
     $context = stream_context_create([
         'http' => [
-            'method' => 'POST',
-            'header' => [
-                "Content-Type: multipart/form-data; boundary={$boundary}",
-                'Content-Length: ' . strlen($body)
-            ],
+            'method' => $method,
+            'header' => $headers,
             'content' => $body,
-            'timeout' => 120, // Longer timeout for migrations
-            'ignore_errors' => true
+            'timeout' => $timeout,
+            'ignore_errors' => true,
         ]
     ]);
 
-    $result = @file_get_contents("{$gatewayUrl}/migrate", false, $context);
-
-    // Parse response
+    $result = @file_get_contents($url, false, $context);
     $httpCode = 0;
     if (isset($http_response_header)) {
         foreach ($http_response_header as $header) {
@@ -220,12 +174,76 @@ while ($attempt <= $retryCount && !$success) {
         }
     }
 
-    if ($httpCode === 200 && $result) {
+    return ['code' => $httpCode, 'body' => $result];
+}
+
+// ─── Step 1: Upload schema archive ───────────────────────────────────────────
+if (!$quiet) {
+    echo "Step 1/2: Uploading schema '{$schemaName}'...\n";
+}
+
+$boundary = uniqid();
+$body = '';
+
+// Add schema_name field
+$body .= "--{$boundary}\r\n";
+$body .= "Content-Disposition: form-data; name=\"schema_name\"\r\n\r\n";
+$body .= "{$schemaName}\r\n";
+
+// Add schema file
+$fileContent = file_get_contents($tarFile);
+$body .= "--{$boundary}\r\n";
+$body .= "Content-Disposition: form-data; name=\"schema\"; filename=\"postgresql.tar.gz\"\r\n";
+$body .= "Content-Type: application/gzip\r\n\r\n";
+$body .= $fileContent . "\r\n";
+$body .= "--{$boundary}--\r\n";
+
+$resp = httpRequest('POST', "{$gatewayUrl}/platform/{$platformId}/schema", [
+    "Content-Type: multipart/form-data; boundary={$boundary}",
+    'Content-Length: ' . strlen($body),
+], $body, 60);
+
+if ($resp['code'] === 200) {
+    if (!$quiet) {
+        echo "  Schema uploaded\n\n";
+    }
+} else {
+    fwrite(STDERR, "ERROR: Failed to upload schema (HTTP {$resp['code']})\n");
+    if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+    exit(1);
+}
+
+// ─── Step 2: Migrate database ────────────────────────────────────────────────
+if (!$quiet) {
+    echo "Step 2/2: Migrating database '{$databaseId}'...\n";
+}
+
+$attempt = 1;
+$success = false;
+
+while ($attempt <= $retryCount && !$success) {
+    if (!$quiet) {
+        echo "  Attempt {$attempt} of {$retryCount}...\n";
+    }
+
+    $payload = json_encode([
+        'platform' => $platformId,
+        'schema_name' => $schemaName,
+        'database_id' => $databaseId,
+        'force' => $force,
+    ]);
+
+    $resp = httpRequest('POST', "{$gatewayUrl}/v2/migrate", [
+        'Content-Type: application/json',
+        'Content-Length: ' . strlen($payload),
+    ], $payload, 120);
+
+    if ($resp['code'] === 200) {
         $success = true;
-        $response = json_decode($result, true);
+        $response = json_decode($resp['body'], true);
 
         if (!$quiet) {
-            echo "\n✅ Migration successful!\n";
+            echo "\nMigration successful!\n";
             echo json_encode($response, JSON_PRETTY_PRINT) . "\n\n";
 
             echo "Summary:\n";
@@ -243,21 +261,17 @@ while ($attempt <= $retryCount && !$success) {
             }
         }
     } else {
-        if ($httpCode === 0) {
-            if (!$quiet) {
-                echo "Connection failed (gateway not reachable)\n";
-            }
+        if ($resp['code'] === 0) {
+            if (!$quiet) echo "  Connection failed (gateway not reachable)\n";
         } else {
             if (!$quiet) {
-                echo "Request failed with HTTP {$httpCode}\n";
-                if ($result) echo "{$result}\n";
+                echo "  Failed (HTTP {$resp['code']})\n";
+                if ($resp['body']) echo "  {$resp['body']}\n";
             }
         }
 
         if ($attempt < $retryCount) {
-            if (!$quiet) {
-                echo "Retrying in {$retryDelay}s...\n";
-            }
+            if (!$quiet) echo "  Retrying in {$retryDelay}s...\n";
             sleep($retryDelay);
         }
     }

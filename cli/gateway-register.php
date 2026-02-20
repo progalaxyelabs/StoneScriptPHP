@@ -1,9 +1,11 @@
 <?php
 /**
- * StoneScriptPHP CLI - Gateway Register
+ * StoneScriptPHP CLI - Gateway Register (V2 API)
  *
- * Registers platform with db-gateway on container startup.
- * Creates schema archive, sends to gateway, cleans up.
+ * Three-step registration flow:
+ *   1. Register platform (idempotent)
+ *   2. Upload schema archive
+ *   3. Create database from stored schema
  *
  * Usage:
  *   php stone gateway:register [options]
@@ -11,18 +13,23 @@
  * Environment variables (required):
  *   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
  *   PLATFORM_ID       - Platform identifier (e.g., myapp)
+ *   SCHEMA_NAME       - Schema version name (e.g., v1.0, latest)
  *
  * Environment variables (optional):
- *   TENANT_ID         - Tenant identifier (omit for main DB)
+ *   DATABASE_ID       - Database identifier (default: main)
+ *   ADMIN_TOKEN       - Admin token for /admin/* endpoints
  *
  * Options:
  *   --retry=<n>       Number of retry attempts (default: 3)
  *   --delay=<s>       Delay between retries in seconds (default: 5)
  *   --quiet           Suppress output
  *   --main            Register main DB schema instead of tenant schema (nested layouts only)
+ *   --database-id=<id> Override DATABASE_ID
+ *   --schema-name=<n>  Override SCHEMA_NAME
  *
  * Example:
- *   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myapp php stone gateway:register
+ *   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myapp SCHEMA_NAME=v1.0 \
+ *     php stone gateway:register
  */
 
 require_once __DIR__ . '/helpers/schema-archive-builder.php';
@@ -30,7 +37,9 @@ require_once __DIR__ . '/helpers/schema-archive-builder.php';
 // Configuration from environment
 $gatewayUrl = getenv('DB_GATEWAY_URL');
 $platformId = getenv('PLATFORM_ID');
-$tenantId = getenv('TENANT_ID') ?: null;
+$schemaName = getenv('SCHEMA_NAME') ?: null;
+$databaseId = getenv('DATABASE_ID') ?: 'main';
+$adminToken = getenv('ADMIN_TOKEN') ?: null;
 
 // Parse options
 $retryCount = 3;
@@ -45,6 +54,12 @@ foreach ($argv as $arg) {
     if (strpos($arg, '--delay=') === 0) {
         $retryDelay = (int) substr($arg, 8);
     }
+    if (strpos($arg, '--database-id=') === 0) {
+        $databaseId = substr($arg, 14);
+    }
+    if (strpos($arg, '--schema-name=') === 0) {
+        $schemaName = substr($arg, 14);
+    }
 }
 
 // Validate required environment variables
@@ -55,6 +70,11 @@ if (!$gatewayUrl) {
 
 if (!$platformId) {
     fwrite(STDERR, "ERROR: PLATFORM_ID environment variable is required\n");
+    exit(1);
+}
+
+if (!$schemaName) {
+    fwrite(STDERR, "ERROR: SCHEMA_NAME environment variable is required (or use --schema-name=...)\n");
     exit(1);
 }
 
@@ -70,11 +90,12 @@ if (!is_dir($postgresqlPath)) {
 $target = $migrateMain ? 'main' : 'tenant';
 
 if (!$quiet) {
-    echo "=== DB Gateway Registration ===\n";
-    echo "Platform: {$platformId}\n";
-    echo "Tenant: " . ($tenantId ?: '<main>') . "\n";
-    echo "Target: {$target}\n";
-    echo "Gateway: {$gatewayUrl}\n";
+    echo "=== DB Gateway Registration (V2) ===\n";
+    echo "Platform:    {$platformId}\n";
+    echo "Schema:      {$schemaName}\n";
+    echo "Database ID: {$databaseId}\n";
+    echo "Target:      {$target}\n";
+    echo "Gateway:     {$gatewayUrl}\n";
     echo "\n";
 }
 
@@ -87,28 +108,20 @@ if (!is_dir($cacheDir)) {
 $timestamp = date('Ymd_His_') . substr(microtime(), 2, 6);
 $tarFile = "{$cacheDir}/postgresql_{$platformId}_{$timestamp}.tar.gz";
 
-// Cleanup function
-function cleanup($file) {
-    if (file_exists($file)) {
-        unlink($file);
-        $tarPath = preg_replace('/\.gz$/', '', $file);
-        if (file_exists($tarPath)) {
-            unlink($tarPath);
-        }
-    }
-}
-
 // Register shutdown handler for cleanup
-register_shutdown_function(function() use ($tarFile, $quiet) {
-    cleanup($tarFile);
-    if (!$quiet) {
-        echo "Cleaned up: {$tarFile}\n";
+register_shutdown_function(function() use ($tarFile) {
+    if (file_exists($tarFile)) {
+        unlink($tarFile);
+    }
+    $tarPath = preg_replace('/\.gz$/', '', $tarFile);
+    if (file_exists($tarPath)) {
+        unlink($tarPath);
     }
 });
 
-// Step 1: Create tar.gz
+// ─── Build schema archive ────────────────────────────────────────────────────
 if (!$quiet) {
-    echo "Creating schema archive...\n";
+    echo "Building schema archive...\n";
 }
 
 try {
@@ -128,61 +141,19 @@ try {
     exit(1);
 }
 
-// Step 2: Send to gateway with retry logic
-if (!$quiet) {
-    echo "Registering with gateway...\n";
-}
-
-$attempt = 1;
-$success = false;
-$response = null;
-
-while ($attempt <= $retryCount && !$success) {
-    if (!$quiet) {
-        echo "Attempt {$attempt} of {$retryCount}...\n";
-    }
-
-    // Build multipart request
-    $boundary = uniqid();
-    $body = '';
-
-    // Add platform field
-    $body .= "--{$boundary}\r\n";
-    $body .= "Content-Disposition: form-data; name=\"platform\"\r\n\r\n";
-    $body .= "{$platformId}\r\n";
-
-    // Add tenant_id if present
-    if ($tenantId) {
-        $body .= "--{$boundary}\r\n";
-        $body .= "Content-Disposition: form-data; name=\"tenant_id\"\r\n\r\n";
-        $body .= "{$tenantId}\r\n";
-    }
-
-    // Add schema file
-    $fileContent = file_get_contents($tarFile);
-    $body .= "--{$boundary}\r\n";
-    $body .= "Content-Disposition: form-data; name=\"schema\"; filename=\"postgresql.tar.gz\"\r\n";
-    $body .= "Content-Type: application/gzip\r\n\r\n";
-    $body .= $fileContent . "\r\n";
-    $body .= "--{$boundary}--\r\n";
-
-    // Send request
+// Helper: make HTTP request using stream context
+function httpRequest(string $method, string $url, array $headers, ?string $body, int $timeout): array {
     $context = stream_context_create([
         'http' => [
-            'method' => 'POST',
-            'header' => [
-                "Content-Type: multipart/form-data; boundary={$boundary}",
-                'Content-Length: ' . strlen($body)
-            ],
+            'method' => $method,
+            'header' => $headers,
             'content' => $body,
-            'timeout' => 60,
-            'ignore_errors' => true
+            'timeout' => $timeout,
+            'ignore_errors' => true,
         ]
     ]);
 
-    $result = @file_get_contents("{$gatewayUrl}/register", false, $context);
-
-    // Parse response
+    $result = @file_get_contents($url, false, $context);
     $httpCode = 0;
     if (isset($http_response_header)) {
         foreach ($http_response_header as $header) {
@@ -192,36 +163,128 @@ while ($attempt <= $retryCount && !$success) {
         }
     }
 
-    if ($httpCode === 200 && $result) {
+    return ['code' => $httpCode, 'body' => $result];
+}
+
+// ─── Step 1: Register platform (idempotent) ──────────────────────────────────
+if (!$quiet) {
+    echo "Step 1/3: Registering platform...\n";
+}
+
+$payload = json_encode(['platform' => $platformId]);
+$resp = httpRequest('POST', "{$gatewayUrl}/platform/register", [
+    'Content-Type: application/json',
+    'Content-Length: ' . strlen($payload),
+], $payload, 30);
+
+if ($resp['code'] === 200 || $resp['code'] === 409) {
+    if (!$quiet) {
+        echo "  Platform registered (or already exists)\n\n";
+    }
+} else {
+    fwrite(STDERR, "ERROR: Failed to register platform (HTTP {$resp['code']})\n");
+    if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+    exit(1);
+}
+
+// ─── Step 2: Upload schema archive ───────────────────────────────────────────
+if (!$quiet) {
+    echo "Step 2/3: Uploading schema '{$schemaName}'...\n";
+}
+
+$boundary = uniqid();
+$body = '';
+
+// Add schema_name field
+$body .= "--{$boundary}\r\n";
+$body .= "Content-Disposition: form-data; name=\"schema_name\"\r\n\r\n";
+$body .= "{$schemaName}\r\n";
+
+// Add schema file
+$fileContent = file_get_contents($tarFile);
+$body .= "--{$boundary}\r\n";
+$body .= "Content-Disposition: form-data; name=\"schema\"; filename=\"postgresql.tar.gz\"\r\n";
+$body .= "Content-Type: application/gzip\r\n\r\n";
+$body .= $fileContent . "\r\n";
+$body .= "--{$boundary}--\r\n";
+
+$resp = httpRequest('POST', "{$gatewayUrl}/platform/{$platformId}/schema", [
+    "Content-Type: multipart/form-data; boundary={$boundary}",
+    'Content-Length: ' . strlen($body),
+], $body, 60);
+
+if ($resp['code'] === 200) {
+    if (!$quiet) {
+        $schemaInfo = json_decode($resp['body'], true);
+        echo "  Schema uploaded\n";
+        if ($schemaInfo) {
+            echo "  has_tables: " . ($schemaInfo['has_tables'] ? 'yes' : 'no') . "\n";
+            echo "  has_functions: " . ($schemaInfo['has_functions'] ? 'yes' : 'no') . "\n";
+            echo "  has_migrations: " . ($schemaInfo['has_migrations'] ? 'yes' : 'no') . "\n";
+        }
+        echo "\n";
+    }
+} else {
+    fwrite(STDERR, "ERROR: Failed to upload schema (HTTP {$resp['code']})\n");
+    if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+    exit(1);
+}
+
+// ─── Step 3: Create database from stored schema ──────────────────────────────
+if (!$quiet) {
+    echo "Step 3/3: Creating database '{$databaseId}'...\n";
+}
+
+$attempt = 1;
+$success = false;
+
+while ($attempt <= $retryCount && !$success) {
+    if (!$quiet) {
+        echo "  Attempt {$attempt} of {$retryCount}...\n";
+    }
+
+    $payload = json_encode([
+        'platform' => $platformId,
+        'schema_name' => $schemaName,
+        'database_id' => $databaseId,
+    ]);
+
+    $headers = [
+        'Content-Type: application/json',
+        'Content-Length: ' . strlen($payload),
+    ];
+    if ($adminToken) {
+        $headers[] = "Authorization: Bearer {$adminToken}";
+    }
+
+    $resp = httpRequest('POST', "{$gatewayUrl}/admin/database/create", $headers, $payload, 60);
+
+    if ($resp['code'] === 200) {
         $success = true;
-        $response = json_decode($result, true);
+        $response = json_decode($resp['body'], true);
 
         if (!$quiet) {
-            echo "\n✅ Registration successful!\n";
-            echo json_encode($response, JSON_PRETTY_PRINT) . "\n\n";
-
-            echo "Summary:\n";
-            echo "  Status: " . ($response['status'] ?? 'unknown') . "\n";
-            echo "  Database: " . ($response['database'] ?? 'unknown') . "\n";
-            echo "  Migrations applied: " . ($response['migrations_applied'] ?? 0) . "\n";
-            echo "  Functions deployed: " . ($response['functions_deployed'] ?? 0) . "\n";
+            echo "\nRegistration successful!\n";
+            echo json_encode($response, JSON_PRETTY_PRINT) . "\n";
+        }
+    } elseif ($resp['code'] === 409) {
+        // Database already exists — not an error
+        $success = true;
+        if (!$quiet) {
+            echo "\n  Database already exists\n";
         }
     } else {
-        if ($httpCode === 0) {
-            if (!$quiet) {
-                echo "Connection failed (gateway not reachable)\n";
-            }
+        if ($resp['code'] === 0) {
+            if (!$quiet) echo "  Connection failed (gateway not reachable)\n";
         } else {
             if (!$quiet) {
-                echo "Request failed with HTTP {$httpCode}\n";
-                if ($result) echo "{$result}\n";
+                echo "  Failed (HTTP {$resp['code']})\n";
+                if ($resp['body']) echo "  {$resp['body']}\n";
             }
         }
 
         if ($attempt < $retryCount) {
-            if (!$quiet) {
-                echo "Retrying in {$retryDelay}s...\n";
-            }
+            if (!$quiet) echo "  Retrying in {$retryDelay}s...\n";
             sleep($retryDelay);
         }
     }
