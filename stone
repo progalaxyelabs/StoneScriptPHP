@@ -95,13 +95,21 @@ $commands = [
         'description' => 'Export postgresql folder as tar.gz for db-gateway',
         'file' => 'cli/schema-export.php',
     ],
-    'gateway:register' => [
-        'description' => 'Register platform with db-gateway on container startup',
-        'file' => 'cli/gateway-register.php',
+    'gateway:register-main' => [
+        'description' => 'Register platform and create main database via gateway',
+        'file' => 'cli/gateway-register-main.php',
     ],
-    'gateway:migrate' => [
-        'description' => 'Hot migrate schema to running db-gateway',
-        'file' => 'cli/gateway-migrate.php',
+    'gateway:register-tenant' => [
+        'description' => 'Register platform and upload tenant schema to gateway',
+        'file' => 'cli/gateway-register-tenant.php',
+    ],
+    'gateway:migrate-main' => [
+        'description' => 'Migrate main database schema via gateway',
+        'file' => 'cli/gateway-migrate-main.php',
+    ],
+    'gateway:migrate-tenant' => [
+        'description' => 'Migrate tenant database schema via gateway',
+        'file' => 'cli/gateway-migrate-tenant.php',
     ],
 ];
 
@@ -158,8 +166,10 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone migrate verify                # Check database drift\n";
     echo "  php stone tenant:create \"Acme\" acme    # Create new tenant\n";
     echo "  php stone tenant:list                   # List all tenants\n";
-    echo "  php stone gateway:register              # Register with db-gateway\n";
-    echo "  php stone gateway:migrate               # Hot migrate to db-gateway\n";
+    echo "  php stone gateway:register-main          # Register platform + create main DB\n";
+    echo "  php stone gateway:register-tenant        # Register platform + upload tenant schema\n";
+    echo "  php stone gateway:migrate-main           # Migrate main database schema\n";
+    echo "  php stone gateway:migrate-tenant          # Migrate all tenant database schemas\n";
     echo "\n";
     echo "Run 'php stone <command> --help' for detailed help on any command.\n";
     echo "\n";

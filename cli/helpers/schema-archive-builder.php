@@ -3,38 +3,25 @@
  * StoneScriptPHP CLI Helper — Schema Archive Builder
  *
  * Builds gateway-compatible tar.gz archives from the postgresql/ directory.
- * Handles two directory layouts:
+ * Supports the nested directory layout:
  *
- *   FLAT:   src/postgresql/{tables,functions,views,migrations}/
- *   NESTED: src/postgresql/{tenant,main}/postgresql/{tables,functions,views}/
- *           + src/postgresql/{functions,views,...}/ (shared, deployed to all databases)
+ *   src/postgresql/{tenant,main}/postgresql/{tables,functions,views}/
+ *   + src/postgresql/{functions,views,...}/ (shared, deployed to all databases)
  *
  * The StoneScriptDB gateway expects a flat `postgresql/` structure in the archive.
- * For nested layouts, this builder merges the target scope (tenant or main) with
- * shared top-level files into a single flat structure.
+ * This builder merges the target scope (tenant or main) with shared top-level
+ * files into a single flat structure.
  */
 
 /**
- * Detect the schema layout type.
+ * Validate the schema layout is nested.
  *
  * @param string $postgresqlPath  Path to src/postgresql/ directory
- * @return string 'nested', 'flat', or 'empty'
+ * @return bool
  */
-function detectSchemaLayout(string $postgresqlPath): string
+function validateSchemaLayout(string $postgresqlPath): bool
 {
-    // Check for nested structure markers
-    if (is_dir($postgresqlPath . '/tenant') || is_dir($postgresqlPath . '/main')) {
-        return 'nested';
-    }
-
-    // Check for at least one expected flat subdirectory
-    foreach (['tables', 'functions', 'views', 'migrations', 'seeders', 'extensions', 'types'] as $sub) {
-        if (is_dir($postgresqlPath . '/' . $sub)) {
-            return 'flat';
-        }
-    }
-
-    return 'empty';
+    return is_dir($postgresqlPath . '/tenant') || is_dir($postgresqlPath . '/main');
 }
 
 /**
@@ -95,18 +82,28 @@ function addFilesToArchive(PharData $phar, string $sourceDir, string $archivePre
 /**
  * Build a gateway-compatible schema archive (tar.gz).
  *
+ * Requires nested layout: src/postgresql/{main,tenant}/postgresql/
+ *
  * @param string $postgresqlPath  Path to src/postgresql/ directory
  * @param string $tarGzFile       Output .tar.gz file path
- * @param string $target          'tenant' or 'main' (only affects nested layouts)
+ * @param string $target          'tenant' or 'main'
  * @param bool   $quiet           Suppress output
  * @return array{layout: string, total_files: int, tables: int, functions: int, views: int, migrations: int}
  * @throws RuntimeException If schema directory not found or archive creation fails
  */
-function buildSchemaArchive(string $postgresqlPath, string $tarGzFile, string $target = 'tenant', bool $quiet = false): array
+function buildSchemaArchive(string $postgresqlPath, string $tarGzFile, string $target, bool $quiet = false): array
 {
-    $layout = detectSchemaLayout($postgresqlPath);
+    if (!validateSchemaLayout($postgresqlPath)) {
+        throw new RuntimeException(
+            "Invalid schema layout. Expected nested structure:\n" .
+            "  src/postgresql/main/postgresql/{tables,functions,...}\n" .
+            "  src/postgresql/tenant/postgresql/{tables,functions,...}\n" .
+            "Found: {$postgresqlPath}"
+        );
+    }
+
     $stats = [
-        'layout' => $layout,
+        'layout' => 'nested',
         'total_files' => 0,
         'tables' => 0,
         'functions' => 0,
@@ -121,71 +118,48 @@ function buildSchemaArchive(string $postgresqlPath, string $tarGzFile, string $t
 
     $phar = new PharData($tarPath);
 
-    if ($layout === 'nested') {
-        // =======================================================
-        // NESTED LAYOUT: postgresql/{tenant,main}/postgresql/...
-        // =======================================================
-        $primaryDir = $postgresqlPath . '/' . $target . '/postgresql';
+    $primaryDir = $postgresqlPath . '/' . $target . '/postgresql';
 
-        if (!is_dir($primaryDir)) {
-            throw new RuntimeException(
-                "Schema directory not found for target '{$target}': {$primaryDir}\n" .
-                "Available targets: " . implode(', ', array_filter(
-                    ['tenant', 'main'],
-                    fn($t) => is_dir($postgresqlPath . '/' . $t)
-                ))
-            );
-        }
+    if (!is_dir($primaryDir)) {
+        $available = array_filter(
+            ['main', 'tenant'],
+            fn($t) => is_dir($postgresqlPath . '/' . $t)
+        );
+        throw new RuntimeException(
+            "Schema directory not found for target '{$target}': {$primaryDir}\n" .
+            "Available targets: " . implode(', ', $available)
+        );
+    }
 
-        if (!$quiet) {
-            echo "  Layout: nested ({$target}/postgresql/)\n";
-        }
+    if (!$quiet) {
+        echo "  Layout: nested ({$target}/postgresql/)\n";
+    }
 
-        // Add primary schema files: tenant/postgresql/* → postgresql/*
-        $added = addFilesToArchive($phar, $primaryDir, 'postgresql');
-        $stats['total_files'] += $added;
+    // Add primary schema files: {target}/postgresql/* -> postgresql/*
+    $added = addFilesToArchive($phar, $primaryDir, 'postgresql');
+    $stats['total_files'] += $added;
 
-        if (!$quiet) {
-            echo "  Primary ({$target}): {$added} files\n";
-        }
+    if (!$quiet) {
+        echo "  Primary ({$target}): {$added} files\n";
+    }
 
-        // Merge shared top-level schema files: postgresql/{subdir}/* → postgresql/{subdir}/*
-        foreach (['functions', 'tables', 'views', 'migrations', 'seeders', 'extensions', 'types'] as $subdir) {
-            $sharedDir = $postgresqlPath . '/' . $subdir;
-            if (is_dir($sharedDir)) {
-                $sharedAdded = addFilesToArchive($phar, $sharedDir, 'postgresql/' . $subdir);
-                $stats['total_files'] += $sharedAdded;
-                if (!$quiet && $sharedAdded > 0) {
-                    echo "  Shared {$subdir}: {$sharedAdded} files\n";
-                }
+    // Merge shared top-level schema files: postgresql/{subdir}/* -> postgresql/{subdir}/*
+    foreach (['functions', 'tables', 'views', 'migrations', 'seeders', 'extensions', 'types'] as $subdir) {
+        $sharedDir = $postgresqlPath . '/' . $subdir;
+        if (is_dir($sharedDir)) {
+            $sharedAdded = addFilesToArchive($phar, $sharedDir, 'postgresql/' . $subdir);
+            $stats['total_files'] += $sharedAdded;
+            if (!$quiet && $sharedAdded > 0) {
+                echo "  Shared {$subdir}: {$sharedAdded} files\n";
             }
         }
-
-        // Count per type (primary + shared)
-        $stats['tables'] = countSchemaFiles($primaryDir, 'tables') + countSchemaFiles($postgresqlPath, 'tables');
-        $stats['functions'] = countSchemaFiles($primaryDir, 'functions') + countSchemaFiles($postgresqlPath, 'functions');
-        $stats['views'] = countSchemaFiles($primaryDir, 'views') + countSchemaFiles($postgresqlPath, 'views');
-        $stats['migrations'] = countSchemaFiles($primaryDir, 'migrations') + countSchemaFiles($postgresqlPath, 'migrations');
-
-    } elseif ($layout === 'flat') {
-        // =======================================================
-        // FLAT LAYOUT: postgresql/{tables,functions,views,...}/
-        // =======================================================
-        if (!$quiet) {
-            echo "  Layout: flat\n";
-        }
-
-        $phar->buildFromDirectory(dirname($postgresqlPath), '/postgresql/');
-
-        $stats['tables'] = countSchemaFiles($postgresqlPath, 'tables');
-        $stats['functions'] = countSchemaFiles($postgresqlPath, 'functions');
-        $stats['views'] = countSchemaFiles($postgresqlPath, 'views');
-        $stats['migrations'] = countSchemaFiles($postgresqlPath, 'migrations');
-        $stats['total_files'] = $stats['tables'] + $stats['functions'] + $stats['views'] + $stats['migrations'];
-
-    } else {
-        throw new RuntimeException("No schema files found in: {$postgresqlPath}");
     }
+
+    // Count per type (primary + shared)
+    $stats['tables'] = countSchemaFiles($primaryDir, 'tables') + countSchemaFiles($postgresqlPath, 'tables');
+    $stats['functions'] = countSchemaFiles($primaryDir, 'functions') + countSchemaFiles($postgresqlPath, 'functions');
+    $stats['views'] = countSchemaFiles($primaryDir, 'views') + countSchemaFiles($postgresqlPath, 'views');
+    $stats['migrations'] = countSchemaFiles($primaryDir, 'migrations') + countSchemaFiles($postgresqlPath, 'migrations');
 
     // Compress to gzip
     $phar->compress(Phar::GZ);

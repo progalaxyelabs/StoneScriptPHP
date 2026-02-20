@@ -8,14 +8,13 @@
  *   php stone schema:export [options]
  *
  * Options:
+ *   --target=<scope>  Schema target: 'main' or 'tenant' (required)
  *   --output=<path>   Output file path (default: .cache/postgresql_<timestamp>.tar.gz)
  *   --quiet           Suppress output
- *   --main            Export main DB schema instead of tenant schema (nested layouts only)
  *
  * Example:
- *   php stone schema:export
- *   php stone schema:export --output=/tmp/schema.tar.gz
- *   php stone schema:export --main
+ *   php stone schema:export --target=main
+ *   php stone schema:export --target=tenant --output=/tmp/schema.tar.gz
  */
 
 require_once __DIR__ . '/helpers/schema-archive-builder.php';
@@ -24,14 +23,22 @@ require_once __DIR__ . '/helpers/schema-archive-builder.php';
 $postgresqlPath = ROOT_PATH . '/src/postgresql';
 $cacheDir = ROOT_PATH . '/.cache';
 $quiet = in_array('--quiet', $argv);
-$migrateMain = in_array('--main', $argv);
 
 // Parse options
 $outputPath = null;
+$target = null;
 foreach ($argv as $arg) {
     if (strpos($arg, '--output=') === 0) {
         $outputPath = substr($arg, 9);
     }
+    if (strpos($arg, '--target=') === 0) {
+        $target = substr($arg, 9);
+    }
+}
+
+if (!$target || !in_array($target, ['main', 'tenant'])) {
+    fwrite(STDERR, "ERROR: --target is required. Use --target=main or --target=tenant\n");
+    exit(1);
 }
 
 // Generate default output path with timestamp
@@ -54,8 +61,6 @@ if (!is_dir($outputDir)) {
         exit(1);
     }
 }
-
-$target = $migrateMain ? 'main' : 'tenant';
 
 if (!$quiet) {
     echo "=== StoneScriptPHP Schema Export ===\n";
