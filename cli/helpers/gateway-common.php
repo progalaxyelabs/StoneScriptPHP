@@ -12,7 +12,7 @@ require_once __DIR__ . '/schema-archive-builder.php';
  * Parse gateway CLI options from argv.
  *
  * @param array $argv
- * @return array{retry: int, delay: int, quiet: bool, force: bool, database_id: ?string, schema_name: ?string}
+ * @return array{retry: int, delay: int, quiet: bool, force: bool, database_id: ?string, schema_name: ?string, main_schema_name: ?string, tenant_schema_name: ?string}
  */
 function parseGatewayOptions(array $argv): array
 {
@@ -23,6 +23,8 @@ function parseGatewayOptions(array $argv): array
         'force' => in_array('--force', $argv),
         'database_id' => null,
         'schema_name' => null,
+        'main_schema_name' => null,
+        'tenant_schema_name' => null,
     ];
 
     foreach ($argv as $arg) {
@@ -38,6 +40,12 @@ function parseGatewayOptions(array $argv): array
         if (strpos($arg, '--schema-name=') === 0) {
             $options['schema_name'] = substr($arg, 14);
         }
+        if (strpos($arg, '--main-schema-name=') === 0) {
+            $options['main_schema_name'] = substr($arg, 19);
+        }
+        if (strpos($arg, '--tenant-schema-name=') === 0) {
+            $options['tenant_schema_name'] = substr($arg, 21);
+        }
     }
 
     return $options;
@@ -48,7 +56,7 @@ function parseGatewayOptions(array $argv): array
  *
  * @param array  $options     Parsed CLI options (may override env vars)
  * @param bool   $requireDb   Whether DATABASE_ID is required
- * @return array{gateway_url: string, platform_id: string, schema_name: string, database_id: string, admin_token: ?string}
+ * @return array{gateway_url: string, platform_id: string, schema_name: string, main_schema_name: string, tenant_schema_name: string, database_id: string, admin_token: ?string}
  */
 function loadGatewayEnv(array $options, bool $requireDb = true): array
 {
@@ -57,6 +65,12 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
     $schemaName = $options['schema_name'] ?: (getenv('SCHEMA_NAME') ?: null);
     $databaseId = $options['database_id'] ?: (getenv('DATABASE_ID') ?: 'main');
     $adminToken = getenv('ADMIN_TOKEN') ?: null;
+
+    // Main schema: MAIN_SCHEMA_NAME takes priority, falls back to SCHEMA_NAME
+    $mainSchemaName = $options['main_schema_name'] ?: (getenv('MAIN_SCHEMA_NAME') ?: $schemaName);
+
+    // Tenant schema: TENANT_SCHEMA_NAME takes priority, falls back to SCHEMA_NAME
+    $tenantSchemaName = $options['tenant_schema_name'] ?: (getenv('TENANT_SCHEMA_NAME') ?: $schemaName);
 
     if (!$gatewayUrl) {
         fwrite(STDERR, "ERROR: DB_GATEWAY_URL environment variable is required\n");
@@ -68,8 +82,8 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
         exit(1);
     }
 
-    if (!$schemaName) {
-        fwrite(STDERR, "ERROR: SCHEMA_NAME environment variable is required (or use --schema-name=...)\n");
+    if (!$schemaName && !$mainSchemaName && !$tenantSchemaName) {
+        fwrite(STDERR, "ERROR: SCHEMA_NAME (or MAIN_SCHEMA_NAME/TENANT_SCHEMA_NAME) environment variable is required (or use --schema-name=...)\n");
         exit(1);
     }
 
@@ -82,6 +96,8 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
         'gateway_url' => $gatewayUrl,
         'platform_id' => $platformId,
         'schema_name' => $schemaName,
+        'main_schema_name' => $mainSchemaName,
+        'tenant_schema_name' => $tenantSchemaName,
         'database_id' => $databaseId,
         'admin_token' => $adminToken,
     ];
@@ -375,6 +391,89 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
                         echo "    - {$db}\n";
                     }
                 }
+            }
+        } else {
+            if ($resp['code'] === 0) {
+                if (!$quiet) echo "  Connection failed (gateway not reachable)\n";
+            } else {
+                if (!$quiet) {
+                    echo "  Failed (HTTP {$resp['code']})\n";
+                    if ($resp['body']) echo "  {$resp['body']}\n";
+                }
+            }
+
+            if ($attempt < $retryCount) {
+                if (!$quiet) echo "  Retrying in {$retryDelay}s...\n";
+                sleep($retryDelay);
+            }
+        }
+
+        $attempt++;
+    }
+
+    if (!$success) {
+        fwrite(STDERR, "ERROR: Failed after {$retryCount} attempts\n");
+        exit(1);
+    }
+}
+
+/**
+ * Step: Migrate ALL tenant databases using stored schema (with retry).
+ *
+ * Calls POST /v2/migrate-all — migrates all existing tenant databases for the
+ * platform sequentially. Skips gracefully if no tenant databases exist.
+ *
+ * @return void Exits on failure.
+ */
+function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, bool $force, int $retryCount, int $retryDelay, bool $quiet): void
+{
+    if (!$quiet) {
+        echo "Migrating all tenant databases (POST /v2/migrate-all)...\n";
+    }
+
+    $attempt = 1;
+    $success = false;
+
+    while ($attempt <= $retryCount && !$success) {
+        if (!$quiet) {
+            echo "  Attempt {$attempt} of {$retryCount}...\n";
+        }
+
+        $payload = json_encode([
+            'platform' => $platformId,
+            'schema_name' => $schemaName,
+            'force' => $force,
+        ]);
+
+        $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/v2/migrate-all", [
+            'Content-Type: application/json',
+            'Content-Length: ' . strlen($payload),
+        ], $payload, 300);
+
+        if (in_array($resp['code'], [200, 201])) {
+            $success = true;
+            $response = json_decode($resp['body'], true);
+
+            if (!$quiet) {
+                echo "\n  Migration-all successful!\n";
+                echo "  Status: " . ($response['status'] ?? 'unknown') . "\n";
+                echo "  Databases updated: " . count($response['databases_updated'] ?? []) . "\n";
+                echo "  Migrations applied: " . ($response['migrations_applied'] ?? 0) . "\n";
+                echo "  Functions updated: " . ($response['functions_updated'] ?? 0) . "\n";
+                echo "  Execution time: " . ($response['execution_time_ms'] ?? 0) . "ms\n";
+
+                if (!empty($response['databases_updated'])) {
+                    echo "\n  Databases:\n";
+                    foreach ($response['databases_updated'] as $db) {
+                        echo "    - {$db}\n";
+                    }
+                }
+            }
+        } elseif ($resp['code'] === 204) {
+            // 204 = no tenant databases exist yet, skip gracefully
+            $success = true;
+            if (!$quiet) {
+                echo "\n  No tenant databases found — skipping (nothing to migrate)\n";
             }
         } else {
             if ($resp['code'] === 0) {
