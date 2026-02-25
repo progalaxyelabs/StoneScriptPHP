@@ -44,6 +44,16 @@ class Env
     public string $AUTH_MODE = 'builtin';
     public string $AUTH_SERVICE_URL = 'http://localhost:3139';
 
+    // Issuer for JWT 'iss' claim validation (v3.6.0+).
+    // In Docker: AUTH_SERVICE_URL = http://auth-container:3139 (container URL, for JWKS fetch)
+    //            AUTH_ISSUER      = http://localhost:3139      (public URL stamped in JWT 'iss' claim)
+    // Leave empty to fall back to AUTH_SERVICE_URL (single-host and local dev setups).
+    public string $AUTH_ISSUER = '';
+
+    // Platform identity sent to the auth service in every request (v3.6.0+).
+    public string $PLATFORM_CODE = '';
+    public ?string $PLATFORM_SECRET = null;
+
     public string $AUTH_COOKIE_DOMAIN = '';
     public ?bool $AUTH_COOKIE_SECURE = null;
 

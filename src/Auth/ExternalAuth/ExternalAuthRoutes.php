@@ -23,6 +23,8 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\ProfileRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\OAuthInitiateRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\OAuthCallbackRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\AuthHealthRoute;
+use StoneScriptPHP\Auth\ExternalAuth\Routes\VerifyEmailRoute;
+use StoneScriptPHP\Auth\ExternalAuth\Routes\ResendVerificationCodeRoute;
 
 /**
  * ExternalAuth Route Registration
@@ -61,90 +63,64 @@ class ExternalAuthRoutes
 
         // Public routes (no auth required)
         if ($config->isEnabled('register')) {
-            $router->post(
-                "$prefix/register",
-                new RegisterRoute($client, $config->hooks, $config)
-            );
+            $router->post("$prefix/register", new RegisterRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered POST $prefix/register (mode={$config->registrationMode})");
         }
 
         if ($config->isEnabled('login')) {
-            $router->post(
-                "$prefix/login",
-                new LoginRoute($client, $config->hooks, $config)
-            );
+            $router->post("$prefix/login", new LoginRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered POST $prefix/login");
         }
 
         if ($config->isEnabled('logout')) {
-            $router->post(
-                "$prefix/logout",
-                new LogoutRoute($client, $config->hooks, $config)
-            );
+            $router->post("$prefix/logout", new LogoutRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered POST $prefix/logout");
         }
 
         if ($config->isEnabled('refresh')) {
-            $router->post(
-                "$prefix/refresh-token",
-                new RefreshTokenRoute($client, $config->hooks, $config)
-            );
+            $router->post("$prefix/refresh-token", new RefreshTokenRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered POST $prefix/refresh-token");
         }
 
         if ($config->isEnabled('password_reset')) {
-            $router->post(
-                "$prefix/forgot-password",
-                new ForgotPasswordRoute($client, $config->hooks, $config)
-            );
-            $router->post(
-                "$prefix/reset-password",
-                new ResetPasswordRoute($client, $config->hooks, $config)
-            );
+            $router->post("$prefix/forgot-password", new ForgotPasswordRoute($client, $config->hooks, $config), [], true);
+            $router->post("$prefix/reset-password", new ResetPasswordRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered POST $prefix/forgot-password, $prefix/reset-password");
         }
 
         if ($config->isEnabled('accept_invite')) {
-            $router->post(
-                "$prefix/accept-invite",
-                new AcceptInviteRoute($client, $config->hooks, $config)
-            );
+            $router->post("$prefix/accept-invite", new AcceptInviteRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered POST $prefix/accept-invite");
         }
 
         if ($config->isEnabled('check_slug')) {
-            $router->get(
-                "$prefix/check-tenant-slug/:slug",
-                new CheckTenantSlugRoute($client, $config->hooks, $config)
-            );
+            $router->get("$prefix/check-tenant-slug/:slug", new CheckTenantSlugRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered GET $prefix/check-tenant-slug/:slug");
         }
 
         if ($config->isEnabled('onboarding_status')) {
-            $router->get(
-                "$prefix/onboarding/status",
-                new OnboardingStatusRoute($client, $config->hooks, $config)
-            );
+            $router->get("$prefix/onboarding/status", new OnboardingStatusRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered GET $prefix/onboarding/status");
         }
 
+        if ($config->isEnabled('verify_email')) {
+            $router->post("$prefix/verify-email", new VerifyEmailRoute($client, $config->hooks, $config), [], true);
+            log_debug("ExternalAuthRoutes: Registered POST $prefix/verify-email");
+        }
+
+        if ($config->isEnabled('resend_code')) {
+            $router->post("$prefix/resend-code", new ResendVerificationCodeRoute($client, $config->hooks, $config), [], true);
+            log_debug("ExternalAuthRoutes: Registered POST $prefix/resend-code");
+        }
+
         if ($config->isEnabled('oauth')) {
-            $router->post(
-                "$prefix/oauth/initiate",
-                new OAuthInitiateRoute($client, $config->hooks, $config)
-            );
-            $router->post(
-                "$prefix/oauth/callback",
-                new OAuthCallbackRoute($client, $config->hooks, $config)
-            );
+            $router->post("$prefix/oauth/initiate", new OAuthInitiateRoute($client, $config->hooks, $config), [], true);
+            $router->post("$prefix/oauth/callback", new OAuthCallbackRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered OAuth routes at $prefix/oauth/*");
         }
 
         if ($config->isEnabled('health')) {
-            $router->get(
-                "$prefix/health",
-                new AuthHealthRoute($client, $config->hooks, $config)
-            );
+            $router->get("$prefix/health", new AuthHealthRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered GET $prefix/health");
         }
 
@@ -236,6 +212,12 @@ class ExternalAuthRoutes
         }
         if ($config->isEnabled('onboarding_status')) {
             $paths[] = "$prefix/onboarding/status";
+        }
+        if ($config->isEnabled('verify_email')) {
+            $paths[] = "$prefix/verify-email";
+        }
+        if ($config->isEnabled('resend_code')) {
+            $paths[] = "$prefix/resend-code";
         }
         if ($config->isEnabled('oauth')) {
             $paths[] = "$prefix/oauth/initiate";

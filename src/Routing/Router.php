@@ -12,6 +12,7 @@ class Router
     private array $routeMiddleware = [];
     private array $routes = [];
     private array $routeParams = [];
+    private array $routeMeta = []; // ['METHOD:path' => ['is_public' => bool]]
 
     public function __construct()
     {
@@ -50,9 +51,9 @@ class Router
      * @param array $middleware Route-specific middleware
      * @return self
      */
-    public function get(string $path, string|object $handler, array $middleware = []): self
+    public function get(string $path, string|object $handler, array $middleware = [], bool $isPublic = false): self
     {
-        return $this->addRoute('GET', $path, $handler, $middleware);
+        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic);
     }
 
     /**
@@ -61,11 +62,12 @@ class Router
      * @param string $path
      * @param string|object $handler Handler class name or pre-instantiated handler object
      * @param array $middleware Route-specific middleware
+     * @param bool $isPublic Whether this route is public (no JWT required)
      * @return self
      */
-    public function post(string $path, string|object $handler, array $middleware = []): self
+    public function post(string $path, string|object $handler, array $middleware = [], bool $isPublic = false): self
     {
-        return $this->addRoute('POST', $path, $handler, $middleware);
+        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic);
     }
 
     /**
@@ -75,9 +77,10 @@ class Router
      * @param string $path Route path
      * @param string|object $handler Handler class name or pre-instantiated handler object
      * @param array $middleware Route-specific middleware
+     * @param bool $isPublic Whether this route is public (no JWT required). Default false (protected).
      * @return self
      */
-    public function addRoute(string $method, string $path, string|object $handler, array $middleware = []): self
+    public function addRoute(string $method, string $path, string|object $handler, array $middleware = [], bool $isPublic = false): self
     {
         $method = strtoupper($method);
 
@@ -87,8 +90,11 @@ class Router
 
         $this->routes[$method][$path] = $handler;
 
-        // Store route-specific middleware
+        // Store route-level metadata (auth requirement)
         $routeKey = "$method:$path";
+        $this->routeMeta[$routeKey] = ['is_public' => $isPublic];
+
+        // Store route-specific middleware
         if (!empty($middleware)) {
             $this->routeMiddleware[$routeKey] = $middleware;
         }
@@ -97,18 +103,48 @@ class Router
     }
 
     /**
-     * Load routes from configuration array
+     * Load routes from configuration array.
      *
-     * @param array $routesConfig Array of routes by method
+     * Supports two formats:
+     *
+     * New format (recommended) — routes declare their own auth requirement:
+     *   ['public'    => ['GET' => ['/health' => HealthRoute::class]],
+     *    'protected' => ['GET' => ['/dashboard' => DashboardRoute::class]]]
+     *
+     * Legacy flat format — all routes default to protected (backward compatible):
+     *   ['GET' => ['/health' => HealthRoute::class]]
+     *
+     * @param array $routesConfig
      * @return self
      */
     public function loadRoutes(array $routesConfig): self
     {
-        foreach ($routesConfig as $method => $routes) {
-            $method = strtoupper($method);
-            if (is_array($routes)) {
-                foreach ($routes as $path => $handler) {
-                    $this->addRoute($method, $path, $handler);
+        if (array_key_exists('public', $routesConfig) || array_key_exists('protected', $routesConfig)) {
+            // New format: public/protected sections
+            foreach ($routesConfig['public'] ?? [] as $method => $routes) {
+                if (is_array($routes)) {
+                    foreach ($routes as $path => $handler) {
+                        $this->addRoute(strtoupper($method), $path, $handler, [], true);
+                    }
+                }
+            }
+            foreach ($routesConfig['protected'] ?? [] as $method => $routes) {
+                if (is_array($routes)) {
+                    foreach ($routes as $path => $handler) {
+                        $this->addRoute(strtoupper($method), $path, $handler, [], false);
+                    }
+                }
+            }
+        } else {
+            // Legacy flat format: ['GET' => [...], 'POST' => [...]]
+            // All routes default to protected (is_public = false).
+            // Platforms using this format keep their excludedPaths in JwtAuthMiddleware as before.
+            foreach ($routesConfig as $method => $routes) {
+                $method = strtoupper($method);
+                if (is_array($routes)) {
+                    foreach ($routes as $path => $handler) {
+                        $this->addRoute($method, $path, $handler);
+                    }
                 }
             }
         }
@@ -125,20 +161,28 @@ class Router
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 
-        // Build request context
+        // Pre-match route BEFORE running middleware so middleware (e.g. JwtAuthMiddleware)
+        // can inspect the route's is_public flag without needing a separate excludedPaths list.
+        $match = $this->matchRoute($method, $path);
+
+        // Build request context — includes route metadata for middleware
         $request = [
-            'method' => $method,
-            'path' => $path,
-            'input' => $this->getInput(),
-            'params' => [],
+            'method'  => $method,
+            'path'    => $path,
+            'input'   => $this->getInput(),
+            'params'  => $match['params'] ?? [],
             'headers' => $this->getHeaders(),
+            // null when route not found — middleware passes through, closure returns 404
+            'route'   => $match ? [
+                'pattern'       => $match['pattern'],
+                'is_public'     => $match['is_public'] ?? false,
+                'handler_class' => is_object($match['handler']) ? get_class($match['handler']) : $match['handler'],
+            ] : null,
         ];
 
-        // Process through global middleware pipeline
-        return $this->globalMiddleware->process($request, function($request) use ($method, $path) {
-            // Find matching route
-            $match = $this->matchRoute($method, $path);
-
+        // Process through global middleware pipeline.
+        // Closure captures $match from outer scope — avoids double-matching.
+        return $this->globalMiddleware->process($request, function($request) use ($method, $match) {
             if (!$match) {
                 return $this->error404();
             }
@@ -182,12 +226,15 @@ class Router
         }
 
         foreach ($this->routes[$method] as $pattern => $handler) {
+            $routeKey = "$method:$pattern";
+
             // Exact match
             if ($pattern === $path) {
                 return [
-                    'handler' => $handler,
-                    'params' => [],
-                    'pattern' => $pattern
+                    'handler'   => $handler,
+                    'params'    => [],
+                    'pattern'   => $pattern,
+                    'is_public' => $this->routeMeta[$routeKey]['is_public'] ?? false,
                 ];
             }
 
@@ -198,9 +245,10 @@ class Router
                 $params = $this->extractParams($pattern, $matches);
 
                 return [
-                    'handler' => $handler,
-                    'params' => $params,
-                    'pattern' => $pattern
+                    'handler'   => $handler,
+                    'params'    => $params,
+                    'pattern'   => $pattern,
+                    'is_public' => $this->routeMeta[$routeKey]['is_public'] ?? false,
                 ];
             }
         }

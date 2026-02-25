@@ -14,4 +14,13 @@ class ApiResponse {
         $this->message = $message;
         $this->data = $data;
     }
+
+    public function toJson(): string
+    {
+        return (string) json_encode([
+            'status'  => $this->status,
+            'message' => $this->message,
+            'data'    => $this->data,
+        ]);
+    }
 }

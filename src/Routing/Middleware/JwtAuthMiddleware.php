@@ -117,7 +117,16 @@ class JwtAuthMiddleware implements MiddlewareInterface
     {
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
 
-        // Check if path is excluded from authentication (uses normalized paths)
+        // Route-level public flag — set by Router::dispatch() pre-match before middleware runs.
+        // This is the preferred mechanism: routes declare public/protected at registration time.
+        // null = route not found (will 404 in dispatch closure) — pass through to preserve 404 UX.
+        $routeMeta = $request['route'] ?? null;
+        if ($routeMeta === null || ($routeMeta['is_public'] ?? false)) {
+            log_debug("JWT middleware: Path $path is public (route-level flag)");
+            return $next($request);
+        }
+
+        // Backward compat: excludedPaths list (for platforms not yet on public/protected routes format)
         foreach ($this->normalizedExcludedPaths as $excludedPath) {
             if ($this->matchesPath($path, $excludedPath)) {
                 log_debug("JWT middleware: Path $path is excluded from authentication (matched: $excludedPath)");

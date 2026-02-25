@@ -7,17 +7,17 @@ namespace StoneScriptPHP\Auth\ExternalAuth\Routes;
 use StoneScriptPHP\ApiResponse;
 
 /**
- * POST {prefix}/reset-password
+ * POST {prefix}/verify-email
  *
- * Proxies password reset confirmation to the auth service.
+ * Proxies email verification to the auth service.
+ * Public route — no JWT required.
  *
  * @package StoneScriptPHP\Auth\ExternalAuth\Routes
  */
-class ResetPasswordRoute extends BaseExternalAuthRoute
+class VerifyEmailRoute extends BaseExternalAuthRoute
 {
     public string $email = '';
     public string $code = '';
-    public string $new_password = '';
 
     /**
      * {@inheritdoc}
@@ -27,7 +27,6 @@ class ResetPasswordRoute extends BaseExternalAuthRoute
         return [
             'email' => 'required|string',
             'code' => 'required|string',
-            'new_password' => 'required|string',
         ];
     }
 
@@ -36,16 +35,8 @@ class ResetPasswordRoute extends BaseExternalAuthRoute
      */
     public function process(): ApiResponse
     {
-        $input = [
-            'email' => $this->email,
-            'code' => $this->code,
-            'new_password' => $this->new_password,
-        ];
-
         return $this->proxyCall(
-            fn() => $this->client->confirmPasswordReset($this->email, $this->code, $this->new_password),
-            'after_password_reset',
-            $input
+            fn() => $this->client->verifyEmail($this->email, $this->code)
         );
     }
 }

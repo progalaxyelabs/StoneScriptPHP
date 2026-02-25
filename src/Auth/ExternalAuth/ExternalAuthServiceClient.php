@@ -28,9 +28,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
         parent::__construct($authServiceUrl);
 
         $env = \StoneScriptPHP\Env::get_instance();
-        $this->platformCode = $platformCode ?? (
-            property_exists($env, 'PLATFORM_CODE') ? ($env->PLATFORM_CODE ?? '') : ''
-        );
+        $this->platformCode = $platformCode ?? ($env->PLATFORM_CODE ?? '');
     }
 
     // ──────────────────────────────────────────────
@@ -143,7 +141,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
      */
     public function getJwks(): array
     {
-        return $this->get('/.well-known/jwks.json');
+        return $this->get('/api/auth/jwks');
     }
 
     /**
@@ -186,18 +184,53 @@ class ExternalAuthServiceClient extends AuthServiceClient
     }
 
     /**
-     * Confirm password reset with token
+     * Confirm password reset with verification code
      *
-     * @param string $token Reset token from email
+     * progalaxyelabs-auth expects: email + code + new_password
+     *
+     * @param string $email User's email
+     * @param string $code Reset code from email
      * @param string $newPassword New password
      * @return array Auth service response
      * @throws AuthServiceException
      */
-    public function confirmPasswordReset(string $token, string $newPassword): array
+    public function confirmPasswordReset(string $email, string $code, string $newPassword): array
     {
         return $this->post('/api/auth/reset-password', [
-            'token' => $token,
+            'email' => $email,
+            'code' => $code,
             'new_password' => $newPassword,
+        ]);
+    }
+
+    /**
+     * Verify email address with code
+     *
+     * @param string $email User's email
+     * @param string $code Verification code from email
+     * @return array Auth service response
+     * @throws AuthServiceException
+     */
+    public function verifyEmail(string $email, string $code): array
+    {
+        return $this->post('/api/auth/verify-email', [
+            'email' => $email,
+            'code' => $code,
+        ]);
+    }
+
+    /**
+     * Resend email verification code
+     *
+     * @param string $email User's email
+     * @return array Auth service response
+     * @throws AuthServiceException
+     */
+    public function resendVerificationCode(string $email): array
+    {
+        return $this->post('/api/auth/resend-code', [
+            'email' => $email,
+            'platform' => $this->platformCode,
         ]);
     }
 

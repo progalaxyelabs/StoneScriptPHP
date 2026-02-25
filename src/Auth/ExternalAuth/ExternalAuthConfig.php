@@ -17,8 +17,15 @@ class ExternalAuthConfig
     /** @var string URL prefix for all auth routes */
     public readonly string $prefix;
 
-    /** @var string Auth service base URL */
+    /** @var string Auth service base URL (used for JWKS fetch — container URL in Docker) */
     public readonly string $authServiceUrl;
+
+    /**
+     * @var string JWT 'iss' claim value (public URL the auth server stamps in tokens).
+     * In Docker: AUTH_SERVICE_URL = container URL (JWKS fetch), AUTH_ISSUER = public URL (JWT iss).
+     * Falls back to authServiceUrl when not set (same-host / local dev deployments).
+     */
+    public readonly string $authIssuer;
 
     /** @var string Platform code sent with requests */
     public readonly string $platformCode;
@@ -47,9 +54,10 @@ class ExternalAuthConfig
 
         $this->prefix = rtrim($options['prefix'] ?? '/auth', '/');
         $this->authServiceUrl = $options['auth_service_url'] ?? $env->AUTH_SERVICE_URL;
-        $this->platformCode = $options['platform_code'] ?? (
-            property_exists($env, 'PLATFORM_CODE') ? ($env->PLATFORM_CODE ?? '') : ''
+        $this->authIssuer = $options['auth_issuer'] ?? (
+            !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : $this->authServiceUrl
         );
+        $this->platformCode = $options['platform_code'] ?? ($env->PLATFORM_CODE ?? '');
 
         // Registration config
         $registration = $options['registration'] ?? [];
@@ -90,6 +98,8 @@ class ExternalAuthConfig
             'oauth' => $options['oauth'] ?? false,
             'profile' => $options['profile'] ?? true,
             'health' => $options['health'] ?? false,
+            'verify_email' => $options['verify_email'] ?? true,
+            'resend_code' => $options['resend_code'] ?? true,
         ];
     }
 
