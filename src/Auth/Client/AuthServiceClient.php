@@ -236,4 +236,37 @@ abstract class AuthServiceClient
 
         return ['Authorization: Bearer ' . $token];
     }
+
+    /**
+     * Get platform secret from environment
+     *
+     * @return string|null Platform secret or null if not configured
+     */
+    public function getPlatformSecret(): ?string
+    {
+        $secret = $_ENV['PLATFORM_SECRET'] ?? getenv('PLATFORM_SECRET');
+        return ($secret !== false && $secret !== '') ? $secret : null;
+    }
+
+    /**
+     * Register a new user and create a new tenant
+     *
+     * Proxies registration to the auth service's /api/auth/register-tenant endpoint,
+     * adding the platform secret as an X-Platform-Secret header.
+     *
+     * @param array $data Registration data: tenant_name, country_code (2-letter ISO),
+     *                    platform, email, password, provider ("emailPassword")
+     * @return array Response with tenant, user, access_token, refresh_token
+     * @throws AuthServiceException
+     */
+    public function registerTenant(array $data): array
+    {
+        $headers = [];
+        $secret = $this->getPlatformSecret();
+        if ($secret !== null) {
+            $headers[] = 'X-Platform-Secret: ' . $secret;
+        }
+
+        return $this->post('/api/auth/register-tenant', $data, $headers);
+    }
 }
