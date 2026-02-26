@@ -44,8 +44,7 @@
     },
     "autoload": {
         "psr-4": {
-            "StoneScriptPHP\\": "src/",
-            "StoneScriptPHP\\CLI\\": "cli/"
+            "StoneScriptPHP\\": "src/"
         },
         "files": [
             "src/helpers.php",
@@ -55,7 +54,7 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "StoneScriptPHP\\Tests\\": "tests/"
+            "Tests\\": "tests/"
         }
     },
     "scripts": {

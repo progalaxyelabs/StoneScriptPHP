@@ -2,6 +2,8 @@
 
 namespace StoneScriptPHP;
 
+use StoneScriptPHP\Exceptions\FrameworkException;
+use StoneScriptPHP\Exceptions\ValidationException;
 use Throwable;
 use Error;
 

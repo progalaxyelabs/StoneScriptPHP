@@ -30,10 +30,6 @@ spl_autoload_register(function ($class) {
         // Framework\ApiResponse -> Framework/ApiResponse.php
         $className = substr($class, strlen('Framework\\'));
         $path = FRAMEWORK_PATH . str_replace('\\', DIRECTORY_SEPARATOR, $className) . '.php';
-    } else if(str_starts_with($class, 'Tests\\Fixtures\\')) {
-        // Tests\Fixtures\ExceptionThrowingRoute -> tests/_fixtures/ExceptionThrowingRoute.php
-        $className = substr($class, strlen('Tests\\Fixtures\\'));
-        $path = ROOT_PATH . 'tests/_fixtures/' . str_replace('\\', DIRECTORY_SEPARATOR, $className) . '.php';
     } else {
         return;
     }

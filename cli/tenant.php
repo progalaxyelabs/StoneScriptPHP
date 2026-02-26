@@ -217,7 +217,7 @@ function tenantMigrate(TenantProvisioner $provisioner, array $args): void
 {
     if (empty($args[0])) {
         echo Color::red("Error: Missing tenant slug\n");
-        echo "Usage: php stone tenant:migrate <slug>\n");
+        echo "Usage: php stone tenant:migrate <slug>\n";
         exit(1);
     }
 
@@ -250,7 +250,7 @@ function tenantSeed(TenantProvisioner $provisioner, array $args): void
 {
     if (empty($args[0])) {
         echo Color::red("Error: Missing tenant slug\n");
-        echo "Usage: php stone tenant:seed <slug>\n");
+        echo "Usage: php stone tenant:seed <slug>\n";
         exit(1);
     }
 
@@ -281,7 +281,7 @@ function tenantSuspend(TenantProvisioner $provisioner, array $args): void
 {
     if (empty($args[0])) {
         echo Color::red("Error: Missing tenant slug\n");
-        echo "Usage: php stone tenant:suspend <slug>\n");
+        echo "Usage: php stone tenant:suspend <slug>\n";
         exit(1);
     }
 
@@ -311,7 +311,7 @@ function tenantActivate(TenantProvisioner $provisioner, array $args): void
 {
     if (empty($args[0])) {
         echo Color::red("Error: Missing tenant slug\n");
-        echo "Usage: php stone tenant:activate <slug>\n");
+        echo "Usage: php stone tenant:activate <slug>\n";
         exit(1);
     }
 
@@ -341,7 +341,7 @@ function tenantDelete(TenantProvisioner $provisioner, array $args): void
 {
     if (empty($args[0])) {
         echo Color::red("Error: Missing tenant slug\n");
-        echo "Usage: php stone tenant:delete <slug> [--drop-db]\n");
+        echo "Usage: php stone tenant:delete <slug> [--drop-db]\n";
         exit(1);
     }
 
