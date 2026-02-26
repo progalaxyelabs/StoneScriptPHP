@@ -21,6 +21,7 @@ class RegisterRoute extends BaseExternalAuthRoute
     public string $password = '';
     public string $tenant_name = '';
     public string $country_code = '';
+    public string $display_name = '';
 
     /**
      * {@inheritdoc}
@@ -33,8 +34,10 @@ class RegisterRoute extends BaseExternalAuthRoute
         ];
 
         if ($this->config->registrationMode === 'tenant') {
-            $rules['tenant_name'] = 'required|string';
-            $rules['country_code'] = 'required|string';
+            // tenant_name and country_code are optional — auth generates slug/schema regardless
+            $rules['tenant_name'] = 'optional|string';
+            $rules['country_code'] = 'optional|string';
+            $rules['display_name'] = 'optional|string';
         }
 
         // Merge extra validation from config
@@ -52,8 +55,19 @@ class RegisterRoute extends BaseExternalAuthRoute
         ];
 
         if ($this->config->registrationMode === 'tenant') {
-            $data['tenant_name'] = $this->tenant_name;
-            $data['country_code'] = $this->country_code;
+            // Platform API generates tenant_id — auth service accepts and stores it,
+            // creating a new tenant record or adding a membership to an existing tenant.
+            $data['tenant_id'] = $this->generateUuid();
+
+            if ($this->tenant_name !== '') {
+                $data['tenant_name'] = $this->tenant_name;
+            }
+            if ($this->country_code !== '') {
+                $data['country_code'] = $this->country_code;
+            }
+            if ($this->display_name !== '') {
+                $data['display_name'] = $this->display_name;
+            }
         }
 
         // Collect extra fields from request body (not typed properties)
@@ -87,6 +101,26 @@ class RegisterRoute extends BaseExternalAuthRoute
                 : $this->client->register($data),
             'after_register',
             $data
+        );
+    }
+
+    /**
+     * Generate a UUID v4 string.
+     * Platform API owns tenant_id generation — auth stores it, not generates it.
+     */
+    private function generateUuid(): string
+    {
+        $bytes = random_bytes(16);
+        $bytes[6] = chr(ord($bytes[6]) & 0x0f | 0x40);
+        $bytes[8] = chr(ord($bytes[8]) & 0x3f | 0x80);
+        $hex = bin2hex($bytes);
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 4),
+            substr($hex, 16, 4),
+            substr($hex, 20, 12)
         );
     }
 }
