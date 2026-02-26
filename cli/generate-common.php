@@ -38,14 +38,7 @@ if (!function_exists('detect_root_path')) {
     }
 }
 
-if (!class_exists('Color')) {
-    class Color {
-        public static function red(string $text): string    { return "\033[0;31m{$text}\033[0m"; }
-        public static function green(string $text): string  { return "\033[0;32m{$text}\033[0m"; }
-        public static function yellow(string $text): string { return "\033[1;33m{$text}\033[0m"; }
-        public static function blue(string $text): string   { return "\033[0;34m{$text}\033[0m"; }
-    }
-}
+require_once __DIR__ . '/helpers/color.php';
 
 // Auto-define paths if not already defined (e.g., by stone script)
 if (!defined('ROOT_PATH')) {

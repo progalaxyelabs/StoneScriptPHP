@@ -11,14 +11,7 @@
 
 if (!defined('ROOT_PATH')) define('ROOT_PATH', dirname(__DIR__) . DIRECTORY_SEPARATOR);
 
-// Colors for output
-class Color {
-    const RED = "\033[0;31m";
-    const GREEN = "\033[0;32m";
-    const YELLOW = "\033[1;33m";
-    const BLUE = "\033[0;34m";
-    const NC = "\033[0m";
-}
+require_once __DIR__ . '/helpers/color.php';
 
 echo Color::BLUE . "StoneScriptPHP Upgrade Tool\n" . Color::NC;
 echo "============================\n\n";
