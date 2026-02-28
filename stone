@@ -8,30 +8,34 @@
  */
 
 // Detect installation mode and set up paths
-$isVendorMode = strpos(__DIR__, 'vendor/progalaxyelabs/stonescriptphp') !== false;
-
-if ($isVendorMode) {
-    // Running from vendor/progalaxyelabs/stonescriptphp/stone
-    // This happens when framework is installed via Composer in a project
-    $vendorDir = dirname(dirname(__DIR__)); // vendor/
-    $projectRoot = dirname($vendorDir);      // project root
-    define('ROOT_PATH', $projectRoot . DIRECTORY_SEPARATOR);
-    define('IS_VENDOR_MODE', true);
+if (strpos(__DIR__, 'vendor/progalaxyelabs/stonescriptphp') !== false) {
+    // Running directly from vendor/progalaxyelabs/stonescriptphp/stone
+    $frameworkDir = __DIR__;
+    $projectRoot = dirname(__DIR__, 3);
+    $isVendorMode = true;
+} elseif (is_dir(__DIR__ . '/vendor/progalaxyelabs/stonescriptphp')) {
+    // stone was copied to project root by composer post-install
+    $frameworkDir = __DIR__ . '/vendor/progalaxyelabs/stonescriptphp';
+    $projectRoot = __DIR__;
+    $isVendorMode = true;
 } else {
     // Running from framework development repository
-    // This happens when working on the framework itself
-    define('ROOT_PATH', __DIR__ . DIRECTORY_SEPARATOR);
-    define('IS_VENDOR_MODE', false);
+    $frameworkDir = __DIR__;
+    $projectRoot = __DIR__;
+    $isVendorMode = false;
 }
+
+define('ROOT_PATH', $projectRoot . DIRECTORY_SEPARATOR);
+define('IS_VENDOR_MODE', $isVendorMode);
 
 // Define project paths
 // SRC_PATH points to the project's src/ directory (where App\ namespace lives)
 define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
 define('CONFIG_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Config' . DIRECTORY_SEPARATOR);
 
-require_once ($isVendorMode ? $vendorDir : ROOT_PATH) . 'vendor/autoload.php';
+require_once $projectRoot . '/vendor/autoload.php';
 
-require_once __DIR__ . '/cli/helpers/color.php';
+require_once $frameworkDir . '/cli/helpers/color.php';
 
 // Available commands
 $commands = [
@@ -189,8 +193,8 @@ if (isset($cmdInfo['handler'])) {
 
 // Execute external CLI script
 if (isset($cmdInfo['file'])) {
-    // CLI tools are in the framework package (vendor/)
-    $scriptPath = ROOT_PATH . 'vendor/progalaxyelabs/stonescriptphp/' . $cmdInfo['file'];
+    // CLI tools are in the framework package directory
+    $scriptPath = $frameworkDir . '/' . $cmdInfo['file'];
 
     if (!file_exists($scriptPath)) {
         echo Color::red("Error: CLI script not found") . "\n\n";
