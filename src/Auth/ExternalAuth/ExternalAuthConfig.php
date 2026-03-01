@@ -79,6 +79,8 @@ class ExternalAuthConfig
             'after_select_tenant' => $options['after_select_tenant'] ?? null,
             'after_password_reset' => $options['after_password_reset'] ?? null,
             'after_accept_invite' => $options['after_accept_invite'] ?? null,
+            'before_provision' => $options['before_provision'] ?? null,
+            'after_provision' => $options['after_provision'] ?? null,
         ];
 
         // Feature toggles (defaults)
@@ -96,6 +98,7 @@ class ExternalAuthConfig
             'invite' => $options['invite'] ?? true,
             'accept_invite' => $options['accept_invite'] ?? true,
             'oauth' => $options['oauth'] ?? false,
+            'provision_tenant' => $options['provision_tenant'] ?? ($options['oauth'] ?? false),
             'profile' => $options['profile'] ?? true,
             'health' => $options['health'] ?? false,
             'verify_email' => $options['verify_email'] ?? true,

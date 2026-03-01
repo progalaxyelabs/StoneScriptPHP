@@ -25,6 +25,7 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\OAuthCallbackRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\AuthHealthRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\VerifyEmailRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\ResendVerificationCodeRoute;
+use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
 
 /**
  * ExternalAuth Route Registration
@@ -131,6 +132,14 @@ class ExternalAuthRoutes
                 new SelectTenantRoute($client, $config->hooks, $config)
             );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/select-tenant (protected)");
+        }
+
+        if ($config->isEnabled('provision_tenant')) {
+            $router->post(
+                "$prefix/provision-tenant",
+                new ProvisionTenantRoute($client, $config->hooks, $config)
+            );
+            log_debug("ExternalAuthRoutes: Registered POST $prefix/provision-tenant (protected)");
         }
 
         if ($config->isEnabled('change_password')) {
@@ -244,6 +253,9 @@ class ExternalAuthRoutes
 
         if ($config->isEnabled('select_tenant')) {
             $paths[] = "$prefix/select-tenant";
+        }
+        if ($config->isEnabled('provision_tenant')) {
+            $paths[] = "$prefix/provision-tenant";
         }
         if ($config->isEnabled('change_password')) {
             $paths[] = "$prefix/change-password";
