@@ -286,4 +286,110 @@ class ExternalAuthRoutes
             self::protectedPaths($options)
         );
     }
+
+    /**
+     * Get route definitions in the same format as routes.php
+     *
+     * Returns ['GET' => ['/path' => HandlerClass::class], 'POST' => [...], ...]
+     * Used by the client generator to include framework-level routes.
+     *
+     * Does NOT instantiate ExternalAuthConfig (which requires Env/database config).
+     * Instead, reads prefix and feature toggles directly from the options array
+     * using the same defaults as ExternalAuthConfig.
+     *
+     * @param array $options Same options passed to register()
+     * @return array Route definitions grouped by HTTP method
+     */
+    public static function getRouteDefinitions(array $options = []): array
+    {
+        $prefix = rtrim($options['prefix'] ?? '/auth', '/');
+
+        // Feature toggle defaults (must match ExternalAuthConfig::__construct)
+        $features = [
+            'register' => $options['register'] ?? true,
+            'login' => $options['login'] ?? true,
+            'logout' => $options['logout'] ?? true,
+            'refresh' => $options['refresh'] ?? true,
+            'select_tenant' => $options['select_tenant'] ?? true,
+            'memberships' => $options['memberships'] ?? true,
+            'check_slug' => $options['check_slug'] ?? true,
+            'onboarding_status' => $options['onboarding_status'] ?? true,
+            'password_reset' => $options['password_reset'] ?? true,
+            'change_password' => $options['change_password'] ?? true,
+            'invite' => $options['invite'] ?? true,
+            'accept_invite' => $options['accept_invite'] ?? true,
+            'oauth' => $options['oauth'] ?? false,
+            'provision_tenant' => $options['provision_tenant'] ?? ($options['oauth'] ?? false),
+            'profile' => $options['profile'] ?? true,
+            'health' => $options['health'] ?? false,
+            'verify_email' => $options['verify_email'] ?? true,
+            'resend_code' => $options['resend_code'] ?? true,
+        ];
+
+        $isEnabled = fn(string $feature) => $features[$feature] ?? false;
+        $routes = ['GET' => [], 'POST' => [], 'PUT' => []];
+
+        // Public routes
+        if ($isEnabled('register')) {
+            $routes['POST']["$prefix/register"] = RegisterRoute::class;
+        }
+        if ($isEnabled('login')) {
+            $routes['POST']["$prefix/login"] = LoginRoute::class;
+        }
+        if ($isEnabled('logout')) {
+            $routes['POST']["$prefix/logout"] = LogoutRoute::class;
+        }
+        if ($isEnabled('refresh')) {
+            $routes['POST']["$prefix/refresh-token"] = RefreshTokenRoute::class;
+        }
+        if ($isEnabled('password_reset')) {
+            $routes['POST']["$prefix/forgot-password"] = ForgotPasswordRoute::class;
+            $routes['POST']["$prefix/reset-password"] = ResetPasswordRoute::class;
+        }
+        if ($isEnabled('accept_invite')) {
+            $routes['POST']["$prefix/accept-invite"] = AcceptInviteRoute::class;
+        }
+        if ($isEnabled('check_slug')) {
+            $routes['GET']["$prefix/check-tenant-slug/:slug"] = CheckTenantSlugRoute::class;
+        }
+        if ($isEnabled('onboarding_status')) {
+            $routes['GET']["$prefix/onboarding/status"] = OnboardingStatusRoute::class;
+        }
+        if ($isEnabled('verify_email')) {
+            $routes['POST']["$prefix/verify-email"] = VerifyEmailRoute::class;
+        }
+        if ($isEnabled('resend_code')) {
+            $routes['POST']["$prefix/resend-code"] = ResendVerificationCodeRoute::class;
+        }
+        if ($isEnabled('oauth')) {
+            $routes['POST']["$prefix/oauth/initiate"] = OAuthInitiateRoute::class;
+            $routes['POST']["$prefix/oauth/callback"] = OAuthCallbackRoute::class;
+        }
+        if ($isEnabled('health')) {
+            $routes['GET']["$prefix/health"] = AuthHealthRoute::class;
+        }
+
+        // Protected routes
+        if ($isEnabled('select_tenant')) {
+            $routes['POST']["$prefix/select-tenant"] = SelectTenantRoute::class;
+        }
+        if ($isEnabled('provision_tenant')) {
+            $routes['POST']["$prefix/provision-tenant"] = ProvisionTenantRoute::class;
+        }
+        if ($isEnabled('change_password')) {
+            $routes['POST']["$prefix/change-password"] = ChangePasswordRoute::class;
+        }
+        if ($isEnabled('invite')) {
+            $routes['POST']["$prefix/invite-member"] = InviteMemberRoute::class;
+        }
+        if ($isEnabled('memberships')) {
+            $routes['GET']["$prefix/memberships"] = MembershipsRoute::class;
+            $routes['PUT']["$prefix/memberships/:id"] = UpdateMembershipRoute::class;
+        }
+        if ($isEnabled('profile')) {
+            $routes['GET']["$prefix/me"] = ProfileRoute::class;
+        }
+
+        return $routes;
+    }
 }

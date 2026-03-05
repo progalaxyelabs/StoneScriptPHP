@@ -78,7 +78,7 @@ if (!str_starts_with($outputDir, '/')) {
 }
 
 /**
- * Load and parse routes from routes.php
+ * Load and parse routes from routes.php + framework-level routes (ExternalAuthRoutes)
  */
 function loadRoutes(): array {
     $routesFile = SRC_PATH . 'config' . DIRECTORY_SEPARATOR . 'routes.php';
@@ -102,7 +102,229 @@ function loadRoutes(): array {
         }
     }
 
+    // Load framework-level routes (ExternalAuthRoutes etc.)
+    $frameworkRoutes = loadExternalAuthRoutes();
+    if (!empty($frameworkRoutes)) {
+        $flatRoutes = array_merge($flatRoutes, $frameworkRoutes);
+    }
+
     return $flatRoutes;
+}
+
+/**
+ * Load ExternalAuth route definitions by parsing the project's index.php
+ *
+ * Scans public/index.php for ExternalAuthRoutes::register() calls and extracts
+ * the options array to determine which routes are enabled and their prefix.
+ */
+function loadExternalAuthRoutes(): array {
+    $externalAuthClass = 'StoneScriptPHP\\Auth\\ExternalAuth\\ExternalAuthRoutes';
+
+    if (!class_exists($externalAuthClass) || !method_exists($externalAuthClass, 'getRouteDefinitions')) {
+        return [];
+    }
+
+    // Try to find index.php in common locations
+    $indexPaths = [
+        ROOT_PATH . 'public' . DIRECTORY_SEPARATOR . 'index.php',
+        ROOT_PATH . 'index.php',
+    ];
+
+    $indexFile = null;
+    foreach ($indexPaths as $path) {
+        if (file_exists($path)) {
+            $indexFile = $path;
+            break;
+        }
+    }
+
+    if (!$indexFile) {
+        return [];
+    }
+
+    $content = file_get_contents($indexFile);
+
+    // Check if ExternalAuthRoutes is used
+    if (strpos($content, 'ExternalAuthRoutes::register') === false) {
+        return [];
+    }
+
+    echo "  Found ExternalAuthRoutes in " . basename($indexFile) . "\n";
+
+    // Extract the options array from ExternalAuthRoutes::register($router, [...])
+    $options = parseExternalAuthOptions($content);
+
+    // Get route definitions using the extracted options
+    $definitions = $externalAuthClass::getRouteDefinitions($options);
+
+    // Flatten to the same format as app routes
+    $flat = [];
+    foreach ($definitions as $method => $methodRoutes) {
+        foreach ($methodRoutes as $path => $handler) {
+            $flat[] = [
+                'method' => $method,
+                'path' => $path,
+                'handler' => $handler
+            ];
+        }
+    }
+
+    if (!empty($flat)) {
+        echo "  Loaded " . count($flat) . " ExternalAuth route(s)\n";
+    }
+
+    return $flat;
+}
+
+/**
+ * Parse ExternalAuthRoutes options from index.php content
+ *
+ * Extracts simple key => value pairs (strings, booleans) from the
+ * ExternalAuthRoutes::register() call. Closures and complex expressions
+ * are ignored (they're runtime hooks, not relevant for client generation).
+ */
+function parseExternalAuthOptions(string $content): array {
+    $options = [];
+
+    // Find the ExternalAuthRoutes::register() call and extract the array argument
+    // Match: ExternalAuthRoutes::register($router, [ ... ])
+    // We use token-based parsing for reliability
+    $pos = strpos($content, 'ExternalAuthRoutes::register');
+    if ($pos === false) {
+        return [];
+    }
+
+    // Find the opening [ of the options array (skip first argument $router)
+    $arrayStart = strpos($content, '[', $pos);
+    if ($arrayStart === false) {
+        return [];
+    }
+
+    // Find matching closing ] using bracket counting
+    $depth = 0;
+    $arrayEnd = null;
+    for ($i = $arrayStart; $i < strlen($content); $i++) {
+        $char = $content[$i];
+        if ($char === '[') $depth++;
+        elseif ($char === ']') {
+            $depth--;
+            if ($depth === 0) {
+                $arrayEnd = $i;
+                break;
+            }
+        }
+    }
+
+    if ($arrayEnd === null) {
+        return [];
+    }
+
+    $arrayContent = substr($content, $arrayStart + 1, $arrayEnd - $arrayStart - 1);
+
+    // Extract simple key => value pairs using regex
+    // Match: 'key' => 'string_value' or 'key' => true/false
+    if (preg_match_all("/['\"](\w+)['\"]\s*=>\s*(true|false|['\"][^'\"]*['\"])/", $arrayContent, $matches, PREG_SET_ORDER)) {
+        foreach ($matches as $match) {
+            $key = $match[1];
+            $value = $match[2];
+
+            if ($value === 'true') {
+                $options[$key] = true;
+            } elseif ($value === 'false') {
+                $options[$key] = false;
+            } else {
+                // Strip quotes
+                $options[$key] = trim($value, "'\"");
+            }
+        }
+    }
+
+    return $options;
+}
+
+/**
+ * Check if a handler class is an IRouteHandler (framework route handler pattern)
+ * These have public properties as request fields and process(): ApiResponse
+ */
+function isRouteHandler(string $handlerClass): bool {
+    if (!class_exists($handlerClass)) {
+        return false;
+    }
+    $reflection = new ReflectionClass($handlerClass);
+    return $reflection->implementsInterface('StoneScriptPHP\\IRouteHandler')
+        || $reflection->implementsInterface('Framework\\IRouteHandler');
+}
+
+/**
+ * Extract request properties from a handler class's public properties
+ *
+ * For handlers that don't have contract interfaces (e.g., ExternalAuth routes),
+ * we introspect their declared public properties as request fields.
+ * Properties inherited from parent classes (like BaseExternalAuthRoute) are excluded.
+ */
+function extractHandlerProperties(string $handlerClass): array {
+    if (!class_exists($handlerClass)) {
+        return [];
+    }
+
+    $reflection = new ReflectionClass($handlerClass);
+    $properties = [];
+
+    foreach ($reflection->getProperties(\ReflectionProperty::IS_PUBLIC) as $prop) {
+        // Only include properties declared on this class, not inherited ones
+        if ($prop->getDeclaringClass()->getName() !== $handlerClass) {
+            continue;
+        }
+
+        $type = $prop->getType();
+        $typeName = getReflectionTypeName($type);
+        if ($typeName === 'mixed') $typeName = 'any';
+        $isNullable = $type && $type->allowsNull();
+        $hasDefault = $prop->hasDefaultValue();
+
+        $properties[] = [
+            'name' => $prop->getName(),
+            'type' => $typeName,
+            'nullable' => $isNullable,
+            'isClass' => false,
+            'optional' => $hasDefault || $isNullable
+        ];
+    }
+
+    return $properties;
+}
+
+/**
+ * Generate a TypeScript interface from a handler's public properties
+ */
+function generateHandlerRequestInterface(string $handlerClass, array &$processedClasses = []): string {
+    $shortName = str_contains($handlerClass, '\\')
+        ? substr($handlerClass, strrpos($handlerClass, '\\') + 1)
+        : $handlerClass;
+
+    // Create a request interface name (e.g., LoginRoute -> LoginRequest)
+    $interfaceName = preg_replace('/Route$/', '', $shortName) . 'Request';
+
+    if (in_array($interfaceName, $processedClasses)) {
+        return '';
+    }
+    $processedClasses[] = $interfaceName;
+
+    $properties = extractHandlerProperties($handlerClass);
+    if (empty($properties)) {
+        return '';
+    }
+
+    $output = "export interface $interfaceName {\n";
+    foreach ($properties as $prop) {
+        $tsType = phpTypeToTs($prop['type']);
+        $optional = $prop['optional'] ? '?' : '';
+        $nullable = $prop['nullable'] ? ' | null' : '';
+        $output .= "  {$prop['name']}$optional: $tsType$nullable;\n";
+    }
+    $output .= "}\n\n";
+
+    return $output;
 }
 
 /**
@@ -458,27 +680,47 @@ function generateClient(array $routes): string {
         $handlerClass = $route['handler'];
         $contract = getRouteContract($handlerClass);
 
-        if (!$contract) {
+        $requestTypeName = null;
+        $responseTypeName = null;
+
+        if ($contract) {
+            // Contract-based route (app-level with DTO interfaces)
+            $types = extractContractTypes($contract);
+            if (!$types) {
+                echo "Warning: Could not extract types from contract for {$route['path']}\n";
+                continue;
+            }
+            $interfaces .= generateTsInterface($types['request'], $processedClasses);
+            $interfaces .= generateTsInterface($types['response'], $processedClasses);
+            $requestTypeName = phpTypeToTs($types['request']);
+            $responseTypeName = phpTypeToTs($types['response']);
+        } elseif (isRouteHandler($handlerClass)) {
+            // IRouteHandler without contract (e.g., ExternalAuth routes)
+            // Introspect public properties as request fields
+            $handlerProps = extractHandlerProperties($handlerClass);
+            $shortName = str_contains($handlerClass, '\\')
+                ? substr($handlerClass, strrpos($handlerClass, '\\') + 1)
+                : $handlerClass;
+            $requestInterfaceName = preg_replace('/Route$/', '', $shortName) . 'Request';
+
+            if (!empty($handlerProps)) {
+                $interfaces .= generateHandlerRequestInterface($handlerClass, $processedClasses);
+                $requestTypeName = $requestInterfaceName;
+            } else {
+                $requestTypeName = 'void';
+            }
+            // Framework routes return ApiResponse (generic { success, data, error })
+            $responseTypeName = 'any';
+        } else {
             echo "Warning: No contract interface found for {$route['path']}\n";
             continue;
         }
 
-        $types = extractContractTypes($contract);
-
-        if (!$types) {
-            echo "Warning: Could not extract types from contract for {$route['path']}\n";
-            continue;
-        }
-
-        // Generate interfaces for request and response
-        $interfaces .= generateTsInterface($types['request'], $processedClasses);
-        $interfaces .= generateTsInterface($types['response'], $processedClasses);
-
         // Get resource and method names
         $resourceName = extractResourceName($route['path']);
         $methodName = pathToMethodName($route['path'], $route['method']);
-        $requestTypeName = phpTypeToTs($types['request']);
-        $responseTypeName = phpTypeToTs($types['response']);
+        if (!$requestTypeName) $requestTypeName = 'void';
+        if (!$responseTypeName) $responseTypeName = 'any';
 
         $pathParams = extractPathParams($route['path']);
         $method = strtoupper($route['method']);
