@@ -18,7 +18,7 @@ use StoneScriptPHP\ApiResponse;
  *   2. Call before_provision hook (platform creates tenant record + provisions DB)
  *   3. Call auth's POST /api/internal/create-membership (membership only)
  *   4. Call after_provision hook (optional post-processing)
- *   5. Return tokens to caller
+ *   5. Return tenant_id, tenant_slug, tenant_name (client refreshes JWT via auth to get tenant claim)
  *
  * @package StoneScriptPHP\Auth\ExternalAuth\Routes
  */
@@ -118,7 +118,11 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             }
         }
 
-        return res_ok($result);
+        return res_ok([
+            'tenant_id' => $tenantId,
+            'tenant_slug' => $tenantSlug,
+            'tenant_name' => $this->store_name,
+        ]);
     }
 
     /**
