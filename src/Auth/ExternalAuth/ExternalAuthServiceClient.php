@@ -292,6 +292,29 @@ class ExternalAuthServiceClient extends AuthServiceClient
     }
 
     // ──────────────────────────────────────────────
+    // Internal (server-to-server) endpoints
+    // ──────────────────────────────────────────────
+
+    /**
+     * Create a tenant membership (server-to-server, secured by X-Platform-Secret)
+     *
+     * Does NOT create identities or provision databases — only the membership.
+     * Returns JWT tokens with tenant context.
+     *
+     * @param array $data Membership data (identity_id, tenant_id, platform_code, tenant_slug, tenant_db_schema, ...)
+     * @param string $platformSecret X-Platform-Secret header value
+     * @return array Auth service response with membership + tokens
+     * @throws AuthServiceException
+     */
+    public function createMembership(array $data, string $platformSecret): array
+    {
+        $data['platform_code'] = $data['platform_code'] ?? $this->platformCode;
+        return $this->post('/api/internal/create-membership', $data, [
+            'X-Platform-Secret: ' . $platformSecret,
+        ]);
+    }
+
+    // ──────────────────────────────────────────────
     // Protected (authenticated) endpoints
     // ──────────────────────────────────────────────
 

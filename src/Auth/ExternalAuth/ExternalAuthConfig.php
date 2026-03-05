@@ -39,6 +39,9 @@ class ExternalAuthConfig
     /** @var array Extra validation rules merged into RegisterRoute */
     public readonly array $extraValidation;
 
+    /** @var string|null Platform secret for server-to-server auth (X-Platform-Secret) */
+    public readonly ?string $platformSecret;
+
     /** @var array<string, callable|null> Lifecycle hooks */
     public readonly array $hooks;
 
@@ -70,6 +73,10 @@ class ExternalAuthConfig
                 "Invalid registration mode '{$this->registrationMode}'. Must be 'tenant' or 'identity'."
             );
         }
+
+        // Platform secret for server-to-server calls (e.g., create-membership)
+        $this->platformSecret = $options['platform_secret']
+            ?? ($env->PLATFORM_SECRET ?? ($env->GATEWAY_ADMIN_TOKEN ?? null));
 
         // Hooks
         $this->hooks = [
