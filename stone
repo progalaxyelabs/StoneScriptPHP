@@ -100,8 +100,12 @@ $commands = [
         'file' => 'cli/gateway-migrate-main.php',
     ],
     'gateway:migrate-tenant' => [
-        'description' => 'Migrate tenant database schema via gateway',
+        'description' => 'Migrate ONE tenant database (--database-id required)',
         'file' => 'cli/gateway-migrate-tenant.php',
+    ],
+    'gateway:migrate-all-tenants' => [
+        'description' => 'Migrate ALL tenant databases (bulk operation)',
+        'file' => 'cli/gateway-migrate-all-tenants.php',
     ],
 ];
 
@@ -160,8 +164,9 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone tenant:list                   # List all tenants\n";
     echo "  php stone gateway:register-main          # Register platform + create main DB\n";
     echo "  php stone gateway:register-tenant        # Register platform + upload tenant schema\n";
-    echo "  php stone gateway:migrate-main           # Migrate main database schema\n";
-    echo "  php stone gateway:migrate-tenant          # Migrate all tenant database schemas\n";
+    echo "  php stone gateway:migrate-main                          # Migrate main database schema\n";
+    echo "  php stone gateway:migrate-tenant --database-id=<uuid>  # Migrate ONE tenant database\n";
+    echo "  php stone gateway:migrate-all-tenants                  # Migrate ALL tenant databases\n";
     echo "\n";
     echo "Run 'php stone <command> --help' for detailed help on any command.\n";
     echo "\n";
