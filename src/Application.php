@@ -76,6 +76,13 @@ class Application
 
         $response = $router->dispatch();
 
+        // Set HTTP status code from ApiResponse when provided.
+        // Middleware/error handlers set their own codes via http_response_code() directly.
+        // This covers route handlers returning res_error(msg, 400) / res_not_ok(msg, 422) etc.
+        if ($response->httpStatusCode !== null) {
+            http_response_code($response->httpStatusCode);
+        }
+
         header('Content-Type: application/json');
         echo $response->toJson();
     }

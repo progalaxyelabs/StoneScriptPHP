@@ -58,20 +58,14 @@ function res_ok($data, $message = '') {
     return new ApiResponse('ok', $message, $data);
 }
 
-function res_not_ok($message) {
-    return new ApiResponse('not ok', $message);
+function res_not_ok($message, int $httpStatusCode = 400) {
+    return new ApiResponse('not ok', $message, null, $httpStatusCode);
 }
 
-function res_error($message) {
+function res_error($message, int $httpStatusCode = 500) {
     $method_and_url = $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'];
     log_error('res_error: ' . $method_and_url . ' - ' . $message);
-    return new ApiResponse('error', $message);
-    
-    // if(DEBUG_MODE) {
-    //     return new ApiResponse('error', $message);
-    // } else {
-    //     return new ApiResponse('error', 'server error.');
-    // }
+    return new ApiResponse('error', $message, null, $httpStatusCode);
 }
 
 
