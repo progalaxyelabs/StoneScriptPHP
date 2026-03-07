@@ -555,7 +555,7 @@ function generateTsInterface(string $className, array &$processedClasses = []): 
 function extractResourceName(string $path): string {
     $path = trim($path, '/');
     $parts = explode('/', $path);
-    $name = $parts[0] ?? 'default';
+    $name = $parts[0] ?: 'root';
 
     // Convert hyphenated/underscored names to camelCase (e.g. customer-bills → customerBills)
     if (str_contains($name, '-') || str_contains($name, '_')) {
