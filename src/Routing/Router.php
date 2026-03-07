@@ -328,7 +328,20 @@ class Router
             foreach ($properties as $property) {
                 $propertyName = $property->getName();
                 if (array_key_exists($propertyName, $allInput)) {
-                    $handler->$propertyName = $allInput[$propertyName];
+                    $value = $allInput[$propertyName];
+                    // Coerce string values to match typed property declarations
+                    if ($value !== null && $property->hasType()) {
+                        $type = $property->getType();
+                        $typeName = $type instanceof \ReflectionNamedType ? $type->getName() : null;
+                        if ($typeName === 'int' && is_string($value) && is_numeric($value)) {
+                            $value = (int) $value;
+                        } elseif ($typeName === 'float' && is_string($value) && is_numeric($value)) {
+                            $value = (float) $value;
+                        } elseif ($typeName === 'bool' && is_string($value)) {
+                            $value = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? $value;
+                        }
+                    }
+                    $handler->$propertyName = $value;
                 }
             }
 
