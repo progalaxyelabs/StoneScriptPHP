@@ -244,8 +244,8 @@ abstract class AuthServiceClient
      */
     public function getPlatformSecret(): ?string
     {
-        $secret = $_ENV['PLATFORM_SECRET'] ?? getenv('PLATFORM_SECRET');
-        return ($secret !== false && $secret !== '') ? $secret : null;
+        $env = \StoneScriptPHP\Env::get_instance();
+        return $env->EXTERNAL_AUTH_CLIENT_SECRET;
     }
 
     /**

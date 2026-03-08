@@ -140,7 +140,7 @@ class Application
             !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : $serverUrl
         );
         $platformCode   = $authConfig['platform']['code'] ?? $env->PLATFORM_CODE ?? '';
-        $platformSecret = $authConfig['platform']['secret'] ?? $env->PLATFORM_SECRET ?? null;
+        $platformSecret = $authConfig['platform']['secret'] ?? $env->EXTERNAL_AUTH_CLIENT_SECRET ?? null;
 
         $options = [
             'prefix'           => $authConfig['prefix'] ?? '/auth',

@@ -20,6 +20,12 @@ class Env
     public string $DB_GATEWAY_URL;
     public string $DB_GATEWAY_PLATFORM;
     public ?string $DB_GATEWAY_TENANT_ID = null;
+    public ?string $DB_GATEWAY_ADMIN_TOKEN = null;
+    public string $PLATFORM_ID = '';
+    public string $SCHEMA_NAME = 'v1_0';
+    public string $DATABASE_ID = 'main';
+    public ?string $MAIN_SCHEMA_NAME = null;
+    public ?string $TENANT_SCHEMA_NAME = null;
 
     public ?string $ZEPTOMAIL_BOUNCE_ADDRESS = null;
     public ?string $ZEPTOMAIL_SENDER_EMAIL = null;
@@ -52,7 +58,7 @@ class Env
 
     // Platform identity sent to the auth service in every request (v3.6.0+).
     public string $PLATFORM_CODE = '';
-    public ?string $PLATFORM_SECRET = null;
+    public ?string $EXTERNAL_AUTH_CLIENT_SECRET = null;
 
     public string $AUTH_COOKIE_DOMAIN = '';
     public ?bool $AUTH_COOKIE_SECURE = null;

@@ -98,7 +98,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // 4. Call auth to create membership (server-to-server)
         $platformSecret = $this->config->platformSecret;
         if (!$platformSecret) {
-            log_error("provision-tenant: PLATFORM_SECRET / GATEWAY_ADMIN_TOKEN not configured");
+            log_error("provision-tenant: EXTERNAL_AUTH_CLIENT_SECRET not configured (required for auth service calls)");
             return res_error('Server configuration error', 500);
         }
 

@@ -64,7 +64,7 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
     $platformId = getenv('PLATFORM_ID');
     $schemaName = $options['schema_name'] ?: (getenv('SCHEMA_NAME') ?: null);
     $databaseId = $options['database_id'] ?: (getenv('DATABASE_ID') ?: 'main');
-    $adminToken = getenv('ADMIN_TOKEN') ?: null;
+    $adminToken = getenv('DB_GATEWAY_ADMIN_TOKEN') ?: (getenv('ADMIN_TOKEN') ?: null);
 
     // Main schema: MAIN_SCHEMA_NAME takes priority, falls back to SCHEMA_NAME
     $mainSchemaName = $options['main_schema_name'] ?: (getenv('MAIN_SCHEMA_NAME') ?: $schemaName);

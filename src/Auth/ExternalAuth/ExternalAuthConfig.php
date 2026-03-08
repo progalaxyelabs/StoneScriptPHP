@@ -74,9 +74,10 @@ class ExternalAuthConfig
             );
         }
 
-        // Platform secret for server-to-server calls (e.g., create-membership)
+        // Client secret for server-to-server calls to auth service (e.g., create-membership)
+        // Only needed when AUTH_MODE=external and provision_tenant is enabled
         $this->platformSecret = $options['platform_secret']
-            ?? ($env->PLATFORM_SECRET ?? ($env->GATEWAY_ADMIN_TOKEN ?? null));
+            ?? ($env->EXTERNAL_AUTH_CLIENT_SECRET ?? null);
 
         // Hooks
         $this->hooks = [

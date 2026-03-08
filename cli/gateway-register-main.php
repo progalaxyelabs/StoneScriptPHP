@@ -14,7 +14,7 @@
  *   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
  *   PLATFORM_ID       - Platform identifier (e.g., myapp)
  *   SCHEMA_NAME       - Schema version name (e.g., v1_0)
- *   ADMIN_TOKEN       - Admin token for /admin/* endpoints
+ *   DB_GATEWAY_ADMIN_TOKEN - Admin token for /admin/* endpoints (legacy: ADMIN_TOKEN)
  *
  * Environment variables (optional):
  *   DATABASE_ID       - Database identifier (default: main)
