@@ -52,6 +52,13 @@ if ($databaseId === 'main') {
     exit(1);
 }
 
+if (str_contains($databaseId, '-')) {
+    $suggested = str_replace('-', '_', $databaseId);
+    fwrite(STDERR, "ERROR: Database IDs use underscores, not hyphens.\n");
+    fwrite(STDERR, "  Did you mean: php stone gateway:migrate-tenant --database-id={$suggested}\n");
+    exit(1);
+}
+
 if (!$options['quiet']) {
     echo "=== Gateway Migrate Tenant Database (V2) ===\n";
     echo "Platform:    {$env['platform_id']}\n";
