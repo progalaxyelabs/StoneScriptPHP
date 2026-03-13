@@ -66,7 +66,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // 2. Generate tenant identifiers
         $tenantId = $this->generateUuid();
         $tenantSlug = $this->slugify($this->store_name);
-        $tenantDbSchema = $this->config->platformCode . '_' . str_replace('-', '_', $tenantSlug);
+        $tenantDbSchema = $this->config->platformCode . '_' . str_replace('-', '_', $tenantId);
 
         $data = [
             'identity_id' => $identityId,
