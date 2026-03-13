@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Subscriptions;
 
-use StoneScriptPHP\Router;
+use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Subscriptions\Routes\GetSubscriptionStatusRoute;
 use StoneScriptPHP\Subscriptions\Routes\GetSubscriptionPlansRoute;
 use StoneScriptPHP\Subscriptions\Routes\PostAdminActivateRoute;
