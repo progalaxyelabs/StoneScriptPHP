@@ -5,20 +5,28 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Auth\ExternalAuth\Routes;
 
 use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
+use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
+use StoneScriptPHP\Tenancy\TenantProvisioner;
 
 /**
  * POST {prefix}/provision-tenant (PROTECTED)
  *
  * Creates a tenant for a logged-in user who has an identity but no tenant.
- * Platform-specific work (tenant record creation, DB provisioning) is done
- * via the before_provision / after_provision hooks.
  *
  * Flow:
- *   1. Generate tenant_id, slug, db_schema
- *   2. Call before_provision hook (platform creates tenant record + provisions DB)
- *   3. Call auth's POST /api/internal/create-membership (membership only)
- *   4. Call after_provision hook (optional post-processing)
- *   5. Return tenant_id, tenant_slug, tenant_name (client refreshes JWT via auth to get tenant claim)
+ *   1. Decode JWT — extract identity_id
+ *   2. Generate tenant_id, slug, db_schema
+ *   3. Call provisioner->provision($data) — sequential platform steps:
+ *        a. createTenantRecord()  — write tenant to main DB
+ *        b. createDatabase()      — provision tenant DB via gateway
+ *        c. runMigrations()       — run migrations (default no-op)
+ *        d. seedData()            — platform-specific seeding (default no-op)
+ *   4. Call auth's POST /api/internal/create-membership
+ *   5. Return tenant_id, tenant_slug, tenant_name
+ *
+ * Falls back to legacy before_provision / after_provision hooks when no
+ * provisioner instance is provided (backward compatibility).
  *
  * @package StoneScriptPHP\Auth\ExternalAuth\Routes
  */
@@ -27,13 +35,25 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     public string $store_name = '';
     public string $display_name = '';
 
+    private ?TenantProvisioner $provisioner;
+
+    public function __construct(
+        ExternalAuthServiceClient $client,
+        array $hooks,
+        ExternalAuthConfig $config,
+        ?TenantProvisioner $provisioner = null
+    ) {
+        parent::__construct($client, $hooks, $config);
+        $this->provisioner = $provisioner;
+    }
+
     /**
      * {@inheritdoc}
      */
     public function validation_rules(): array
     {
         return array_merge([
-            'store_name' => 'required|string|max:255',
+            'store_name'   => 'required|string|max:255',
             'display_name' => 'optional|string|max:255',
         ], $this->config->extraValidation);
     }
@@ -64,23 +84,31 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         }
 
         // 2. Generate tenant identifiers
-        $tenantId = $this->generateUuid();
-        $tenantSlug = $this->slugify($this->store_name);
+        $tenantId      = $this->generateUuid();
+        $tenantSlug    = $this->slugify($this->store_name);
         $tenantDbSchema = $this->config->platformCode . '_' . str_replace('-', '_', $tenantId);
 
         $data = [
-            'identity_id' => $identityId,
-            'tenant_id' => $tenantId,
-            'platform_code' => $this->config->platformCode,
-            'tenant_name' => $this->store_name,
-            'tenant_slug' => $tenantSlug,
+            'identity_id'      => $identityId,
+            'tenant_id'        => $tenantId,
+            'platform_code'    => $this->config->platformCode,
+            'tenant_name'      => $this->store_name,
+            'tenant_slug'      => $tenantSlug,
             'tenant_db_schema' => $tenantDbSchema,
-            'display_name' => $this->display_name ?: ($claims['display_name'] ?? ''),
-            'role' => 'owner',
+            'display_name'     => $this->display_name ?: ($claims['display_name'] ?? ''),
+            'role'             => 'owner',
         ];
 
-        // 3. Call before_provision hook — platform creates tenant record + provisions DB
-        if (isset($this->hooks['before_provision']) && is_callable($this->hooks['before_provision'])) {
+        // 3. Run provisioning — prefer class-based provisioner over legacy hooks
+        if ($this->provisioner !== null) {
+            try {
+                $data = $this->provisioner->provision($data);
+            } catch (\Throwable $e) {
+                log_error("TenantProvisioner::provision failed: " . $e->getMessage());
+                return res_error('Tenant provisioning failed: ' . $e->getMessage());
+            }
+        } elseif (isset($this->hooks['before_provision']) && is_callable($this->hooks['before_provision'])) {
+            // Legacy hook path (backward compatibility)
             try {
                 $hookResult = ($this->hooks['before_provision'])($data);
                 if ($hookResult === false) {
@@ -109,7 +137,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             return res_error('Failed to create organization membership');
         }
 
-        // 5. Call after_provision hook
+        // 5. Call after_provision hook (legacy — no-op when using provisioner)
         if (isset($this->hooks['after_provision']) && is_callable($this->hooks['after_provision'])) {
             try {
                 ($this->hooks['after_provision'])($result, $data);
@@ -119,7 +147,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         }
 
         return res_ok([
-            'tenant_id' => $tenantId,
+            'tenant_id'   => $data['tenant_id'],
             'tenant_slug' => $tenantSlug,
             'tenant_name' => $this->store_name,
         ]);

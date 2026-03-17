@@ -135,9 +135,10 @@ class ExternalAuthRoutes
         }
 
         if ($config->isEnabled('provision_tenant')) {
+            $provisioner = $options['provisioner'] ?? null;
             $router->post(
                 "$prefix/provision-tenant",
-                new ProvisionTenantRoute($client, $config->hooks, $config)
+                new ProvisionTenantRoute($client, $config->hooks, $config, $provisioner)
             );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/provision-tenant (protected)");
         }
