@@ -123,16 +123,97 @@ $content = trim($content);
 
 // echo $content . PHP_EOL;
 
-// Updated regex to handle:
-// - Multi-line parameters (newlines)
-// - DEFAULT values in parameters (e.g., "DEFAULT 'IN'")
-// - More flexible matching for parameter types and values
-$regex = '#^(create\s+or\s+replace\s+function\s+)([a-z0-9_]+)(\s*\()(.*?)(\)\s*)(returns\s+table\s*\(.*?\))?\s*(.*)$#is';
-$matches = [];
-if (!preg_match($regex, $content, $matches)) {
-    echo 'error parsing file' . PHP_EOL;
+// ============================================================
+// STEP-BY-STEP PARSER (replaces single regex)
+// Handles nested parentheses in types like VARCHAR(255),
+// NUMERIC(15,2) etc. that break simple regex approaches.
+// ============================================================
+
+/**
+ * Given a string and a position of an opening '(', walk forward
+ * counting paren depth until the matching ')' is found.
+ * Returns the position of the matching ')'.
+ */
+function find_matching_paren(string $str, int $open_pos): int
+{
+    $depth = 0;
+    $len = strlen($str);
+    for ($i = $open_pos; $i < $len; $i++) {
+        if ($str[$i] === '(') {
+            $depth++;
+        } elseif ($str[$i] === ')') {
+            $depth--;
+            if ($depth === 0) {
+                return $i;
+            }
+        }
+    }
+    return -1; // unbalanced
+}
+
+// Pass 1: Find function name
+$fn_match = preg_match('/create\s+or\s+replace\s+function\s+([a-z0-9_]+)/is', $content, $fn_parts);
+if (!$fn_match) {
+    echo "Error: Could not find CREATE OR REPLACE FUNCTION in file\n";
     die(0);
 }
+$parsed_fn_name = $fn_parts[1];
+$after_fn_name_pos = $fn_parts[0][strlen($fn_parts[0]) - 1] === $parsed_fn_name[strlen($parsed_fn_name) - 1]
+    ? strpos($content, $fn_parts[0]) + strlen($fn_parts[0])
+    : 0;
+
+// Pass 2: Find the opening '(' for input params
+$input_open_pos = strpos($content, '(', $after_fn_name_pos);
+if ($input_open_pos === false) {
+    echo "Error: Could not find opening '(' for function parameters\n";
+    die(0);
+}
+
+// Walk parens to find the matching ')' for input params
+$input_close_pos = find_matching_paren($content, $input_open_pos);
+if ($input_close_pos === -1) {
+    echo "Error: Unbalanced parentheses in function parameters\n";
+    die(0);
+}
+
+// Extract input params string (between the parens, exclusive)
+$parsed_input_params = substr($content, $input_open_pos + 1, $input_close_pos - $input_open_pos - 1);
+
+// Pass 3: Check for RETURNS TABLE in the text after input params
+$after_input_params = substr($content, $input_close_pos + 1);
+$parsed_returns_table_columns = '';
+
+$returns_table_match = preg_match('/returns\s+table\s*\(/is', $after_input_params, $rt_parts, PREG_OFFSET_CAPTURE);
+if ($returns_table_match) {
+    // Found RETURNS TABLE — now find its opening '(' and walk to matching ')'
+    $rt_keyword_pos_in_remainder = $rt_parts[0][1];
+    $rt_text = $rt_parts[0][0]; // e.g. "RETURNS TABLE("
+    $rt_open_paren_pos = $rt_keyword_pos_in_remainder + strlen($rt_text) - 1; // position of '('
+    $rt_close_paren_pos = find_matching_paren($after_input_params, $rt_open_paren_pos);
+
+    if ($rt_close_paren_pos === -1) {
+        echo "Error: Unbalanced parentheses in RETURNS TABLE\n";
+        die(0);
+    }
+
+    // Extract the columns between the parens (exclusive)
+    $parsed_returns_table_columns = substr(
+        $after_input_params,
+        $rt_open_paren_pos + 1,
+        $rt_close_paren_pos - $rt_open_paren_pos - 1
+    );
+}
+
+// Build a matches-like structure for compatibility with existing code
+$matches = [
+    0 => '',                         // full match (unused)
+    1 => '',                         // CREATE OR REPLACE FUNCTION (unused)
+    2 => $parsed_fn_name,            // function name
+    3 => '',                         // opening paren (unused)
+    4 => $parsed_input_params,       // input params string
+    5 => '',                         // closing paren (unused)
+    6 => $parsed_returns_table_columns, // returns table columns (just the inner content, no wrapper)
+];
 
 /**
  * Split parameter string by commas, respecting parenthesized groups (e.g., numeric(15,2))
@@ -207,17 +288,17 @@ function get_input_params(string $str, array $type_map): array
     return [$typed_input_params, $input_params];
 }
 
-function get_output_params(string $input_str, string $returns_str, array $type_map): array
+function get_output_params(string $input_str, string $returns_columns_str, array $type_map): array
 {
     $input_str_clean = strtolower(trim(preg_replace('#[\s]+#', ' ', $input_str)));
-    $returns_str_clean = strtolower(trim(preg_replace('#[\s]+#', ' ', $returns_str)));
+    // returns_columns_str is already just the inner content (no RETURNS TABLE(...) wrapper)
+    $returns_columns_clean = strtolower(trim(preg_replace('#[\s]+#', ' ', $returns_columns_str)));
     $output_params = [];
     $is_return_table = false;
 
-    if (!empty($returns_str_clean)) {
+    if (!empty($returns_columns_clean)) {
         $is_return_table = true;
-        $params_str = rtrim(preg_replace('#^returns table[\s]*\(#', '', $returns_str_clean), ')');
-        $lines = split_parameters($params_str);
+        $lines = split_parameters($returns_columns_clean);
         foreach ($lines as $line) {
             $trimmed_line = trim($line);
             $parts = explode(' ', $trimmed_line);
