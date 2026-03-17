@@ -186,7 +186,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
     /**
      * Confirm password reset with verification code
      *
-     * progalaxyelabs-auth expects: email + code + new_password
+     * The external auth service expects: email + code + new_password
      *
      * @param string $email User's email
      * @param string $code Reset code from email

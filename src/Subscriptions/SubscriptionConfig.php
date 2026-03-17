@@ -13,7 +13,7 @@ namespace StoneScriptPHP\Subscriptions;
  * Usage:
  *
  *   SubscriptionRoutes::register($router, [
- *       'platform_code' => 'medstoreapp',
+ *       'platform_code' => 'my_trading_platform',
  *       'razorpay_webhook_secret' => 'whsec_xxx',   // enables webhook
  *       'admin_api_key' => 'secret-key',             // enables admin activate
  *       'prefix' => '/subscription',                 // optional, default: /subscription

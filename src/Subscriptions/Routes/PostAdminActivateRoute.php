@@ -17,7 +17,7 @@ use StoneScriptPHP\Subscriptions\SubscriptionConfig;
  *
  * Body:
  * {
- *   "platform_code": "medstoreapp",
+ *   "platform_code": "my_trading_platform",
  *   "tenant_id": "uuid",
  *   "plan_code": "annual",
  *   "payment_id": "pay_xxx",      (optional)

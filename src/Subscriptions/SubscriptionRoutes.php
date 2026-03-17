@@ -19,7 +19,7 @@ use StoneScriptPHP\Subscriptions\Routes\PostRazorpayWebhookRoute;
  * Usage in index.php:
  *
  *   SubscriptionRoutes::register($router, [
- *       'platform_code'           => 'medstoreapp',
+ *       'platform_code'           => 'my_trading_platform',
  *       'razorpay_webhook_secret' => $_ENV['RAZORPAY_WEBHOOK_SECRET'], // opt-in
  *       'admin_api_key'           => $_ENV['ADMIN_API_KEY'],           // opt-in
  *       'prefix'                  => '/subscription',                  // default
