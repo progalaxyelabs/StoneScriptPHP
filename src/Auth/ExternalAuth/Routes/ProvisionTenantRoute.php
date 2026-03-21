@@ -34,6 +34,8 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
 {
     public string $store_name = '';
     public string $display_name = '';
+    public string $email = '';
+    public string $phone_number = '';
 
     private ?TenantProvisioner $provisioner;
 
@@ -55,6 +57,8 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         return array_merge([
             'store_name'   => 'required|string|max:255',
             'display_name' => 'optional|string|max:255',
+            'email'        => 'optional|string|max:255',
+            'phone_number' => 'optional|string|max:50',
         ], $this->config->extraValidation);
     }
 
@@ -96,6 +100,8 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             'tenant_slug'      => $tenantSlug,
             'tenant_db_schema' => $tenantDbSchema,
             'display_name'     => $this->display_name ?: ($claims['display_name'] ?? ''),
+            'email'            => $this->email ?: ($claims['email'] ?? ''),
+            'phone_number'     => $this->phone_number,
             'role'             => 'owner',
         ];
 
