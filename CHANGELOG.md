@@ -17,6 +17,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Can generate for a single route or all routes at once
 - Skips routes that already have contracts unless `--force` is used
 
+## [3.14.0] - 2026-03-22
+
+### Added
+- **Route scope support** — routes in `routes.php` can now declare a `scope` (e.g., `portal`, `admin`, `shared`)
+- New `RouteEntry` value object (`src/Routing/RouteEntry.php`) to hold handler, scope, and alias metadata
+- `Router::normalizeRouteConfig()` static method for parsing both old string format and new array format
+- `Router::scope()` method for grouping scope-specific middleware:
+  ```php
+  $router->scope('portal', function($r) {
+      $r->use(new GatewayTenantMiddleware());
+  });
+  ```
+- `ScopeMiddlewareBuilder` class for clean middleware registration within a scope
+- `Router::getRouteMeta()` and `Router::getKnownScopes()` methods for introspecting route metadata
+- Scope metadata included in `$request['route']['scope']` during dispatch
+- `--scope` flag for `php stone generate client` — generates client with only scope + shared routes
+- Alias support: routes marked `'alias' => true` are routable but excluded from client generation
+- Optional top-level `'scopes'` key in routes.php for documenting available scopes
+- Scope-aware resource name extraction strips scope prefix (e.g., `/portal/invoices` → resource `invoices`)
+
+### Changed
+- `Router::loadRoutes()` now supports route values as arrays: `['handler' => class, 'scope' => '...', 'alias' => bool]`
+- Legacy `RequestParser` (old Router) normalizes new array format via `normalizeRoutes()` for backward compatibility
+- `extractResourceName()` and `pathToMethodName()` in generate-client now accept `$knownScopes` parameter
+- Scope-specific middleware runs after global middleware but before route-specific middleware
+
 ## [2.9.0] - 2026-02-11
 
 ### Added

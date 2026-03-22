@@ -21,11 +21,43 @@ abstract class RequestParser
 
     public function __construct()
     {
-        $this->routes = require CONFIG_PATH . 'routes.php';
+        $rawRoutes = require CONFIG_PATH . 'routes.php';
+        $this->routes = self::normalizeRoutes($rawRoutes);
         $this->allowed_origins =  require CONFIG_PATH . 'allowed-origins.php';
 
         $this->request_path = parse_url($_SERVER['REQUEST_URI'])['path'] ?? '';
         log_debug("request path is [$this->request_path]");
+    }
+
+    /**
+     * Normalize routes config to support both old string format and new array format.
+     *
+     * Old format: '/health' => HealthRoute::class
+     * New format: '/portal/dashboard' => ['handler' => GetDashboardRoute::class, 'scope' => 'portal']
+     *
+     * Returns normalized format where all values are handler class strings.
+     */
+    protected static function normalizeRoutes(array $rawRoutes): array
+    {
+        $normalized = [];
+        foreach ($rawRoutes as $method => $routes) {
+            // Skip non-method keys like 'scopes'
+            if (!is_array($routes) || $method === 'scopes') {
+                continue;
+            }
+            $normalized[$method] = [];
+            foreach ($routes as $path => $config) {
+                if (is_string($config)) {
+                    $normalized[$method][$path] = $config;
+                } elseif (is_array($config) && isset($config['handler'])) {
+                    $normalized[$method][$path] = $config['handler'];
+                } else {
+                    // Unknown format, skip
+                    $normalized[$method][$path] = $config;
+                }
+            }
+        }
+        return $normalized;
     }
 
     protected function add_cors_headers(): void

@@ -6,12 +6,14 @@
  * Generates a TypeScript or Kotlin client from PHP routes with full type safety.
  *
  * Usage:
- *   php generate client [--output=<path>] [--language=typescript|kotlin]
+ *   php generate client [--output=<path>] [--language=typescript|kotlin] [--scope=<scope>]
  *
  * Example:
  *   php generate client
  *   php generate client --output=frontend/src/api/client.ts
  *   php generate client --language=kotlin --output=/tmp/kotlin-gen
+ *   php generate client --scope=portal
+ *   php generate client --scope=admin --output=client/admin
  */
 
 // Determine the root path (go up two levels from Framework/cli)
@@ -40,6 +42,7 @@ $outputDir = 'client';
 $packageName = '@stonescript/api-client';
 $apiVersion = '1.0.0';
 $language = 'typescript';
+$scopeFilter = null; // null = all routes (backward compat), string = filter by scope
 
 foreach ($argv as $arg) {
     if (str_starts_with($arg, '--output=')) {
@@ -51,6 +54,9 @@ foreach ($argv as $arg) {
     if (str_starts_with($arg, '--language=')) {
         $language = strtolower(substr($arg, 11));
     }
+    if (str_starts_with($arg, '--scope=')) {
+        $scopeFilter = strtolower(substr($arg, 8));
+    }
     if (in_array($arg, ['--help', '-h', 'help'])) {
         echo "API Client Generator\n";
         echo "=====================\n\n";
@@ -58,10 +64,14 @@ foreach ($argv as $arg) {
         echo "Options:\n";
         echo "  --output=<dir>       Output directory (default: client)\n";
         echo "  --name=<name>        Package name (default: @stonescript/api-client)\n";
-        echo "  --language=<lang>    Language: typescript (default) or kotlin\n\n";
+        echo "  --language=<lang>    Language: typescript (default) or kotlin\n";
+        echo "  --scope=<scope>      Filter routes by scope (includes scope + shared routes)\n";
+        echo "                       When omitted, all routes are included (backward compat)\n\n";
         echo "Example:\n";
         echo "  php generate client\n";
         echo "  php generate client --output=packages/api-client\n";
+        echo "  php generate client --scope=portal\n";
+        echo "  php generate client --scope=admin --output=client/admin\n";
         echo "  php generate client --language=kotlin --output=/tmp/kotlin-gen\n\n";
         exit(0);
     }
@@ -79,6 +89,12 @@ if (!str_starts_with($outputDir, '/')) {
 
 /**
  * Load and parse routes from routes.php + framework-level routes (ExternalAuthRoutes)
+ *
+ * Supports both old format (string handler) and new format (array with scope/alias):
+ *   Old: '/health' => HealthRoute::class
+ *   New: '/portal/dashboard' => ['handler' => GetDashboardRoute::class, 'scope' => 'portal']
+ *
+ * Also supports optional top-level 'scopes' key for documentation.
  */
 function loadRoutes(): array {
     $routesFile = SRC_PATH . 'config' . DIRECTORY_SEPARATOR . 'routes.php';
@@ -90,21 +106,58 @@ function loadRoutes(): array {
 
     $routes = require $routesFile;
 
-    // Flatten routes by method
+    // Flatten routes by method, normalizing both old and new formats
     $flatRoutes = [];
     foreach ($routes as $method => $methodRoutes) {
-        foreach ($methodRoutes as $path => $handler) {
-            $flatRoutes[] = [
-                'method' => $method,
-                'path' => $path,
-                'handler' => $handler
-            ];
+        // Skip non-method keys like 'scopes'
+        if (!is_array($methodRoutes) || $method === 'scopes') {
+            continue;
+        }
+        foreach ($methodRoutes as $path => $config) {
+            if (is_string($config)) {
+                // Old format: handler class string — scope defaults to 'shared'
+                $flatRoutes[] = [
+                    'method' => $method,
+                    'path' => $path,
+                    'handler' => $config,
+                    'scope' => 'shared',
+                    'alias' => false,
+                ];
+            } elseif (is_array($config) && isset($config['handler'])) {
+                // New format: ['handler' => class, 'scope' => '...', 'alias' => bool]
+                $flatRoutes[] = [
+                    'method' => $method,
+                    'path' => $path,
+                    'handler' => $config['handler'],
+                    'scope' => $config['scope'] ?? 'shared',
+                    'alias' => $config['alias'] ?? false,
+                ];
+            } else {
+                // Unknown format — treat as old format
+                $flatRoutes[] = [
+                    'method' => $method,
+                    'path' => $path,
+                    'handler' => $config,
+                    'scope' => 'shared',
+                    'alias' => false,
+                ];
+            }
         }
     }
 
     // Load framework-level routes (ExternalAuthRoutes etc.)
     $frameworkRoutes = loadExternalAuthRoutes();
     if (!empty($frameworkRoutes)) {
+        // Framework routes default to scope 'shared' and are never aliases
+        foreach ($frameworkRoutes as &$fwRoute) {
+            if (!isset($fwRoute['scope'])) {
+                $fwRoute['scope'] = 'shared';
+            }
+            if (!isset($fwRoute['alias'])) {
+                $fwRoute['alias'] = false;
+            }
+        }
+        unset($fwRoute);
         $flatRoutes = array_merge($flatRoutes, $frameworkRoutes);
     }
 
@@ -547,15 +600,29 @@ function generateTsInterface(string $className, array &$processedClasses = []): 
 }
 
 /**
- * Extract resource name from path (first segment)
- * /projects/create -> projects
- * /users/{id} -> users
- * /auth/login -> auth
+ * Extract resource name from path (first segment).
+ *
+ * When a scope filter is active and the first segment matches a known scope prefix,
+ * the resource is extracted from the second segment instead:
+ *   /portal/invoices → 'invoices' (not 'portal')
+ *   /admin/tenants   → 'tenants'  (not 'admin')
+ *   /auth/profile    → 'auth'     (no scope prefix, keep as-is)
+ *   /health          → 'health'
+ *
+ * @param string $path The route path
+ * @param string[] $knownScopes Known scope prefixes to strip (from routes config)
  */
-function extractResourceName(string $path): string {
+function extractResourceName(string $path, array $knownScopes = []): string {
     $path = trim($path, '/');
     $parts = explode('/', $path);
-    $name = $parts[0] ?: 'root';
+
+    // If the first segment is a known scope prefix and there are more segments,
+    // use the second segment as the resource name
+    if (count($parts) > 1 && in_array($parts[0], $knownScopes)) {
+        $name = $parts[1] ?: 'root';
+    } else {
+        $name = $parts[0] ?: 'root';
+    }
 
     // Convert hyphenated/underscored names to camelCase (e.g. customer-bills → customerBills)
     if (str_contains($name, '-') || str_contains($name, '_')) {
@@ -574,10 +641,22 @@ function extractResourceName(string $path): string {
  * /projects/:id + DELETE -> delete
  * /projects -> GET -> list
  * /payments/reference/:reference_type/:reference_id + GET -> getByReference
+ *
+ * When knownScopes is provided, scope prefixes are stripped first:
+ * /portal/invoices/create + POST -> create (not portal)
+ *
+ * @param string $path The route path
+ * @param string $method The HTTP method
+ * @param string[] $knownScopes Known scope prefixes to strip
  */
-function pathToMethodName(string $path, string $method): string {
+function pathToMethodName(string $path, string $method, array $knownScopes = []): string {
     $path = trim($path, '/');
     $parts = explode('/', $path);
+
+    // Strip scope prefix if the first segment is a known scope
+    if (count($parts) > 1 && in_array($parts[0], $knownScopes)) {
+        array_shift($parts);
+    }
 
     // Remove the first segment (resource name)
     array_shift($parts);
@@ -669,9 +748,57 @@ function extractPathParams(string $path): array {
 }
 
 /**
- * Generate TypeScript API client (v2.0 - with ApiConnectionService)
+ * Filter routes by scope.
+ *
+ * When $scopeFilter is set, only routes matching that scope OR scope='shared' are included.
+ * Alias routes are always excluded from client generation.
+ *
+ * @param array $routes Flat route array with 'scope' and 'alias' keys
+ * @param string|null $scopeFilter Scope to filter by (null = all routes)
+ * @return array Filtered routes
  */
-function generateClient(array $routes): string {
+function filterRoutesByScope(array $routes, ?string $scopeFilter): array {
+    return array_filter($routes, function($route) use ($scopeFilter) {
+        // Always exclude alias routes from client generation
+        if ($route['alias'] ?? false) {
+            return false;
+        }
+
+        // If no scope filter, include all non-alias routes
+        if ($scopeFilter === null) {
+            return true;
+        }
+
+        // Include routes matching the requested scope OR the 'shared' scope
+        $routeScope = $route['scope'] ?? 'shared';
+        return $routeScope === $scopeFilter || $routeScope === 'shared';
+    });
+}
+
+/**
+ * Collect known scope names from routes config.
+ *
+ * @param array $routes Flat route array with 'scope' keys
+ * @return string[] Unique scope names
+ */
+function collectKnownScopes(array $routes): array {
+    $scopes = [];
+    foreach ($routes as $route) {
+        $scope = $route['scope'] ?? 'shared';
+        if (!in_array($scope, $scopes)) {
+            $scopes[] = $scope;
+        }
+    }
+    return $scopes;
+}
+
+/**
+ * Generate TypeScript API client (v2.0 - with ApiConnectionService)
+ *
+ * @param array $routes Flat route array (already filtered by scope if applicable)
+ * @param string[] $knownScopes Known scope prefixes for resource name extraction
+ */
+function generateClient(array $routes, array $knownScopes = []): string {
     $interfaces = '';
     $processedClasses = [];
     $resourceMethods = []; // Group methods by resource
@@ -716,9 +843,9 @@ function generateClient(array $routes): string {
             continue;
         }
 
-        // Get resource and method names
-        $resourceName = extractResourceName($route['path']);
-        $methodName = pathToMethodName($route['path'], $route['method']);
+        // Get resource and method names (scope-aware: strips scope prefix)
+        $resourceName = extractResourceName($route['path'], $knownScopes);
+        $methodName = pathToMethodName($route['path'], $route['method'], $knownScopes);
         if (!$requestTypeName) $requestTypeName = 'void';
         if (!$responseTypeName) $responseTypeName = 'any';
 
@@ -1573,8 +1700,23 @@ KOTLIN;
 
 // Main execution
 echo "Scanning routes...\n";
-$routes = loadRoutes();
-echo "Found " . count($routes) . " route(s)\n";
+$allRoutes = loadRoutes();
+echo "Found " . count($allRoutes) . " route(s)\n";
+
+// Collect all known scopes from the routes (before filtering)
+$knownScopes = collectKnownScopes($allRoutes);
+
+// Apply scope filtering
+if ($scopeFilter !== null) {
+    echo "Filtering by scope: $scopeFilter (+ shared)\n";
+    $routes = filterRoutesByScope($allRoutes, $scopeFilter);
+    $routes = array_values($routes); // Re-index
+    echo "  " . count($routes) . " route(s) after scope filter\n";
+} else {
+    // Even without scope filter, exclude alias routes from client generation
+    $routes = filterRoutesByScope($allRoutes, null);
+    $routes = array_values($routes);
+}
 
 // Branch on language
 if ($language === 'kotlin') {
@@ -1584,7 +1726,7 @@ if ($language === 'kotlin') {
 }
 
 echo "Generating TypeScript client...\n";
-$clientCode = generateClient($routes);
+$clientCode = generateClient($routes, $knownScopes);
 
 // Create output directory structure
 $srcDir = $outputDir . DIRECTORY_SEPARATOR . 'src';
