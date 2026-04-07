@@ -328,7 +328,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
     public function getMemberships(?string $authToken = null): array
     {
         $query = !empty($this->platformCode)
-            ? '?platform=' . urlencode($this->platformCode)
+            ? '?platform_code=' . urlencode($this->platformCode)
             : '';
         return $this->get('/api/auth/memberships' . $query, $this->buildAuthHeader($authToken));
     }
@@ -395,7 +395,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
      * Uses /api/auth/memberships which returns the user's memberships
      * (including tenant info, role, status) for the current platform.
      *
-     * @param string|null $authToken Authorization header value (with or without "Bearer " prefix)
+     * @param string|null $authToken Raw JWT token (without "Bearer " prefix)
      * @return array Auth service response
      * @throws AuthServiceException
      */
@@ -404,14 +404,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
         $query = !empty($this->platformCode)
             ? '?platform_code=' . urlencode($this->platformCode)
             : '';
-
-        // Strip "Bearer " prefix if present — buildAuthHeader() adds it back
-        $token = $authToken;
-        if ($token !== null && str_starts_with($token, 'Bearer ')) {
-            $token = substr($token, 7);
-        }
-
-        return $this->get('/api/auth/memberships' . $query, $this->buildAuthHeader($token));
+        return $this->get('/api/auth/memberships' . $query, $this->buildAuthHeader($authToken));
     }
 
     /**

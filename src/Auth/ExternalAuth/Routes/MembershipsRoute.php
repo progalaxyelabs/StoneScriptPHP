@@ -31,7 +31,7 @@ class MembershipsRoute extends BaseExternalAuthRoute
     public function process(): ApiResponse
     {
         return $this->proxyCall(
-            fn() => $this->client->getMemberships($this->getAuthHeader())
+            fn() => $this->client->getMemberships($this->getBearerToken())
         );
     }
 }

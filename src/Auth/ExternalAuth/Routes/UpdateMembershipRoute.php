@@ -51,7 +51,7 @@ class UpdateMembershipRoute extends BaseExternalAuthRoute
             fn() => $this->client->updateMembership(
                 $this->id,
                 $data,
-                $this->getAuthHeader()
+                $this->getBearerToken()
             )
         );
     }

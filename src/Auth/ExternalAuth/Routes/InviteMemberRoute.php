@@ -42,7 +42,7 @@ class InviteMemberRoute extends BaseExternalAuthRoute
                 $this->email,
                 $this->tenant_id,
                 $this->role,
-                $this->getAuthHeader()
+                $this->getBearerToken()
             )
         );
     }

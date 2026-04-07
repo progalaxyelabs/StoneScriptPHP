@@ -68,14 +68,10 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     public function process(): ApiResponse
     {
         // 1. Get identity_id from JWT
-        $authHeader = $this->getAuthHeader();
-        if (!$authHeader) {
+        $token = $this->getBearerToken();
+        if (!$token) {
             return res_error('Authorization token required', 401);
         }
-
-        $token = str_starts_with($authHeader, 'Bearer ')
-            ? substr($authHeader, 7)
-            : $authHeader;
 
         $claims = $this->decodeJwt($token);
         if ($claims === null) {

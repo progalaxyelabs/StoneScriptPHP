@@ -78,33 +78,49 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
     }
 
     /**
-     * Extract the Authorization header from the current request
+     * Extract the raw JWT token from the Authorization header of the current request
      *
-     * @return string|null The raw Authorization header value, or null
+     * Strips the "Bearer " prefix so the raw token can be passed directly to
+     * client methods — buildAuthHeader() will re-add the prefix when making
+     * outbound requests, avoiding the double-Bearer bug.
+     *
+     * @return string|null The raw JWT token (without "Bearer " prefix), or null
      */
-    protected function getAuthHeader(): ?string
+    protected function getBearerToken(): ?string
     {
+        $headerValue = null;
+
         // Try getallheaders() first (Apache/FPM)
         if (function_exists('getallheaders')) {
             $headers = getallheaders();
             // Headers are case-insensitive per HTTP spec
             foreach ($headers as $name => $value) {
                 if (strtolower($name) === 'authorization') {
-                    return $value;
+                    $headerValue = $value;
+                    break;
                 }
             }
         }
 
         // Fallback to $_SERVER
-        if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-            return $_SERVER['HTTP_AUTHORIZATION'];
+        if ($headerValue === null && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            $headerValue = $_SERVER['HTTP_AUTHORIZATION'];
         }
 
         // Apache mod_rewrite fallback
-        if (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
-            return $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+        if ($headerValue === null && isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $headerValue = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
         }
 
-        return null;
+        if ($headerValue === null) {
+            return null;
+        }
+
+        // Strip "Bearer " prefix — buildAuthHeader() adds it back when making outbound requests
+        if (str_starts_with($headerValue, 'Bearer ')) {
+            return substr($headerValue, 7);
+        }
+
+        return $headerValue;
     }
 }

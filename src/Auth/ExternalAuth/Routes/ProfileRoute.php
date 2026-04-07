@@ -36,7 +36,7 @@ class ProfileRoute extends BaseExternalAuthRoute
     public function process(): ApiResponse
     {
         return $this->proxyCall(
-            fn() => $this->client->getProfile($this->getAuthHeader())
+            fn() => $this->client->getProfile($this->getBearerToken())
         );
     }
 }

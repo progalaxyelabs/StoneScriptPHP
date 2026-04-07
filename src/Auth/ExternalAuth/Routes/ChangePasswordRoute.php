@@ -39,7 +39,7 @@ class ChangePasswordRoute extends BaseExternalAuthRoute
             fn() => $this->client->changePassword(
                 $this->current_password,
                 $this->new_password,
-                $this->getAuthHeader()
+                $this->getBearerToken()
             )
         );
     }

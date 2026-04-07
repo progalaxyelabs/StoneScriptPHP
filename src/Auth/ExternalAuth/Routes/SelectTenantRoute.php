@@ -44,7 +44,7 @@ class SelectTenantRoute extends BaseExternalAuthRoute
             fn() => $this->client->selectTenant(
                 $this->selection_token,
                 $this->tenant_id,
-                $this->getAuthHeader()
+                $this->getBearerToken()
             ),
             'after_select_tenant',
             $input
