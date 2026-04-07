@@ -44,7 +44,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
      */
     public function register(array $data): array
     {
-        $data['platform'] = $data['platform'] ?? $this->platformCode;
+        $data['platform_code'] = $data['platform_code'] ?? $this->platformCode;
         return $this->post('/api/auth/register', $data);
     }
 
@@ -60,7 +60,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
      */
     public function registerTenant(array $data): array
     {
-        $data['platform'] = $data['platform'] ?? $this->platformCode;
+        $data['platform_code'] = $data['platform_code'] ?? $this->platformCode;
         return $this->post('/api/auth/register-tenant', $data);
     }
 
@@ -78,7 +78,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
         $data = [
             'email' => $email,
             'password' => $password,
-            'platform' => $this->platformCode,
+            'platform_code' => $this->platformCode,
         ];
 
         if ($tenantSlug !== null) {
@@ -179,7 +179,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
     {
         return $this->post('/api/auth/forgot-password', [
             'email' => $email,
-            'platform' => $this->platformCode,
+            'platform_code' => $this->platformCode,
         ]);
     }
 
@@ -230,7 +230,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
     {
         return $this->post('/api/auth/resend-code', [
             'email' => $email,
-            'platform' => $this->platformCode,
+            'platform_code' => $this->platformCode,
         ]);
     }
 
@@ -265,7 +265,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
         $data = [
             'provider' => $provider,
             'redirect_uri' => $redirectUri,
-            'platform' => $this->platformCode,
+            'platform_code' => $this->platformCode,
         ];
         if ($tenantSlug !== null) {
             $data['tenant_slug'] = $tenantSlug;
@@ -349,7 +349,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
             'email' => $email,
             'tenant_id' => $tenantId,
             'role' => $role,
-            'platform' => $this->platformCode,
+            'platform_code' => $this->platformCode,
         ], $this->buildAuthHeader($authToken));
     }
 
