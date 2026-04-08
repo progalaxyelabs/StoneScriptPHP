@@ -80,7 +80,7 @@ class RateLimiter
         if ($this->isBlacklisted($identifier)) {
             log_warning("Rate limit: Blacklisted client attempted $action", [
                 'identifier' => substr($identifier, 0, 16) . '...',
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
             return false;
         }
@@ -176,7 +176,7 @@ class RateLimiter
 
         log_warning("Client blacklisted for $durationSeconds seconds", [
             'identifier' => substr($identifier, 0, 16) . '...',
-            'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+            'ip' => client_ip()
         ]);
     }
 
@@ -186,7 +186,7 @@ class RateLimiter
     private function isWhitelisted(string $identifier): bool
     {
         return in_array($identifier, $this->whitelist) ||
-               in_array($_SERVER['REMOTE_ADDR'] ?? '', $this->whitelist);
+               in_array(client_ip(), $this->whitelist);
     }
 
     /**
@@ -198,7 +198,7 @@ class RateLimiter
         $this->blacklist = array_filter($this->blacklist, fn($expiry) => $expiry > time());
 
         return isset($this->blacklist[$identifier]) ||
-               isset($this->blacklist[$_SERVER['REMOTE_ADDR'] ?? '']);
+               isset($this->blacklist[client_ip()]);
     }
 
     /**
@@ -206,7 +206,7 @@ class RateLimiter
      */
     private function getClientIdentifier(): string
     {
-        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $ip = client_ip();
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
 
         return hash('sha256', $ip . '|' . $userAgent);
@@ -231,7 +231,7 @@ class RateLimiter
 
             log_warning("Rate limit exceeded for $action", [
                 'identifier' => substr($identifier, 0, 16) . '...',
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+                'ip' => client_ip(),
                 'attempts' => count($recentAttempts),
                 'max_attempts' => $maxAttempts,
                 'window_seconds' => $windowSeconds,

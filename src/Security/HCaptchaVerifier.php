@@ -89,7 +89,7 @@ class HCaptchaVerifier
             log_warning("hCaptcha verification failed", [
                 'error_codes' => $errorCodes,
                 'error_message' => $this->lastError,
-                'ip' => $remoteIp ?? ($_SERVER['REMOTE_ADDR'] ?? 'unknown')
+                'ip' => $remoteIp ?? client_ip()
             ]);
 
             return false;

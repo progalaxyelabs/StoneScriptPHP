@@ -73,7 +73,7 @@ class HCaptchaMiddleware implements MiddlewareInterface
             log_warning("hCaptcha verification failed: No token provided", [
                 'path' => $path,
                 'method' => $method,
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
 
             return new ApiResponse('error', 'CAPTCHA verification required', [
@@ -83,7 +83,7 @@ class HCaptchaMiddleware implements MiddlewareInterface
         }
 
         // Verify token
-        $remoteIp = $_SERVER['REMOTE_ADDR'] ?? null;
+        $remoteIp = client_ip();
         $valid = $this->verifier->verify($token, $remoteIp);
 
         if (!$valid) {

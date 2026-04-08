@@ -55,7 +55,7 @@ class ProofOfWorkMiddleware implements MiddlewareInterface
         if (!$solution) {
             log_warning("PoW verification failed: No solution provided", [
                 'path' => $path,
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
 
             return new ApiResponse('error', 'Proof-of-work solution required', [
@@ -76,7 +76,7 @@ class ProofOfWorkMiddleware implements MiddlewareInterface
         if (!$valid) {
             log_warning("PoW verification failed: Invalid solution", [
                 'path' => $path,
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
 
             return new ApiResponse('error', 'Invalid proof-of-work solution', [

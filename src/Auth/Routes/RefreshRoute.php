@@ -151,7 +151,7 @@ class RefreshRoute implements IRouteHandler
             $newTokenHash = hash('sha256', $newRefreshToken);
 
             $metadata = [
-                'ip_address' => $_SERVER['REMOTE_ADDR'] ?? null,
+                'ip_address' => client_ip(),
                 'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null
             ];
 

@@ -51,7 +51,7 @@ class CsrfTokenRoute implements IRouteHandler
 
             log_debug("CSRF token generated", [
                 'action' => $action,
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
 
             return new ApiResponse('success', 'CSRF token generated', [
@@ -64,7 +64,7 @@ class CsrfTokenRoute implements IRouteHandler
         } catch (\RuntimeException $e) {
             // Rate limit exceeded
             log_warning("CSRF token generation failed: {$e->getMessage()}", [
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
 
             return new ApiResponse('error', $e->getMessage(), [

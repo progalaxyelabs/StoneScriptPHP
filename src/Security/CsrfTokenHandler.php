@@ -48,7 +48,7 @@ class CsrfTokenHandler
         if ($this->isRateLimited($clientFingerprint)) {
             log_warning("CSRF token generation rate limited", [
                 'client_fingerprint' => substr($clientFingerprint, 0, 16) . '...',
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
             throw new \RuntimeException('Too many token requests. Please try again later.');
         }
@@ -163,7 +163,7 @@ class CsrfTokenHandler
      */
     private function getClientFingerprint(): string
     {
-        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $ip = client_ip();
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
 
         // Use first 3 octets of IP to handle dynamic IPs from same network

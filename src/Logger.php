@@ -467,7 +467,7 @@ class Logger
         $this->log($level, sprintf('%s %s', $method, $uri), [
             'status_code' => $status_code,
             'duration_ms' => round($duration_ms, 2),
-            'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+            'ip' => client_ip(),
             'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown'
         ]);
     }

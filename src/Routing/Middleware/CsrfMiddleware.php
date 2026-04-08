@@ -72,7 +72,7 @@ class CsrfMiddleware implements MiddlewareInterface
             log_warning("CSRF validation failed: No token provided", [
                 'path' => $path,
                 'method' => $method,
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
 
             return new ApiResponse('error', 'CSRF token required', [
@@ -90,7 +90,7 @@ class CsrfMiddleware implements MiddlewareInterface
                 'path' => $path,
                 'method' => $method,
                 'action' => $action,
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+                'ip' => client_ip()
             ]);
 
             return new ApiResponse('error', 'Invalid or expired CSRF token', [
