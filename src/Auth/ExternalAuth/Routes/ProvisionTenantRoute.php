@@ -8,6 +8,8 @@ use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
 use StoneScriptPHP\Tenancy\TenantProvisioner;
+use StoneScriptPHP\Exceptions\ValidationException;
+use StoneScriptPHP\Exceptions\FrameworkException;
 
 /**
  * POST {prefix}/provision-tenant (PROTECTED)
@@ -107,6 +109,24 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
                 $data = $this->provisioner->provision($data);
             } catch (\Throwable $e) {
                 log_error("TenantProvisioner::provision failed: " . $e->getMessage());
+
+                // Return structured validation errors for ValidationException (422)
+                if ($e instanceof ValidationException) {
+                    return new ApiResponse(
+                        'error',
+                        $e->getMessage(),
+                        null,
+                        $e->getHttpStatusCode(),
+                        $e->getValidationErrors()
+                    );
+                }
+
+                // Return structured error with proper status code for other FrameworkExceptions
+                if ($e instanceof FrameworkException) {
+                    return res_error($e->getMessage(), $e->getHttpStatusCode());
+                }
+
+                // Generic 500 for unexpected errors
                 return res_error('Tenant provisioning failed: ' . $e->getMessage());
             }
         } elseif (isset($this->hooks['before_provision']) && is_callable($this->hooks['before_provision'])) {
