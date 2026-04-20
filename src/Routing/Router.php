@@ -513,8 +513,8 @@ class Router
 
         } catch (TenantDatabaseUnavailableException $e) {
             log_error('Tenant database unavailable: ' . $e->getMessage());
-            http_response_code(503);
-            return new ApiResponse('error', 'Service temporarily unavailable. Please try again.');
+            http_response_code(401);
+            return new ApiResponse('error', 'Unauthorized: session references an unavailable tenant. Please sign in again.');
         } catch (\Exception $e) {
             log_debug('Exception in handler: ' . $e->getMessage());
             return $this->error500($e->getMessage());

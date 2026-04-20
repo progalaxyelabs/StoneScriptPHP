@@ -2,8 +2,6 @@
 
 namespace StoneScriptPHP;
 
-use Exception;
-
 /**
  * Thrown when the gateway cannot connect to a tenant's database.
  *
@@ -16,7 +14,14 @@ use Exception;
  * The Router maps this to HTTP 503 with a clean "service unavailable" message
  * instead of leaking an internal 500 to the client.
  */
-class TenantDatabaseUnavailableException extends Exception
+/**
+ * Extends \Error (not \Exception) deliberately.
+ *
+ * Route handlers use `catch (\Exception $e)` which does NOT catch \Error subclasses.
+ * This ensures the exception propagates past route handler try-catch blocks and
+ * reaches the Router's dedicated catch clause, which returns the correct HTTP status.
+ */
+class TenantDatabaseUnavailableException extends \Error
 {
     public function __construct(string $message = 'Tenant database unavailable', int $code = 503, ?\Throwable $previous = null)
     {
