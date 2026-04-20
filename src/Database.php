@@ -125,6 +125,17 @@ class Database
             return $client->callFunction($function_name, $params);
         } catch (GatewayException $e) {
             log_debug(__METHOD__ . " Gateway error: " . $e->getMessage());
+
+            // connection_failed means the tenant DB is unreachable (dropped, deprovisioned, or temporarily unavailable).
+            // Throw a typed exception so the Router returns 503 instead of leaking a 500 to the client.
+            if ($e->getGatewayError() === 'connection_failed') {
+                throw new TenantDatabaseUnavailableException(
+                    "Tenant database unavailable: " . $e->getMessage(),
+                    503,
+                    $e
+                );
+            }
+
             throw new Exception("Database function call failed: " . $e->getMessage(), $e->getCode(), $e);
         }
     }

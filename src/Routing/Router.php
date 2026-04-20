@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Routing;
 
 use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\TenantDatabaseUnavailableException;
 use StoneScriptPHP\Routing\MiddlewarePipeline;
 use StoneScriptPHP\Routing\MiddlewareInterface;
 use StoneScriptPHP\Routing\RouteEntry;
@@ -510,6 +511,10 @@ class Router
 
             return $response;
 
+        } catch (TenantDatabaseUnavailableException $e) {
+            log_error('Tenant database unavailable: ' . $e->getMessage());
+            http_response_code(503);
+            return new ApiResponse('error', 'Service temporarily unavailable. Please try again.');
         } catch (\Exception $e) {
             log_debug('Exception in handler: ' . $e->getMessage());
             return $this->error500($e->getMessage());
