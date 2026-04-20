@@ -10,51 +10,112 @@ use StoneScriptPHP\Routing\Middleware\CorsMiddleware;
 use StoneScriptPHP\Routing\Middleware\JsonBodyParserMiddleware;
 use StoneScriptPHP\Routing\Middleware\JwtAuthMiddleware;
 use StoneScriptPHP\Routing\Middleware\GatewayTenantMiddleware;
+use StoneScriptPHP\Routing\MiddlewareInterface;
 use StoneScriptPHP\Auth\JwtHandlerInterface;
 use StoneScriptPHP\Auth\RsaJwtHandler;
 use StoneScriptPHP\Auth\MultiAuthJwtValidator;
 use StoneScriptPHP\Auth\MultiAuthJwtAdapter;
 use StoneScriptPHP\Auth\AuthRoutes;
+use StoneScriptPHP\Auth\AuthContext;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes;
+use StoneScriptPHP\Subscriptions\SubscriptionMiddleware;
+use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
 
 /**
  * Application entry point
  *
  * Replaces the 200+ line boilerplate index.php that every platform had to copy-paste.
  * Takes a config array and handles everything: middleware setup, JWT handler construction,
- * auth route registration, and request dispatch.
+ * auth route registration, subscription enforcement, and request dispatch.
  *
  * Usage in public/index.php:
  *
  *   Application::run([
  *       'routes' => require CONFIG_PATH . 'routes.php',
- *       'auth'   => require CONFIG_PATH . 'auth.php',
+ *       'auth'   => [
+ *           'mode' => 'external',
+ *           'provisioner' => new MyProvisioner(...),
+ *           // ... other auth config
+ *       ],
+ *       'subscription' => [
+ *           'prefix' => '/subscription',
+ *           'razorpay_webhook_secret' => '...',
+ *           'admin_api_key' => '...',
+ *       ],
+ *       'jwt' => [
+ *           'excluded_paths' => ['/health', '/webhook/...'],
+ *       ],
+ *       'middleware' => [
+ *           new CustomMiddleware(),
+ *       ],
  *   ]);
  *
  * @package StoneScriptPHP
  */
 class Application
 {
+    /** @var float Request start time for logging */
+    private static float $startTime;
+
     /**
      * Run the application with the given config
      *
-     * @param array $config Must contain 'routes' and optionally 'auth'
+     * @param array $config Must contain 'routes' and optionally 'auth', 'subscription', 'jwt', 'middleware'
      */
     public static function run(array $config): void
     {
+        self::$startTime = microtime(true);
+
+        // Define STDIN, STDOUT, STDERR for PHP-FPM compatibility (CLI has them by default)
+        self::defineStdStreams();
+
+        // Handle robots.txt before any routing or auth — disallow all crawlers
+        if (self::handleRobotsTxt()) {
+            return;
+        }
+
         $env = Env::get_instance();
-        $authConfig = $config['auth'] ?? [];
-        $appRoutes  = $config['routes'] ?? [];
+        $authConfig         = $config['auth'] ?? [];
+        $appRoutes          = $config['routes'] ?? [];
+        $subscriptionConfig = $config['subscription'] ?? [];
+        $jwtConfig          = $config['jwt'] ?? [];
+        $customMiddleware   = $config['middleware'] ?? [];
 
         $jwtHandler = self::buildJwtHandler($authConfig, $env);
+
+        // Build JWT excluded paths from config
+        $jwtExcludedPaths = $jwtConfig['excluded_paths'] ?? [];
+
+        // Add subscription public paths if subscription module is enabled
+        if (!empty($subscriptionConfig)) {
+            $jwtExcludedPaths = array_merge(
+                $jwtExcludedPaths,
+                SubscriptionRoutes::publicPaths($subscriptionConfig)
+            );
+        }
 
         $router = new Router();
         $router->use(new LoggingMiddleware());
         $router->use(new CorsMiddleware(
             explode(',', $env->ALLOWED_ORIGINS ?? '*')
         ));
-        $router->use(new JwtAuthMiddleware($jwtHandler));
+        $router->use(new JwtAuthMiddleware(
+            jwtHandler: $jwtHandler,
+            excludedPaths: $jwtExcludedPaths
+        ));
         $router->use(new GatewayTenantMiddleware());
+
+        // Add SubscriptionMiddleware if subscription config is present
+        if (!empty($subscriptionConfig)) {
+            $router->use(new SubscriptionMiddleware());
+        }
+
+        // Add custom middleware
+        foreach ($customMiddleware as $middleware) {
+            if ($middleware instanceof MiddlewareInterface) {
+                $router->use($middleware);
+            }
+        }
 
         $authMode = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
 
@@ -72,6 +133,14 @@ class Application
             ExternalAuthRoutes::register($router, $authRouteOptions);
         }
 
+        // Register subscription routes if subscription config is present
+        if (!empty($subscriptionConfig)) {
+            SubscriptionRoutes::register($router, array_merge(
+                $subscriptionConfig,
+                ['platform_code' => $authConfig['platform']['code'] ?? $env->PLATFORM_CODE ?? '']
+            ));
+        }
+
         $router->loadRoutes($appRoutes);
 
         $response = $router->dispatch();
@@ -85,6 +154,68 @@ class Application
 
         header('Content-Type: application/json');
         echo $response->toJson();
+
+        // Log request to STDERR for Docker/Swarm
+        self::logRequest();
+    }
+
+    /**
+     * Define STDIN, STDOUT, STDERR for PHP-FPM compatibility
+     *
+     * CLI mode defines these automatically, but PHP-FPM does not.
+     */
+    private static function defineStdStreams(): void
+    {
+        if (!defined('STDIN')) {
+            define('STDIN', fopen('php://stdin', 'rb'));
+        }
+        if (!defined('STDOUT')) {
+            define('STDOUT', fopen('php://stdout', 'wb'));
+        }
+        if (!defined('STDERR')) {
+            define('STDERR', fopen('php://stderr', 'wb'));
+        }
+    }
+
+    /**
+     * Handle robots.txt request before routing
+     *
+     * @return bool True if request was handled, false otherwise
+     */
+    private static function handleRobotsTxt(): bool
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' &&
+            parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) === '/robots.txt') {
+            header('Content-Type: text/plain');
+            echo "User-agent: *\nDisallow: /\n";
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Log request to STDERR for Docker/Swarm
+     *
+     * Format: [REQUEST] METHOD /path | status=CODE | duration=Xms | user=ID | tenant=ID
+     */
+    private static function logRequest(): void
+    {
+        $method   = $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN';
+        $uri      = $_SERVER['REQUEST_URI'] ?? '/';
+        $route    = strtok($uri, '?');
+        $status   = http_response_code() ?: 200;
+        $duration = round((microtime(true) - self::$startTime) * 1000, 2);
+        $userId   = AuthContext::check() ? (string) AuthContext::getUser()->user_id : '-';
+        $tenantId = AuthContext::check() ? (string) (AuthContext::getUser()->tenant_id ?? '-') : '-';
+
+        fwrite(STDERR, implode(' | ', [
+            '[REQUEST]',
+            $method . ' ' . $route,
+            'status=' . $status,
+            'duration=' . $duration . 'ms',
+            'user=' . $userId,
+            'tenant=' . $tenantId,
+        ]) . PHP_EOL);
     }
 
     /**
@@ -162,6 +293,13 @@ class Application
         // Merge lifecycle hooks from config['hooks'] if present
         if (!empty($authConfig['hooks'])) {
             $options = array_merge($options, $authConfig['hooks']);
+        }
+
+        // Pass through provisioner if present (for tenant provisioning flow)
+        if (isset($authConfig['provisioner'])) {
+            $options['provisioner'] = $authConfig['provisioner'];
+            // Enable provision_tenant route when provisioner is provided
+            $options['provision_tenant'] = true;
         }
 
         return $options;
