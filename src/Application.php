@@ -86,6 +86,11 @@ class Application
         // Build JWT excluded paths from config
         $jwtExcludedPaths = $jwtConfig['excluded_paths'] ?? [];
 
+        // Always exclude /health from JWT auth (health checks must be public for Docker/Traefik)
+        if (!in_array('/health', $jwtExcludedPaths, true)) {
+            $jwtExcludedPaths[] = '/health';
+        }
+
         // Add subscription public paths if subscription module is enabled
         if (!empty($subscriptionConfig)) {
             $jwtExcludedPaths = array_merge(
