@@ -499,3 +499,40 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
         exit(1);
     }
 }
+
+/**
+ * Compute a deterministic SHA-256 hash of all files under a directory.
+ *
+ * Hashes both relative paths and file contents so renames and edits are detected.
+ *
+ * @param string $dirPath Absolute path to the directory to hash.
+ * @return string 64-char hex SHA-256, or empty string if directory does not exist.
+ */
+function computeSchemaHash(string $dirPath): string
+{
+    if (!is_dir($dirPath)) {
+        return '';
+    }
+
+    $files = [];
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dirPath, RecursiveDirectoryIterator::SKIP_DOTS)
+    );
+
+    foreach ($iterator as $file) {
+        if ($file->isFile()) {
+            $files[] = $file->getRealPath();
+        }
+    }
+
+    sort($files);
+
+    $hash = hash_init('sha256');
+    foreach ($files as $filePath) {
+        $relativePath = substr($filePath, strlen($dirPath));
+        hash_update($hash, $relativePath);
+        hash_update($hash, file_get_contents($filePath));
+    }
+
+    return hash_final($hash);
+}
