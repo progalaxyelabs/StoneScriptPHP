@@ -68,9 +68,9 @@ class ExternalAuthConfig
         $this->extraFields = $registration['extra_fields'] ?? [];
         $this->extraValidation = $registration['extra_validation'] ?? [];
 
-        if (!in_array($this->registrationMode, ['tenant', 'identity'], true)) {
+        if (!in_array($this->registrationMode, ['tenant', 'identity', 'none'], true)) {
             throw new \InvalidArgumentException(
-                "Invalid registration mode '{$this->registrationMode}'. Must be 'tenant' or 'identity'."
+                "Invalid registration mode '{$this->registrationMode}'. Must be 'tenant', 'identity', or 'none'."
             );
         }
 

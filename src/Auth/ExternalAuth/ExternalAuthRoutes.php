@@ -63,7 +63,7 @@ class ExternalAuthRoutes
         $prefix = $config->prefix;
 
         // Public routes (no auth required)
-        if ($config->isEnabled('register')) {
+        if ($config->isEnabled('register') && $config->registrationMode !== 'none') {
             $router->post("$prefix/register", new RegisterRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered POST $prefix/register (mode={$config->registrationMode})");
         }
