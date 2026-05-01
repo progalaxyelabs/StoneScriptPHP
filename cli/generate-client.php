@@ -1022,7 +1022,7 @@ function generateResourceMethod(
         response
           .onOk((result) => resolve(result))
           .onNotOk((message) => reject(new Error(message)))
-          .onError((data) => { const e = new Error('Server error'); (e as any).data = data; reject(e); });
+          .onError(() => reject(new Error('Server error')));
       });
     },
 TS;
@@ -1042,7 +1042,7 @@ TS;
         response
           .onOk((result) => resolve(result))
           .onNotOk((message) => reject(new Error(message)))
-          .onError((data) => { const e = new Error('Server error'); (e as any).data = data; reject(e); });
+          .onError(() => reject(new Error('Server error')));
       });
     },
 TS;

@@ -37,14 +37,12 @@ if (!defined('DEBUG_MODE')) {
 // Note: functions.php is already loaded via composer autoload.files
 // Note: All Framework classes are autoloaded via PSR-4
 
-// Check if .env file exists before initializing
-// During setup (composer create-project), .env doesn't exist yet
-$envFile = ROOT_PATH . '.env';
-if (file_exists($envFile)) {
-    // Initialize environment from .env file
+// Initialize environment from .env file OR environment variables
+// .env file is optional - Docker environments can use env vars directly
+try {
     $env = Env::get_instance();
 
-    // Define DEBUG_MODE with actual value from .env (if not already defined)
+    // Define DEBUG_MODE with actual value from env (if not already defined)
     if (!defined('DEBUG_MODE')) {
         define('DEBUG_MODE', $env->DEBUG_MODE);
     }
@@ -104,4 +102,10 @@ if (file_exists($envFile)) {
         'tenant.required' => \StoneScriptPHP\Auth\Middleware\RequireTenantMiddleware::class,
         'role' => \StoneScriptPHP\Auth\Middleware\RequireRoleMiddleware::class,
     ];
+} catch (Exception $e) {
+    // Env initialization failed (e.g., missing required vars like DB_GATEWAY_URL)
+    // This is expected during initial setup (composer create-project) or CLI tools
+    // that don't need full framework initialization
+    // Store the error for later retrieval if needed
+    $GLOBALS['__stonescript_bootstrap_error'] = $e->getMessage();
 }
