@@ -102,7 +102,8 @@ class Application
         $router = new Router();
         $router->use(new LoggingMiddleware());
         $router->use(new CorsMiddleware(
-            explode(',', $env->ALLOWED_ORIGINS ?? '*')
+            explode(',', $env->ALLOWED_ORIGINS ?? '*'),
+            explode(',', $env->ALLOWED_METHODS ?? 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
         ));
         $router->use(new JwtAuthMiddleware(
             jwtHandler: $jwtHandler,

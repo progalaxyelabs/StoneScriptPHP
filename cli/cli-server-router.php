@@ -8,7 +8,7 @@ if (!defined('ROOT_PATH')) define('ROOT_PATH', dirname(__DIR__));
 // Set JSON response headers
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
 // Handle OPTIONS preflight

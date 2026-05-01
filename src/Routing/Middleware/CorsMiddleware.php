@@ -22,7 +22,7 @@ class CorsMiddleware implements MiddlewareInterface
      */
     public function __construct(
         array $allowedOrigins = [],
-        array $allowedMethods = ['GET', 'POST', 'OPTIONS'],
+        array $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         array $allowedHeaders = ['Alt-Used', 'Content-Type', 'Authorization'],
         bool $allowCredentials = true,
         int $maxAge = 900
