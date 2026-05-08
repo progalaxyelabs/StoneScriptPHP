@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION ana_insert_event(
-    p_event_name  VARCHAR(100),
-    p_event_data  JSONB,
-    p_session_id  UUID,
+    p_event_name  TEXT,
+    p_event_data  TEXT,
+    p_session_id  TEXT,
     p_user_id     TEXT,
     p_tenant_id   TEXT,
     p_ip_address  TEXT,
@@ -25,8 +25,8 @@ BEGIN
         referrer
     ) VALUES (
         p_event_name,
-        COALESCE(p_event_data, '{}'::JSONB),
-        p_session_id,
+        COALESCE(NULLIF(p_event_data, '')::JSONB, '{}'::JSONB),
+        NULLIF(p_session_id, '')::UUID,
         NULLIF(p_user_id,    ''),
         NULLIF(p_tenant_id,  ''),
         NULLIF(p_ip_address, '')::INET,
