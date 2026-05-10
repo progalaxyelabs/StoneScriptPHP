@@ -34,10 +34,16 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  */
 class ProvisionTenantRoute extends BaseExternalAuthRoute
 {
-    public string $store_name = '';
+    public string $store_name   = '';
     public string $display_name = '';
-    public string $email = '';
-    public string $phone_number = '';
+    public string $email        = '';
+    public string $phone        = '';          // preferred field name
+    public string $phone_number = '';          // kept for backwards compat
+    public string $address      = '';
+    public string $city         = '';
+    public string $state        = '';
+    public string $pincode      = '';
+    public string $country      = '';
 
     private ?TenantProvisioner $provisioner;
 
@@ -60,7 +66,13 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             'store_name'   => 'required|string|max:255',
             'display_name' => 'optional|string|max:255',
             'email'        => 'optional|string|max:255',
-            'phone_number' => 'optional|string|max:50',
+            'phone'        => 'optional|string|max:50',
+            'phone_number' => 'optional|string|max:50',   // backwards compat
+            'address'      => 'optional|string|max:500',
+            'city'         => 'optional|string|max:100',
+            'state'        => 'optional|string|max:100',
+            'pincode'      => 'optional|string|max:10',
+            'country'      => 'optional|string|max:50',
         ], $this->config->extraValidation);
     }
 
@@ -69,26 +81,19 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      */
     public function process(): ApiResponse
     {
-        // 1. Get identity_id from JWT
-        $token = $this->getBearerToken();
-        if (!$token) {
-            return res_error('Authorization token required', 401);
+        // 1. Get identity from verified JWT (JwtAuthMiddleware already ran)
+        $user = auth();
+        if (!$user || !isset($user->user_id)) {
+            return res_error('Authorization required', 401);
         }
-
-        $claims = $this->decodeJwt($token);
-        if ($claims === null) {
-            return res_error('Invalid token', 401);
-        }
-
-        $identityId = $claims['identity_id'] ?? null;
-        if (!$identityId) {
-            return res_error('Token missing identity_id', 401);
-        }
+        $identityId = (string) $user->user_id;
 
         // 2. Generate tenant identifiers
-        $tenantId      = $this->generateUuid();
-        $tenantSlug    = $this->slugify($this->store_name);
+        $tenantId       = $this->generateUuid();
+        $tenantSlug     = $this->slugify($this->store_name);
         $tenantDbSchema = $this->config->platformCode . '_' . str_replace('-', '_', $tenantId);
+
+        $phone = $this->phone ?: $this->phone_number; // accept either field name
 
         $data = [
             'identity_id'      => $identityId,
@@ -97,9 +102,15 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             'tenant_name'      => $this->store_name,
             'tenant_slug'      => $tenantSlug,
             'tenant_db_schema' => $tenantDbSchema,
-            'display_name'     => $this->display_name ?: ($claims['display_name'] ?? ''),
-            'email'            => $this->email ?: ($claims['email'] ?? ''),
-            'phone_number'     => $this->phone_number,
+            'display_name'     => $this->display_name ?: ($user->display_name ?? ''),
+            'email'            => $this->email ?: ($user->email ?? ''),
+            'phone'            => $phone,
+            'phone_number'     => $phone,   // keep for seedData() compatibility
+            'address'          => $this->address,
+            'city'             => $this->city,
+            'state'            => $this->state,
+            'pincode'          => $this->pincode,
+            'country'          => $this->country,
             'role'             => 'owner',
         ];
 
@@ -173,26 +184,6 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             'tenant_slug' => $tenantSlug,
             'tenant_name' => $this->store_name,
         ]);
-    }
-
-    /**
-     * Decode JWT payload without verification (client-side check only).
-     * Auth service validates the token — this just reads claims for identity_id.
-     */
-    private function decodeJwt(string $token): ?array
-    {
-        $parts = explode('.', $token);
-        if (count($parts) !== 3) {
-            return null;
-        }
-
-        $payload = base64_decode(strtr($parts[1], '-_', '+/'), true);
-        if ($payload === false) {
-            return null;
-        }
-
-        $claims = json_decode($payload, true);
-        return is_array($claims) ? $claims : null;
     }
 
     /**
