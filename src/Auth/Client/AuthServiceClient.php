@@ -34,19 +34,38 @@ abstract class AuthServiceClient
     }
 
     /**
-     * Get default auth service URL from config
+     * Resolve the default auth service URL.
+     *
+     * Precedence (first match wins):
+     *   1. $_ENV['AUTH_SERVICE_URL']      — Docker / process environment
+     *   2. getenv('AUTH_SERVICE_URL')     — fallback for FPM where $_ENV may be empty
+     *   3. ROOT_PATH . 'config/auth.php'  — flat 'auth_service_url' key (legacy)
+     *   4. 'http://auth:3139'             — internal Docker service name (sane default)
+     *
+     * The previous version only consulted (3) and (4), and (4) was hard-coded as
+     * 'http://localhost:3139' — which silently broke every platform whose framework
+     * config file lived under src/config/ instead of ROOT_PATH/config/ (e.g.
+     * medstoreapp). Reading env first removes the trap entirely.
      */
     protected function getDefaultAuthServiceUrl(): string
     {
-        // Try to load from config
-        $configFile = defined('ROOT_PATH') ? ROOT_PATH . 'config/auth.php' : null;
-
-        if ($configFile && file_exists($configFile)) {
-            $config = require $configFile;
-            return $config['auth_service_url'] ?? 'http://localhost:3139';
+        $envUrl = $_ENV['AUTH_SERVICE_URL'] ?? null;
+        if (!$envUrl) {
+            $envUrl = getenv('AUTH_SERVICE_URL') ?: null;
+        }
+        if ($envUrl) {
+            return $envUrl;
         }
 
-        return 'http://localhost:3139';
+        $configFile = defined('ROOT_PATH') ? ROOT_PATH . 'config/auth.php' : null;
+        if ($configFile && file_exists($configFile)) {
+            $config = require $configFile;
+            if (!empty($config['auth_service_url'])) {
+                return $config['auth_service_url'];
+            }
+        }
+
+        return 'http://auth:3139';
     }
 
     /**
