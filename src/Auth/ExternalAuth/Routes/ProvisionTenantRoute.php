@@ -25,7 +25,10 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  *        c. runMigrations()       — run migrations (default no-op)
  *        d. seedData()            — platform-specific seeding (default no-op)
  *   4. Call auth's POST /api/internal/create-membership
- *   5. Return tenant_id, tenant_slug, tenant_name
+ *   5. Return full platform JWT envelope (AUTH-SPEC §5a):
+ *      access_token, refresh_token, token_type, expires_in,
+ *      tenant {id, name, slug, db_schema}, identity {id, email, display_name},
+ *      membership {id, tenant_id, role, roles}
  *
  * Falls back to legacy before_provision / after_provision hooks when no
  * provisioner instance is provided (backward compatibility).
@@ -181,11 +184,35 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             }
         }
 
-        return res_ok([
-            'tenant_id'   => $data['tenant_id'],
-            'tenant_slug' => $tenantSlug,
-            'tenant_name' => $this->store_name,
-        ]);
+        // AUTH-SPEC §5a — return full platform JWT envelope.
+        // $result (from createMembership) contains: access_token, refresh_token,
+        // token_type, expires_in, membership_id, tenant_id, tenant_slug,
+        // tenant_db_schema, role, roles, is_new_tenant.
+        $tenantSlug = $data['tenant_slug'] ?? ($result['tenant_slug'] ?? null);
+
+        return new ApiResponse('ok', 'Tenant created', [
+            'access_token'  => $result['access_token']  ?? null,
+            'refresh_token' => $result['refresh_token'] ?? null,
+            'token_type'    => $result['token_type']    ?? 'Bearer',
+            'expires_in'    => $result['expires_in']    ?? 3600,
+            'tenant' => [
+                'id'        => $data['tenant_id'],
+                'name'      => $data['tenant_name'],
+                'slug'      => $tenantSlug,
+                'db_schema' => $data['tenant_db_schema'],
+            ],
+            'identity' => [
+                'id'           => $identityId,
+                'email'        => ($data['email'] ?: null) ?: null,
+                'display_name' => ($data['display_name'] ?: null) ?: null,
+            ],
+            'membership' => [
+                'id'        => $result['membership_id'] ?? null,
+                'tenant_id' => $data['tenant_id'],
+                'role'      => $result['role']          ?? 'owner',
+                'roles'     => $result['roles']         ?? ['owner'],
+            ],
+        ], 201);
     }
 
     /**
