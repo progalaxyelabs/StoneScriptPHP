@@ -37,8 +37,10 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  */
 class ProvisionTenantRoute extends BaseExternalAuthRoute
 {
-    public string $store_name   = '';
-    public string $display_name = '';
+    public string $store_name       = '';
+    /** AUTH-SPEC §5a S9 — required, client-generated UUID. Prevents double-creates on retry. */
+    public string $idempotency_key  = '';
+    public string $display_name     = '';
     public string $email        = '';
     public string $phone        = '';          // preferred field name
     public string $phone_number = '';          // kept for backwards compat
@@ -66,8 +68,9 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     public function validation_rules(): array
     {
         return array_merge([
-            'store_name'   => 'required|string|max:255',
-            'display_name' => 'optional|string|max:255',
+            'store_name'      => 'required|string|max:255',
+            'idempotency_key' => 'required|string|max:64',   // AUTH-SPEC §5a S9
+            'display_name'    => 'optional|string|max:255',
             'email'        => 'optional|string|max:255',
             'phone'        => 'optional|string|max:50',
             'phone_number' => 'optional|string|max:50',   // backwards compat
