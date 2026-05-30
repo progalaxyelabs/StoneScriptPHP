@@ -14,8 +14,15 @@ namespace StoneScriptPHP\Auth\ExternalAuth;
  */
 class ExternalAuthConfig
 {
-    /** @var string URL prefix for all auth routes */
+    /** @var string URL prefix for all auth routes (canonical) */
     public readonly string $prefix;
+
+    /**
+     * @var bool When true (default), also register all routes under the legacy `/auth` prefix
+     * for backward compatibility. Set to false once all clients have migrated to `/api/auth`.
+     * Automatically skipped when prefix is already `/auth` (no double-registration).
+     */
+    public readonly bool $legacyCompat;
 
     /** @var string Auth service base URL (used for JWKS fetch — container URL in Docker) */
     public readonly string $authServiceUrl;
@@ -55,7 +62,10 @@ class ExternalAuthConfig
     {
         $env = \StoneScriptPHP\Env::get_instance();
 
-        $this->prefix = rtrim($options['prefix'] ?? '/auth', '/');
+        // AUTH-SPEC §S1: canonical prefix is /api/auth.
+        // Legacy default was /auth — kept as compat routes when legacyCompat=true.
+        $this->prefix = rtrim($options['prefix'] ?? '/api/auth', '/');
+        $this->legacyCompat = $options['legacy_compat'] ?? true;
         $this->authServiceUrl = $options['auth_service_url'] ?? $env->AUTH_SERVICE_URL;
         $this->authIssuer = $options['auth_issuer'] ?? (
             !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : $this->authServiceUrl

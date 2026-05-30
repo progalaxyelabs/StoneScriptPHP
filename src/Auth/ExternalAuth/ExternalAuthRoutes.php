@@ -33,10 +33,17 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
  * Registers framework-level proxy routes for external auth services.
  * Replaces 18+ duplicate proxy routes that each platform previously maintained.
  *
+ * AUTH-SPEC §S1: canonical prefix is `/api/auth`. Default changed from `/auth` to
+ * `/api/auth` in v3.26.0. When `legacy_compat` is true (the default), all routes
+ * are ALSO registered under the old `/auth` prefix so existing deployments keep
+ * working during the migration window. Set `'legacy_compat' => false` once all
+ * Angular clients have been updated to use `/api/auth`.
+ *
  * Usage in your index.php:
  *
  *   ExternalAuthRoutes::register($router, [
- *       'prefix' => '/auth',
+ *       'prefix' => '/api/auth',      // canonical — AUTH-SPEC §S1
+ *       'legacy_compat' => true,      // also answer /auth/* during transition (default: true)
  *       'registration' => ['mode' => 'tenant'],
  *       'after_register' => fn($result, $input) => log_info('New registration'),
  *   ]);
@@ -49,8 +56,16 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
  */
 class ExternalAuthRoutes
 {
+    /** @var string The legacy prefix that compat mode registers routes under */
+    private const LEGACY_PREFIX = '/auth';
+
     /**
-     * Register all enabled external auth routes with the router
+     * Register all enabled external auth routes with the router.
+     *
+     * When `legacy_compat` is true and the canonical prefix is NOT `/auth`,
+     * routes are registered under BOTH the canonical prefix and the legacy `/auth`
+     * prefix. This allows Angular clients to keep calling `/auth/*` during the
+     * transition to `/api/auth/*`.
      *
      * @param Router $router The router instance
      * @param array $options Configuration options (see ExternalAuthConfig)
@@ -60,8 +75,41 @@ class ExternalAuthRoutes
     {
         $config = new ExternalAuthConfig($options);
         $client = new ExternalAuthServiceClient($config->authServiceUrl, $config->platformCode);
-        $prefix = $config->prefix;
+        $provisioner = $options['provisioner'] ?? null;
 
+        // Register routes under the canonical prefix
+        self::registerForPrefix($router, $config->prefix, $client, $config, $provisioner);
+
+        // AUTH-SPEC §S1 legacy compat: also register under /auth if the canonical
+        // prefix differs from /auth. This keeps existing clients working during
+        // the transition window. Skip when prefix is already /auth (no double-register).
+        if ($config->legacyCompat && $config->prefix !== self::LEGACY_PREFIX) {
+            log_warning(
+                "ExternalAuthRoutes: legacy_compat=true — also registering routes under " .
+                self::LEGACY_PREFIX . " (deprecated; set legacy_compat=false once clients use {$config->prefix})"
+            );
+            self::registerForPrefix($router, self::LEGACY_PREFIX, $client, $config, $provisioner);
+        }
+
+        log_info("ExternalAuthRoutes: Registration complete with prefix '{$config->prefix}'" .
+            ($config->legacyCompat && $config->prefix !== self::LEGACY_PREFIX
+                ? ' + legacy compat ' . self::LEGACY_PREFIX
+                : ''));
+    }
+
+    /**
+     * Register all enabled routes under a single prefix.
+     *
+     * Private helper extracted so both canonical and legacy registrations
+     * share identical logic without duplication.
+     */
+    private static function registerForPrefix(
+        Router $router,
+        string $prefix,
+        ExternalAuthServiceClient $client,
+        ExternalAuthConfig $config,
+        mixed $provisioner
+    ): void {
         // Public routes (no auth required)
         if ($config->isEnabled('register') && $config->registrationMode !== 'none') {
             $router->post("$prefix/register", new RegisterRoute($client, $config->hooks, $config), [], true);
@@ -135,7 +183,6 @@ class ExternalAuthRoutes
         }
 
         if ($config->isEnabled('provision_tenant')) {
-            $provisioner = $options['provisioner'] ?? null;
             $router->post(
                 "$prefix/provision-tenant",
                 new ProvisionTenantRoute($client, $config->hooks, $config, $provisioner)
@@ -179,15 +226,17 @@ class ExternalAuthRoutes
             );
             log_debug("ExternalAuthRoutes: Registered GET $prefix/me (protected)");
         }
-
-        log_info("ExternalAuthRoutes: Registration complete with prefix '$prefix'");
     }
 
     /**
-     * Get public paths (no auth required) based on options
+     * Get public paths (no auth required) based on options.
      *
      * Pure function — computes paths WITHOUT registering routes.
      * Use this to build JwtAuthMiddleware excludedPaths.
+     *
+     * When legacy_compat is true and prefix is not /auth, returns paths for BOTH
+     * the canonical prefix and the legacy /auth prefix so the JWT middleware
+     * excludes requests to either path.
      *
      * @param array $options Same options passed to register()
      * @return array List of public path strings
@@ -195,7 +244,27 @@ class ExternalAuthRoutes
     public static function publicPaths(array $options = []): array
     {
         $config = new ExternalAuthConfig($options);
-        $prefix = $config->prefix;
+
+        $paths = self::computePublicPaths($config->prefix, $config);
+
+        // AUTH-SPEC §S1 legacy compat: include /auth/* paths in the exclusion list
+        // so the JWT middleware does not block requests to the old prefix.
+        if ($config->legacyCompat && $config->prefix !== self::LEGACY_PREFIX) {
+            $paths = array_merge($paths, self::computePublicPaths(self::LEGACY_PREFIX, $config));
+        }
+
+        return $paths;
+    }
+
+    /**
+     * Compute public path strings for a given prefix.
+     *
+     * @param string $prefix URL prefix
+     * @param ExternalAuthConfig $config Parsed config
+     * @return array List of public path strings under this prefix
+     */
+    private static function computePublicPaths(string $prefix, ExternalAuthConfig $config): array
+    {
         $paths = [];
 
         if ($config->isEnabled('register')) {
@@ -303,7 +372,8 @@ class ExternalAuthRoutes
      */
     public static function getRouteDefinitions(array $options = []): array
     {
-        $prefix = rtrim($options['prefix'] ?? '/auth', '/');
+        // AUTH-SPEC §S1: default changed from /auth to /api/auth (matches ExternalAuthConfig).
+        $prefix = rtrim($options['prefix'] ?? '/api/auth', '/');
 
         // Feature toggle defaults (must match ExternalAuthConfig::__construct)
         $features = [
