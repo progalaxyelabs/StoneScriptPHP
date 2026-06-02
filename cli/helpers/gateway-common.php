@@ -12,15 +12,38 @@ require_once __DIR__ . '/schema-archive-builder.php';
  * Parse gateway CLI options from argv.
  *
  * @param array $argv
- * @return array{retry: int, delay: int, quiet: bool, force: bool, database_id: ?string, schema_name: ?string, main_schema_name: ?string, tenant_schema_name: ?string}
+ * @return array{retry: int, delay: int, quiet: bool, force: bool, allow: string[], skip_verification: bool, database_id: ?string, schema_name: ?string, main_schema_name: ?string, tenant_schema_name: ?string}
  */
 function parseGatewayOptions(array $argv): array
 {
+    // Granular per-operation safety flags → gateway allow-tokens (least-privilege).
+    // Each flag unlocks exactly one guarded destructive operation.
+    $allowFlagMap = [
+        '--allow-drop-table'          => 'drop_table',
+        '--allow-drop-column'         => 'drop_column',
+        '--allow-column-type-change'  => 'modify_column_type',
+        '--allow-add-not-null-column' => 'add_not_null_column',
+        '--allow-set-not-null'        => 'set_not_null',
+    ];
+
+    $allow = [];
+    foreach ($allowFlagMap as $flag => $token) {
+        if (in_array($flag, $argv, true)) {
+            $allow[] = $token;
+        }
+    }
+
     $options = [
         'retry' => 3,
         'delay' => 5,
         'quiet' => in_array('--quiet', $argv),
+        // Back-compat allow-all escape hatch. `--force` permits every guarded
+        // operation AND skips post-migration verification (legacy behavior).
         'force' => in_array('--force', $argv),
+        // Granular per-operation allow-tokens (gate #1: schema diff dataloss/incompatible).
+        'allow' => $allow,
+        // Gate #2: bypass the holistic post-migration verification check only.
+        'skip_verification' => in_array('--dangerously-skip-verification', $argv, true),
         'database_id' => null,
         'schema_name' => null,
         'main_schema_name' => null,
@@ -347,7 +370,7 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
  *
  * @return void Exits on failure.
  */
-function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, bool $force, int $retryCount, int $retryDelay, bool $quiet): void
+function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false): void
 {
     if (!$quiet) {
         echo "Migrating database '{$databaseId}'...\n";
@@ -366,6 +389,8 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
             'schema_name' => $schemaName,
             'database_id' => $databaseId,
             'force' => $force,
+            'allow' => array_values($allow),
+            'skip_verification' => $skipVerification,
         ]);
 
         $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/v2/migrate", [
@@ -425,7 +450,7 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
  *
  * @return void Exits on failure.
  */
-function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, bool $force, int $retryCount, int $retryDelay, bool $quiet): void
+function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false): void
 {
     if (!$quiet) {
         echo "Migrating all tenant databases (POST /v2/migrate-all)...\n";
@@ -443,6 +468,8 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
             'platform' => $platformId,
             'schema_name' => $schemaName,
             'force' => $force,
+            'allow' => array_values($allow),
+            'skip_verification' => $skipVerification,
         ]);
 
         $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/v2/migrate-all", [

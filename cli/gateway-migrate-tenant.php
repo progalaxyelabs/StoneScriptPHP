@@ -83,7 +83,8 @@ if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $tenantSchemaName,
     $databaseId, $options['force'],
-    $options['retry'], $options['delay'], $options['quiet']
+    $options['retry'], $options['delay'], $options['quiet'],
+    $options['allow'], $options['skip_verification']
 );
 
 exit(0);

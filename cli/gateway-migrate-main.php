@@ -20,10 +20,19 @@
  *   --retry=<n>              Number of retry attempts (default: 3)
  *   --delay=<s>              Delay between retries in seconds (default: 5)
  *   --quiet                  Suppress output
- *   --force                  Bypass schema validation (use with caution)
  *   --database-id=<id>       Override DATABASE_ID
  *   --main-schema-name=<n>   Override MAIN_SCHEMA_NAME
  *   --schema-name=<n>        Override SCHEMA_NAME (fallback)
+ *
+ * Granular safety flags (least-privilege — unlock only the operation you intend):
+ *   --allow-drop-table            Permit dropping tables
+ *   --allow-drop-column           Permit dropping columns
+ *   --allow-column-type-change    Permit changing a column's type
+ *   --allow-add-not-null-column   Permit adding a NOT NULL column without DEFAULT
+ *   --allow-set-not-null          Permit making an existing column NOT NULL
+ *   --dangerously-skip-verification  Bypass post-migration schema verification only
+ *   --force                       Deprecated allow-all: permits every guarded op AND
+ *                                 skips verification (kept for back-compat)
  */
 
 require_once __DIR__ . '/helpers/gateway-common.php';
@@ -63,7 +72,8 @@ if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
     $env['database_id'], $options['force'],
-    $options['retry'], $options['delay'], $options['quiet']
+    $options['retry'], $options['delay'], $options['quiet'],
+    $options['allow'], $options['skip_verification']
 );
 
 exit(0);
