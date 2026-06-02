@@ -16,6 +16,14 @@ $root_path = dirname(__DIR__);
 $env_file_path = $root_path . DIRECTORY_SEPARATOR . '.env';
 $env_example_path = $root_path . DIRECTORY_SEPARATOR . '.env.example';
 
+// Test seam: when required with this constant defined (e.g. by a unit test),
+// only the helper functions below are exposed and the CLI flow is skipped.
+// Top-level function declarations are compiled before execution, so they remain
+// available despite this early return. CLI usage never defines the constant.
+if (defined('STONESCRIPTPHP_ENV_GENERATOR_LIB_ONLY')) {
+    return;
+}
+
 // Load the Env class from vendor or autoloader
 if (file_exists($root_path . '/vendor/autoload.php')) {
     require_once $root_path . '/vendor/autoload.php';
@@ -135,6 +143,74 @@ function parseEnvFile(string $filepath): array
  * @param bool $is_example Whether generating .env.example (uses placeholders)
  * @param array $existing_values Existing values from current .env
  */
+/**
+ * Build the env-var schema from an Env class's public typed properties.
+ *
+ * Replaces the removed Env::getSchema() (dropped in the v2.3.0 Env refactor).
+ * Env vars are declared as public typed properties whose name IS the env var
+ * name (the same convention Env's own constructor uses to read them).
+ *
+ * Returns the same shape the rest of this generator consumes:
+ *   [ ENV_VAR => ['type' => string, 'required' => bool, 'default' => ?string, 'description' => string] ]
+ *
+ * Derivation:
+ *   - type        ← the property's reflection type (string|int|bool|float)
+ *   - default     ← the property's default value, stringified for .env emission
+ *                   (bool → 'true'/'false', int/float → string, string → as-is,
+ *                   no default → null). Stringifying is required because
+ *                   escapeEnvValue() casts via (string), which would turn a raw
+ *                   bool false into an empty value.
+ *   - required    ← no default value AND not nullable. This reproduces exactly
+ *                   the vars Env's constructor hard-validates (DB_GATEWAY_URL,
+ *                   DB_GATEWAY_PLATFORM).
+ *   - description ← not derivable: Env properties carry only free-form `//`
+ *                   group comments, not `/** *​/` docblocks, so per-var
+ *                   descriptions cannot be reflected and are intentionally
+ *                   omitted. (A future enhancement could add docblocks to
+ *                   src/Env.php properties to restore description comments.)
+ *
+ * Inherited properties are included, so a consuming project's App\Env subclass
+ * emits its inherited + custom env vars.
+ *
+ * @param \ReflectionClass $rc Env (or App\Env) class reflection
+ * @return array<string, array{type:string, required:bool, default:?string, description:string}>
+ */
+function buildSchemaFromReflection(\ReflectionClass $rc): array
+{
+    $schema = [];
+
+    foreach ($rc->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+        if ($property->isStatic()) {
+            continue;
+        }
+
+        $type = $property->getType();
+        $typeName = $type instanceof \ReflectionNamedType ? $type->getName() : 'string';
+
+        $hasDefault = $property->hasDefaultValue();
+        $default = $hasDefault ? $property->getDefaultValue() : null;
+
+        // Stringify the default into its .env representation.
+        if (is_bool($default)) {
+            $default = $default ? 'true' : 'false';
+        } elseif (is_int($default) || is_float($default)) {
+            $default = (string) $default;
+        }
+        // string defaults pass through; null (no default / null default) stays null.
+
+        $required = !$hasDefault && !($type !== null && $type->allowsNull());
+
+        $schema[$property->getName()] = [
+            'type' => $typeName,
+            'required' => $required,
+            'default' => $default,
+            'description' => '',
+        ];
+    }
+
+    return $schema;
+}
+
 function generateEnvFile(string $filepath, bool $force, bool $is_example, array $existing_values = []): void
 {
     // Get schema from an Env instance (or App\Env if it exists)
@@ -144,10 +220,12 @@ function generateEnvFile(string $filepath, bool $force, bool $is_example, array 
         $envClass = 'StoneScriptPHP\\Env';
     }
 
-    // Use reflection to instantiate without triggering .env file check
+    // Derive the schema from the Env class's public typed properties via
+    // reflection. (The old Env::getSchema() array was removed in the v2.3.0
+    // Env refactor; env vars are now declared as public typed properties —
+    // property name == ENV var name, exactly as Env's own constructor reads them.)
     $reflectionClass = new \ReflectionClass($envClass);
-    $envInstance = $reflectionClass->newInstanceWithoutConstructor();
-    $schema = $envInstance->getSchema();
+    $schema = buildSchemaFromReflection($reflectionClass);
 
     $output = [];
 
