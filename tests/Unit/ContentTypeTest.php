@@ -149,10 +149,10 @@ class ContentTypeTest extends TestCase
     public function test_e415_returns_unsupported_media_type_error(): void
     {
         // Check if e415 function exists, if not we need to create it
-        if (function_exists('Framework\e415')) {
-            $response = \Framework\e415('Unsupported media type');
+        if (function_exists('StoneScriptPHP\e415')) {
+            $response = \StoneScriptPHP\e415('Unsupported media type');
 
-            $this->assertInstanceOf(\Framework\ApiResponse::class, $response);
+            $this->assertInstanceOf(\StoneScriptPHP\ApiResponse::class, $response);
             $this->assertEquals('error', $response->status);
 
             $currentCode = http_response_code();
