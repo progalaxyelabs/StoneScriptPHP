@@ -6,10 +6,14 @@ use Error;
 use Exception;
 use ReflectionClass;
 use ReflectionProperty;
-use RequestMethod;
 use StoneScriptPHP\Validator;
 
 
+/**
+ * @deprecated since 3.28.0, scheduled for removal in 4.0.0.
+ *   Helper for the legacy {@see \StoneScriptPHP\Router}; superseded by
+ *   {@see \StoneScriptPHP\Routing\Router}. Not used by any runtime path.
+ */
 abstract class RequestParser
 {
     public array $routes = [];
@@ -176,6 +180,9 @@ abstract class RequestParser
     public abstract function respond(): ApiResponse;
 }
 
+/**
+ * @deprecated since 3.28.0, scheduled for removal in 4.0.0. Legacy — see {@see \StoneScriptPHP\Routing\Router}.
+ */
 class GetRequestParser extends RequestParser
 {
     public function extract_input(): array
@@ -213,6 +220,9 @@ class GetRequestParser extends RequestParser
     }
 }
 
+/**
+ * @deprecated since 3.28.0, scheduled for removal in 4.0.0. Legacy — see {@see \StoneScriptPHP\Routing\Router}.
+ */
 class PostRequestParser extends RequestParser
 {
     public function extract_input(): array
@@ -255,6 +265,9 @@ class PostRequestParser extends RequestParser
     }
 }
 
+/**
+ * @deprecated since 3.28.0, scheduled for removal in 4.0.0. Legacy — see {@see \StoneScriptPHP\Routing\Router}.
+ */
 class OptionsRequestParser extends RequestParser
 {
     public function extract_input(): array
@@ -274,6 +287,9 @@ class OptionsRequestParser extends RequestParser
     }
 }
 
+/**
+ * @deprecated since 3.28.0, scheduled for removal in 4.0.0. Legacy — see {@see \StoneScriptPHP\Routing\Router}.
+ */
 class NullRequestParser extends RequestParser
 {
     public function extract_input(): array
@@ -292,6 +308,14 @@ class NullRequestParser extends RequestParser
     }
 }
 
+/**
+ * @deprecated since 3.28.0, scheduled for removal in 4.0.0.
+ *   Legacy request router (`process_route()`). Superseded by the middleware
+ *   pipeline router {@see \StoneScriptPHP\Routing\Router} (`dispatch()`), which
+ *   is what `Application` and all consuming platforms now use. This class is no
+ *   longer wired into any runtime path (PSR-4 lazy-loaded, never referenced);
+ *   it is retained only for backward compatibility until v4.0.0.
+ */
 class Router
 {
 
