@@ -4,7 +4,7 @@
 /**
  * Environment File Generator
  *
- * Generates or updates .env file based on the schema defined in Framework\Env class
+ * Generates or updates .env file based on the schema defined in StoneScriptPHP\Env class
  *
  * Usage:
  *   php stone generate env
@@ -25,8 +25,8 @@ if (file_exists($root_path . '/vendor/autoload.php')) {
 }
 
 // Try to load Env class
-if (!class_exists('Framework\\Env')) {
-    echo "Error: Framework\\Env class not found\n";
+if (!class_exists('StoneScriptPHP\\Env')) {
+    echo "Error: StoneScriptPHP\\Env class not found\n";
     echo "Make sure StoneScriptPHP framework is installed via composer\n";
     exit(1);
 }
@@ -141,7 +141,7 @@ function generateEnvFile(string $filepath, bool $force, bool $is_example, array 
     if (class_exists('App\\Env')) {
         $envClass = 'App\\Env';
     } else {
-        $envClass = 'Framework\\Env';
+        $envClass = 'StoneScriptPHP\\Env';
     }
 
     // Use reflection to instantiate without triggering .env file check
