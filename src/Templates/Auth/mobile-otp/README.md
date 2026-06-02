@@ -176,7 +176,7 @@ All tenants share the same database with `tenant_id` column:
 // Uncomment the tenant_id indexes in migration files
 // Queries automatically filter by tenant_id
 
-use Framework\Tenancy\TenantQueryBuilder;
+use StoneScriptPHP\Tenancy\TenantQueryBuilder;
 
 $builder = new TenantQueryBuilder($db, 'mobile_users');
 $users = $builder->all();  // Automatically adds WHERE tenant_id = ?

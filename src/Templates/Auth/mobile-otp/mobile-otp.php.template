@@ -14,11 +14,11 @@
 
 require_once __DIR__ . '/../../vendor/autoload.php';
 
-use Framework\Routing\Router;
-use Framework\Routing\Middleware\JwtAuthMiddleware;
-use Framework\Routing\Middleware\TenantMiddleware;
-use Framework\Auth\RsaJwtHandler;
-use Framework\Tenancy\TenantResolver;
+use StoneScriptPHP\Routing\Router;
+use StoneScriptPHP\Routing\Middleware\JwtAuthMiddleware;
+use StoneScriptPHP\Routing\Middleware\TenantMiddleware;
+use StoneScriptPHP\Auth\RsaJwtHandler;
+use StoneScriptPHP\Tenancy\TenantResolver;
 
 use App\Routes\Auth\SendOtpRoute;
 use App\Routes\Auth\VerifyOtpRoute;
@@ -53,7 +53,7 @@ $router->use(new JwtAuthMiddleware($jwtHandler, [
 
 $router->get('/api/auth/me', function($request) {
     $user = auth();
-    return new Framework\ApiResponse('success', 'User profile', [
+    return new StoneScriptPHP\ApiResponse('success', 'User profile', [
         'user_id' => $user->user_id,
         'mobile_number' => $user->mobile_number ?? null,
         'display_name' => $user->display_name,

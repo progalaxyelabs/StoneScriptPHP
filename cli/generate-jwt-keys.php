@@ -36,7 +36,7 @@ class JwtKeyGenerator
         echo "\n✅ JWT authentication setup complete!\n\n";
         echo "Next steps:\n";
         echo "  1. Review your .env file\n";
-        echo "  2. Use Framework\\Auth\\RsaJwtHandler for JWT authentication\n";
+        echo "  2. Use StoneScriptPHP\\Auth\\RsaJwtHandler for JWT authentication\n";
         echo "  3. See docs/authentication.md for usage examples\n\n";
     }
 

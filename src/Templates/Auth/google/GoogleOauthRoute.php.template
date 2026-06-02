@@ -2,8 +2,8 @@
 
 namespace App\Routes;
 
-use Framework\ApiResponse;
-use Framework\IRouteHandler;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\IRouteHandler;
 
 require CONFIG_PATH . 'google-oauth.php';
 

@@ -2,11 +2,11 @@
 
 namespace App\Routes\Auth;
 
-use Framework\IRouteHandler;
-use Framework\ApiResponse;
-use Framework\Auth\RsaJwtHandler;
-use Framework\Lib\Email\MyZeptoMail;
-use Framework\Lib\Email\EmailValidator;
+use StoneScriptPHP\IRouteHandler;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Auth\RsaJwtHandler;
+use StoneScriptPHP\Lib\Email\MyZeptoMail;
+use StoneScriptPHP\Lib\Email\EmailValidator;
 use PDO;
 
 /**

@@ -238,7 +238,7 @@ The registration process includes comprehensive email validation to reduce bounc
 Uses PHP's `filter_var()` with `FILTER_VALIDATE_EMAIL` (RFC 5322 compliant):
 
 ```php
-use Framework\Lib\Email\EmailValidator;
+use StoneScriptPHP\Lib\Email\EmailValidator;
 
 $validator = new EmailValidator();
 if (!$validator->validateFormat('user@example.com')) {
@@ -286,7 +286,7 @@ if ($validator->isRoleBased('admin@example.com')) {
 ### Full Validation Example
 
 ```php
-use Framework\Lib\Email\EmailValidator;
+use StoneScriptPHP\Lib\Email\EmailValidator;
 
 $validator = new EmailValidator();
 
@@ -344,7 +344,7 @@ All tenants share the same database with `tenant_id` column:
 // Uncomment the tenant_id index in users.pgsql.template
 // Queries automatically filter by tenant_id when using TenantQueryBuilder
 
-use Framework\Tenancy\TenantQueryBuilder;
+use StoneScriptPHP\Tenancy\TenantQueryBuilder;
 
 $builder = new TenantQueryBuilder($db, 'users');
 $users = $builder->all();  // Automatically adds WHERE tenant_id = ?
