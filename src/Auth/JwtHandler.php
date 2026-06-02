@@ -38,11 +38,11 @@ class JwtHandler implements JwtHandlerInterface
         $issuedAt = time();
         $expire = $issuedAt + ($expiryDays * 24 * 60 * 60);
 
-        $data = [
+        // AUTH-SPEC §4: custom claims at top level alongside standard JWT claims.
+        $data = array_merge([
             'iat' => $issuedAt,
             'exp' => $expire,
-            'data' => $payload
-        ];
+        ], $payload);
 
         return JWT::encode($data, $this->getSecretKey(), self::ALGORITHM);
     }
@@ -57,7 +57,11 @@ class JwtHandler implements JwtHandlerInterface
     {
         try {
             $decoded = JWT::decode($token, new Key($this->getSecretKey(), self::ALGORITHM));
-            return (array) $decoded->data;
+            // AUTH-SPEC §4: claims are at top level. Return all claims minus
+            // the standard JWT fields that are framework internals (iat, exp, etc.).
+            $claims = (array) $decoded;
+            unset($claims['iat'], $claims['exp'], $claims['aud'], $claims['nbf']);
+            return $claims;
         } catch (\Firebase\JWT\ExpiredException $e) {
             error_log('JWT token expired: ' . $e->getMessage());
             return false;

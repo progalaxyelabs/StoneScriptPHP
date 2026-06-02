@@ -71,12 +71,15 @@ class RsaJwtHandler implements JwtHandlerInterface
         // Support custom issuer from .env
         $issuer = $env->JWT_ISSUER ?? 'example.com';
 
-        $data = [
+        // AUTH-SPEC §4: custom claims at top level alongside standard JWT claims.
+        // Spreading $payload after the standard claims means any claim in $payload
+        // (e.g. 'exp') would override the standard value — callers should not include
+        // reserved JWT fields in $payload.
+        $data = array_merge([
             'iss' => $issuer,
             'iat' => $issuedAt,
             'exp' => $expire,
-            'data' => $payload
-        ];
+        ], $payload);
 
         return JWT::encode($data, $privateKey, self::ALGORITHM);
     }
@@ -111,7 +114,11 @@ class RsaJwtHandler implements JwtHandlerInterface
                 }
             }
 
-            return (array) $decoded->data;
+            // AUTH-SPEC §4: claims are at top level. Return all claims minus
+            // the standard JWT fields that are framework internals (iss, iat, exp, etc.).
+            $claims = (array) $decoded;
+            unset($claims['iss'], $claims['iat'], $claims['exp'], $claims['aud'], $claims['nbf']);
+            return $claims;
         } catch (\Firebase\JWT\ExpiredException $e) {
             error_log('JWT token expired: ' . $e->getMessage());
             return false;
