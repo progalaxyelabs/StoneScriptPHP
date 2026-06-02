@@ -21,7 +21,7 @@ class DatabaseTest extends TestCase
      */
     public function test_database_is_singleton(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Database::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Database::class);
         $constructor = $reflection->getConstructor();
 
         $this->assertTrue($constructor->isPrivate(), 'Constructor should be private for singleton');
@@ -33,7 +33,7 @@ class DatabaseTest extends TestCase
     public function test_fn_requires_function_name(): void
     {
         $this->expectException(\TypeError::class);
-        \Framework\Database::fn(null, []);
+        \StoneScriptPHP\Database::fn(null, []);
     }
 
     /**
@@ -41,10 +41,15 @@ class DatabaseTest extends TestCase
      */
     public function test_fn_accepts_array_parameters(): void
     {
+        // Integration test: Database::fn() calls the live gateway (v3 gateway-only).
+        if (!getenv('DB_GATEWAY_URL')) {
+            $this->markTestSkipped('Requires a live gateway (DB_GATEWAY_URL) — integration test.');
+        }
+
         $functionName = 'test_function';
         $params = ['param1', 'param2'];
 
-        $result = \Framework\Database::fn($functionName, $params);
+        $result = \StoneScriptPHP\Database::fn($functionName, $params);
 
         $this->assertIsArray($result);
     }
@@ -54,7 +59,7 @@ class DatabaseTest extends TestCase
      */
     public function test_result_as_object_handles_empty_rows(): void
     {
-        $result = \Framework\Database::result_as_object('test_fn', [], 'stdClass');
+        $result = \StoneScriptPHP\Database::result_as_object('test_fn', [], 'stdClass');
 
         $this->assertNull($result);
     }
@@ -64,7 +69,7 @@ class DatabaseTest extends TestCase
      */
     public function test_result_as_table_handles_empty_rows(): void
     {
-        $result = \Framework\Database::result_as_table('test_fn', [], 'stdClass');
+        $result = \StoneScriptPHP\Database::result_as_table('test_fn', [], 'stdClass');
 
         $this->assertIsArray($result);
         $this->assertEmpty($result);
@@ -87,7 +92,7 @@ class DatabaseTest extends TestCase
             'active' => 't'
         ];
 
-        $result = \Framework\Database::array_to_class_object(
+        $result = \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass)
@@ -110,7 +115,7 @@ class DatabaseTest extends TestCase
 
         $row = ['count' => null];
 
-        $result = \Framework\Database::array_to_class_object(
+        $result = \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass)
@@ -130,7 +135,7 @@ class DatabaseTest extends TestCase
 
         $row = ['enabled' => null];
 
-        $result = \Framework\Database::array_to_class_object(
+        $result = \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass)
@@ -150,7 +155,7 @@ class DatabaseTest extends TestCase
 
         $row = ['description' => null];
 
-        $result = \Framework\Database::array_to_class_object(
+        $result = \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass)
@@ -170,7 +175,7 @@ class DatabaseTest extends TestCase
 
         $row = ['active' => 't'];
 
-        $result = \Framework\Database::array_to_class_object(
+        $result = \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass)
@@ -190,7 +195,7 @@ class DatabaseTest extends TestCase
 
         $row = ['active' => 'f'];
 
-        $result = \Framework\Database::array_to_class_object(
+        $result = \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass)
@@ -210,7 +215,7 @@ class DatabaseTest extends TestCase
 
         $row = ['created_at' => '2025-01-01 12:00:00'];
 
-        $result = \Framework\Database::array_to_class_object(
+        $result = \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass)
@@ -234,7 +239,7 @@ class DatabaseTest extends TestCase
         $this->expectException(\Exception::class);
         $this->expectExceptionMessage('mismatch in function result fields and class properties');
 
-        \Framework\Database::array_to_class_object(
+        \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass)
@@ -256,7 +261,7 @@ class DatabaseTest extends TestCase
             'o_code' => '200'
         ];
 
-        $result = \Framework\Database::array_to_class_object(
+        $result = \StoneScriptPHP\Database::array_to_class_object(
             'test_fn',
             $row,
             get_class($testClass),
@@ -283,7 +288,7 @@ class DatabaseTest extends TestCase
             ['name' => 'Charlie', 'id' => '3']
         ];
 
-        $result = \Framework\Database::result_as_table(
+        $result = \StoneScriptPHP\Database::result_as_table(
             'test_fn',
             $rows,
             get_class($testClass)
@@ -302,11 +307,17 @@ class DatabaseTest extends TestCase
      */
     public function test_copy_from_returns_boolean(): void
     {
+        // Integration test: copy_from() uses a direct PostgreSQL connection
+        // (not the gateway), unavailable in a gateway-only unit context.
+        if (!getenv('DB_GATEWAY_URL')) {
+            $this->markTestSkipped('Requires a direct DB connection — integration test.');
+        }
+
         $rows = ['row1', 'row2'];
         $tablename = 'test_table';
         $delimiter = ',';
 
-        $result = \Framework\Database::copy_from($rows, $tablename, $delimiter);
+        $result = \StoneScriptPHP\Database::copy_from($rows, $tablename, $delimiter);
 
         $this->assertIsBool($result);
     }
@@ -316,22 +327,132 @@ class DatabaseTest extends TestCase
      */
     public function test_query_returns_string(): void
     {
+        // Integration test: query() uses a direct PostgreSQL connection
+        // (not the gateway), unavailable in a gateway-only unit context.
+        if (!getenv('DB_GATEWAY_URL')) {
+            $this->markTestSkipped('Requires a direct DB connection — integration test.');
+        }
+
         $sql = 'SELECT version()';
 
-        $result = \Framework\Database::query($sql);
+        $result = \StoneScriptPHP\Database::query($sql);
 
         $this->assertIsString($result);
     }
 
     /**
-     * Test that internal_query returns array
+     * Test that internal_query throws in v3 gateway-only mode (behavior pinned).
+     * Direct SQL was removed in v3 — use PostgreSQL functions via the gateway.
      */
-    public function test_internal_query_returns_array(): void
+    public function test_internal_query_throws_in_gateway_mode(): void
     {
-        $sql = 'SELECT 1 as test';
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('not available in gateway mode');
 
-        $result = \Framework\Database::internal_query($sql);
+        \StoneScriptPHP\Database::internal_query('SELECT 1 as test');
+    }
 
-        $this->assertIsArray($result);
+    // ──────────────────────────────────────────────────────────────────────────
+    // o_ output-column resolution (SPEC §5, Output Column Naming) — #2825
+    // Regression guard: clean (unprefixed) model properties MUST map gateway
+    // output whether the result keys are o_-prefixed or not, across all mappers,
+    // WITHOUT the legacy $as_out_param flag. This is the cat-and-mouse killer:
+    // regenerating a model (which strips o_) can never re-break mapping.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Clean-props model maps an o_-prefixed row WITHOUT the as_out_param flag.
+     * (This is the exact case that was broken — exact-name match missed o_id.)
+     */
+    public function test_clean_props_map_o_prefixed_row_without_flag(): void
+    {
+        $testClass = new class {
+            public int $id = 0;
+            public string $name = '';
+        };
+
+        $row = ['o_id' => '7', 'o_name' => 'Ada'];
+
+        $result = \StoneScriptPHP\Database::array_to_class_object('fn', $row, get_class($testClass));
+
+        $this->assertEquals(7, $result->id);
+        $this->assertEquals('Ada', $result->name);
+    }
+
+    /**
+     * Clean-props model still maps a legacy UNPREFIXED row (exact match first).
+     */
+    public function test_clean_props_map_unprefixed_legacy_row(): void
+    {
+        $testClass = new class {
+            public int $id = 0;
+            public string $name = '';
+        };
+
+        $row = ['id' => '7', 'name' => 'Ada'];
+
+        $result = \StoneScriptPHP\Database::array_to_class_object('fn', $row, get_class($testClass));
+
+        $this->assertEquals(7, $result->id);
+        $this->assertEquals('Ada', $result->name);
+    }
+
+    /**
+     * Hand-written o_-prefixed model property maps an o_-prefixed row (exact match).
+     * Ensures we never reintroduce the o_o_id failure mode for such models.
+     */
+    public function test_hand_fixed_o_prefixed_prop_maps_o_prefixed_row(): void
+    {
+        $testClass = new class {
+            public int $o_id = 0;
+        };
+
+        $row = ['o_id' => '7'];
+
+        $result = \StoneScriptPHP\Database::array_to_class_object('fn', $row, get_class($testClass));
+
+        $this->assertEquals(7, $result->o_id);
+    }
+
+    /**
+     * result_as_table maps o_-prefixed rows to clean-props models — the exact
+     * #2811 BLOCKER 1 scenario (RETURNS TABLE function output).
+     */
+    public function test_result_as_table_maps_o_prefixed_rows(): void
+    {
+        $testClass = new class {
+            public int $id = 0;
+            public string $name = '';
+        };
+
+        $rows = [
+            ['o_id' => '1', 'o_name' => 'Alice'],
+            ['o_id' => '2', 'o_name' => 'Bob'],
+        ];
+
+        $result = \StoneScriptPHP\Database::result_as_table('fn', $rows, get_class($testClass));
+
+        $this->assertCount(2, $result);
+        $this->assertEquals(1, $result[0]->id);
+        $this->assertEquals('Alice', $result[0]->name);
+        $this->assertEquals(2, $result[1]->id);
+        $this->assertEquals('Bob', $result[1]->name);
+    }
+
+    /**
+     * result_as_single maps an o_-prefixed row to a clean-props model.
+     */
+    public function test_result_as_single_maps_o_prefixed_row(): void
+    {
+        $testClass = new class {
+            public int $id = 0;
+            public string $name = '';
+        };
+
+        $result = \StoneScriptPHP\Database::result_as_single('fn', [['o_id' => '9', 'o_name' => 'Zed']], get_class($testClass));
+
+        $this->assertNotNull($result);
+        $this->assertEquals(9, $result->id);
+        $this->assertEquals('Zed', $result->name);
     }
 }

@@ -271,11 +271,29 @@ class Database
 
             // log_debug(__METHOD__ . ' ' . var_export($row, true));
 
-            $row_key = $p_name;
-            if ($as_out_param) {
-                $row_key = 'o_' . $p_name;
+            // Resolve the result-row key for this property (SPEC §5, Output Column
+            // Naming). Model properties are canonically UNPREFIXED; PostgreSQL
+            // functions emit `o_`-prefixed output columns (OUT-param / RETURNS TABLE
+            // convention, to avoid clashing with table columns inside the function
+            // body). Match the exact property name first, then fall back to the
+            // `o_`-prefixed key. This is consistent across all result mappers and
+            // handles every case without re-breaking on model regeneration:
+            //   - clean prop `id`        + row `o_id`  → o_ fallback
+            //   - clean prop `id`        + row `id`    → exact (legacy unprefixed fns)
+            //   - hand-fixed prop `o_id` + row `o_id`  → exact
+            // The legacy `$as_out_param` flag is retained for signature back-compat
+            // but no longer drives resolution (it previously forced an o_-prepend-only
+            // match, which would seek `o_o_id` for an already-`o_` property).
+            $prefixed_key = 'o_' . $p_name;
+            if (array_key_exists($p_name, $row)) {
+                $row_key = $p_name;
+            } elseif (array_key_exists($prefixed_key, $row)) {
+                $row_key = $prefixed_key;
+            } else {
+                $row_key = null;
             }
-            if (array_key_exists($row_key, $row)) {
+
+            if ($row_key !== null) {
                 if ($row[$row_key] === null) {
                     if ($p_type === 'int') {
                         $instance->$p_name = 0;
@@ -292,8 +310,7 @@ class Database
                     $instance->$p_name = $row[$row_key];
                 }
             } else {
-                $is_out_param = $as_out_param ? 'true' : 'false';
-                log_debug(" expected [$row_key] with type [$p_type] as out param is [$is_out_param]  from class [$class] but not found in db function [$function_name] result");
+                log_debug(" expected [$p_name] or [$prefixed_key] with type [$p_type] from class [$class] but neither found in db function [$function_name] result");
                 $missing_properties[] = $p_name;
             }
         }

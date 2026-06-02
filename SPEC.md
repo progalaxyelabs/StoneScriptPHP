@@ -332,13 +332,14 @@ All database calls go through the StoneScriptDB Gateway. Direct PDO is forbidden
 
 ### Parameter Naming Convention
 
-PostgreSQL function parameters MUST be prefixed with `p_`:
+PostgreSQL function parameters MUST be prefixed with `p_`, and output columns
+(OUT params / `RETURNS TABLE` columns) MUST be prefixed with `o_`:
 
 ```sql
 CREATE OR REPLACE FUNCTION get_user_by_id(
     p_user_id INTEGER
 )
-RETURNS TABLE (id INTEGER, name VARCHAR, email VARCHAR)
+RETURNS TABLE (o_id INTEGER, o_name VARCHAR, o_email VARCHAR)
 AS $$ ... $$
 LANGUAGE plpgsql;
 ```
@@ -349,6 +350,31 @@ The gateway strips `p_` prefix for gateway calls. PHP calls use unprefixed names
 // PHP call
 $user = Database::fn('get_user_by_id', ['user_id' => 42]);
 ```
+
+### Output Column Naming (`o_`)
+
+PostgreSQL function output columns — OUT parameters and `RETURNS TABLE` columns —
+MUST be prefixed with `o_` (e.g. `o_id`, `o_name`). This is the canonical
+gateway-output convention: the prefix prevents the output column names from
+clashing with the table columns referenced inside the function body
+(e.g. `SELECT u.id AS o_id FROM users u`). The gateway returns these column
+names verbatim as result keys (it does not add or strip the prefix).
+
+**Model properties are canonically UNPREFIXED.** `php stone generate model`
+strips the `o_` prefix, so generated model properties are clean (`$user->id`,
+not `$user->o_id`). At runtime, `Database::array_to_class_object` (used by all
+`result_as_*` mappers) resolves each property against the result row by matching
+the **exact property name first, then the `o_`-prefixed key**:
+
+| Model property | Result-row key | Resolves via |
+|----------------|----------------|--------------|
+| `id` | `o_id` | `o_` fallback (standard case) |
+| `id` | `id` | exact match (legacy unprefixed functions) |
+| `o_id` (hand-written) | `o_id` | exact match |
+
+Because the mapping is resolved this way for every mapper, **regenerating a model
+can never re-break gateway-output mapping**, and both `o_`-prefixed and legacy
+unprefixed functions map correctly without per-model hand-fixing.
 
 ### Tenant ID Injection
 
@@ -391,18 +417,24 @@ Generate PHP model wrappers from SQL functions:
 php stone generate model get_user_by_id.pgsql
 ```
 
-Produces:
+Produces (a `RETURNS TABLE` function maps to `result_as_table` → an array; the
+`o_`-prefixed output columns map to the clean `User` properties automatically):
 
 ```php
 class FnGetUserById
 {
-    public static function run(int $user_id): ?User
+    /** @return User[] */
+    public static function run(int $user_id): array
     {
         $rows = Database::fn('get_user_by_id', ['user_id' => $user_id]);
-        return Database::result_as_single('get_user_by_id', $rows, User::class);
+        return Database::result_as_table('get_user_by_id', $rows, User::class);
     }
 }
 ```
+
+> Functions that return a single composite/OUT-param row (not `RETURNS TABLE`)
+> generate a `result_as_single` / `result_as_object` call returning one object;
+> the same `o_`-aware property resolution applies.
 
 ### Exception Mapping
 
