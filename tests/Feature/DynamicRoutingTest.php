@@ -143,7 +143,7 @@ class DynamicRoutingTest extends TestCase
             ]
         ];
 
-        $compiled = \Framework\RouteCompiler::compile($routes);
+        $compiled = \StoneScriptPHP\RouteCompiler::compile($routes);
 
         // Verify routes are flattened with prefix applied
         $this->assertArrayHasKey('/', $compiled);
@@ -175,7 +175,7 @@ class DynamicRoutingTest extends TestCase
             ]
         ];
 
-        $compiledNested = \Framework\RouteCompiler::compile($nestedRoutes);
+        $compiledNested = \StoneScriptPHP\RouteCompiler::compile($nestedRoutes);
 
         $this->assertArrayHasKey('/api/v1/users', $compiledNested);
         $this->assertArrayHasKey('/api/v2/users', $compiledNested);

@@ -20,6 +20,18 @@ class RouteGeneratorTest extends TestCase
         parent::setUp();
         $this->generatorScript = ROOT_PATH . 'Framework/cli/generate-route.php';
         $this->testRoutesDir = ROOT_PATH . 'Routes';
+
+        // Gated: this whole file asserts a SCAFFOLDED consuming-project layout
+        // that does not exist in the bare framework lib — App\Routes\HomeRoute,
+        // src/App/Routes/, CONFIG_PATH.'routes.php', and the generate-route.php
+        // output namespace. Several assertions are also stale post the
+        // Framework\ -> StoneScriptPHP\ rename (e.g. expecting Framework\ApiResponse).
+        // Retargeting them would rewrite the tests' intent / fabricate coverage,
+        // so they are skipped-with-reason here and belong to the project skeleton
+        // repo. See #2827.
+        $this->markTestSkipped(
+            'Asserts scaffolded-project route conventions (App\\Routes, src/config/routes.php, generate-route output) absent in the bare framework lib — covered by the project skeleton repo.'
+        );
     }
 
     protected function tearDown(): void

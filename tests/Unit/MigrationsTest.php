@@ -17,13 +17,36 @@ use PHPUnit\Framework\TestCase;
 class MigrationsTest extends TestCase
 {
     /**
+     * Migrations couples to a live PostgreSQL at construction time
+     * (Migrations::__construct -> Env DATABASE_* -> pg_connect). These are
+     * integration tests, not bare-lib unit tests — including the reflection-based
+     * logic tests, which still need an instance. Skip-with-reason on the default
+     * unit run; they execute in an integration env where a real DB is configured.
+     *
+     * NB: we gate on DATABASE_HOST (the param pg_connect actually needs), NOT
+     * DB_GATEWAY_URL — a sibling test (ExternalAuthConfigTest) putenv's a fake
+     * DB_GATEWAY_URL that leaks across this single-process run, so it is not a
+     * reliable signal here. Matches the markTestSkipped convention used by
+     * DatabaseTest / ExternalAuthConfigTest / JwtHandlerFlatClaimsTest.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+        if (!getenv('DATABASE_HOST')) {
+            $this->markTestSkipped(
+                'Requires a live PostgreSQL (DATABASE_HOST/pg_connect) — Migrations connects in its constructor; integration test.'
+            );
+        }
+    }
+
+    /**
      * Test that Migrations class can be instantiated
      */
     public function test_migrations_can_be_instantiated(): void
     {
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
-        $this->assertInstanceOf(\Framework\Migrations::class, $migrations);
+        $this->assertInstanceOf(\StoneScriptPHP\Migrations::class, $migrations);
     }
 
     /**
@@ -31,7 +54,7 @@ class MigrationsTest extends TestCase
      */
     public function test_verify_returns_array(): void
     {
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
         $result = $migrations->verify();
 
         $this->assertIsArray($result);
@@ -42,7 +65,7 @@ class MigrationsTest extends TestCase
      */
     public function test_verify_result_has_expected_structure(): void
     {
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
         $result = $migrations->verify();
 
         $this->assertArrayHasKey('tables', $result);
@@ -62,7 +85,7 @@ class MigrationsTest extends TestCase
      */
     public function test_get_exit_code_returns_zero_when_no_drift(): void
     {
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
         $migrations->verify();
 
         $exitCode = $migrations->getExitCode();
@@ -76,11 +99,11 @@ class MigrationsTest extends TestCase
      */
     public function test_parse_table_name_extracts_from_create_statement(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('parseTableName');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $tempFile = tempnam(sys_get_temp_dir(), 'test_table_');
         file_put_contents($tempFile, 'CREATE TABLE users (id serial PRIMARY KEY);');
@@ -97,11 +120,11 @@ class MigrationsTest extends TestCase
      */
     public function test_parse_table_name_returns_null_for_invalid(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('parseTableName');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $tempFile = tempnam(sys_get_temp_dir(), 'test_invalid_');
         file_put_contents($tempFile, 'INVALID SQL CONTENT');
@@ -118,11 +141,11 @@ class MigrationsTest extends TestCase
      */
     public function test_parse_function_name_extracts_from_create_statement(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('parseFunctionName');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $tempFile = tempnam(sys_get_temp_dir(), 'test_function_');
         file_put_contents($tempFile, 'CREATE FUNCTION get_user(id integer) RETURNS TABLE...');
@@ -139,11 +162,11 @@ class MigrationsTest extends TestCase
      */
     public function test_parse_function_name_handles_or_replace(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('parseFunctionName');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $tempFile = tempnam(sys_get_temp_dir(), 'test_function_');
         file_put_contents($tempFile, 'CREATE OR REPLACE FUNCTION update_timestamp() RETURNS trigger...');
@@ -160,11 +183,11 @@ class MigrationsTest extends TestCase
      */
     public function test_normalize_type_converts_int_to_integer(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $this->assertEquals('integer', $method->invoke($migrations, 'int'));
         $this->assertEquals('integer', $method->invoke($migrations, 'int4'));
@@ -176,11 +199,11 @@ class MigrationsTest extends TestCase
      */
     public function test_normalize_type_converts_bool_to_boolean(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $this->assertEquals('boolean', $method->invoke($migrations, 'bool'));
     }
@@ -190,11 +213,11 @@ class MigrationsTest extends TestCase
      */
     public function test_normalize_type_converts_varchar(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $this->assertEquals('character varying', $method->invoke($migrations, 'varchar'));
     }
@@ -204,11 +227,11 @@ class MigrationsTest extends TestCase
      */
     public function test_normalize_type_preserves_unknown_types(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $this->assertEquals('text', $method->invoke($migrations, 'text'));
         $this->assertEquals('timestamptz', $method->invoke($migrations, 'timestamptz'));
@@ -219,11 +242,11 @@ class MigrationsTest extends TestCase
      */
     public function test_normalize_type_is_case_insensitive(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $this->assertEquals('integer', $method->invoke($migrations, 'INT'));
         $this->assertEquals('integer', $method->invoke($migrations, 'Int'));
@@ -235,11 +258,11 @@ class MigrationsTest extends TestCase
      */
     public function test_compare_columns_detects_missing_in_db(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('compareColumns');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $codeColumns = [
             'id' => ['type' => 'integer'],
@@ -263,11 +286,11 @@ class MigrationsTest extends TestCase
      */
     public function test_compare_columns_detects_missing_in_code(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('compareColumns');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $codeColumns = [
             'id' => ['type' => 'integer'],
@@ -291,11 +314,11 @@ class MigrationsTest extends TestCase
      */
     public function test_compare_columns_detects_type_mismatch(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('compareColumns');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $codeColumns = [
             'id' => ['type' => 'integer'],
@@ -320,11 +343,11 @@ class MigrationsTest extends TestCase
      */
     public function test_compare_columns_returns_empty_when_match(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('compareColumns');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $codeColumns = [
             'id' => ['type' => 'integer'],
@@ -346,11 +369,11 @@ class MigrationsTest extends TestCase
      */
     public function test_diff_detects_tables_missing_in_db(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('diff');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $codeDefinitions = [
             'tables' => ['users' => [], 'posts' => []],
@@ -372,11 +395,11 @@ class MigrationsTest extends TestCase
      */
     public function test_diff_detects_tables_missing_in_code(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('diff');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $codeDefinitions = [
             'tables' => ['users' => []],
@@ -398,11 +421,11 @@ class MigrationsTest extends TestCase
      */
     public function test_diff_detects_functions_missing_in_db(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('diff');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $codeDefinitions = [
             'tables' => [],
@@ -424,11 +447,11 @@ class MigrationsTest extends TestCase
      */
     public function test_diff_detects_functions_missing_in_code(): void
     {
-        $reflection = new \ReflectionClass(\Framework\Migrations::class);
+        $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('diff');
         $method->setAccessible(true);
 
-        $migrations = new \Framework\Migrations();
+        $migrations = new \StoneScriptPHP\Migrations();
 
         $codeDefinitions = [
             'tables' => [],
