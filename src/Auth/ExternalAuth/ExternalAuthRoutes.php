@@ -26,6 +26,7 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\AuthHealthRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\VerifyEmailRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\ResendVerificationCodeRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
+use StoneScriptPHP\Auth\ExternalAuth\Routes\ExchangeRoute;
 
 /**
  * ExternalAuth Route Registration
@@ -76,9 +77,12 @@ class ExternalAuthRoutes
         $config = new ExternalAuthConfig($options);
         $client = new ExternalAuthServiceClient($config->authServiceUrl, $config->platformCode);
         $provisioner = $options['provisioner'] ?? null;
+        // Platform-specific role resolver for the token exchange route.
+        // Signature: fn(array $identityClaims): array. Injected like $provisioner.
+        $rolesResolver = $options['roles_resolver'] ?? null;
 
         // Register routes under the canonical prefix
-        self::registerForPrefix($router, $config->prefix, $client, $config, $provisioner);
+        self::registerForPrefix($router, $config->prefix, $client, $config, $provisioner, $rolesResolver);
 
         // AUTH-SPEC §S1 legacy compat: also register under /auth if the canonical
         // prefix differs from /auth. This keeps existing clients working during
@@ -88,7 +92,7 @@ class ExternalAuthRoutes
                 "ExternalAuthRoutes: legacy_compat=true — also registering routes under " .
                 self::LEGACY_PREFIX . " (deprecated; set legacy_compat=false once clients use {$config->prefix})"
             );
-            self::registerForPrefix($router, self::LEGACY_PREFIX, $client, $config, $provisioner);
+            self::registerForPrefix($router, self::LEGACY_PREFIX, $client, $config, $provisioner, $rolesResolver);
         }
 
         log_info("ExternalAuthRoutes: Registration complete with prefix '{$config->prefix}'" .
@@ -108,7 +112,8 @@ class ExternalAuthRoutes
         string $prefix,
         ExternalAuthServiceClient $client,
         ExternalAuthConfig $config,
-        mixed $provisioner
+        mixed $provisioner,
+        mixed $rolesResolver = null
     ): void {
         // Public routes (no auth required)
         if ($config->isEnabled('register') && $config->registrationMode !== 'none') {
@@ -171,6 +176,19 @@ class ExternalAuthRoutes
         if ($config->isEnabled('health')) {
             $router->get("$prefix/health", new AuthHealthRoute($client, $config->hooks, $config), [], true);
             log_debug("ExternalAuthRoutes: Registered GET $prefix/health");
+        }
+
+        // Token exchange is PUBLIC: the inbound Authorization token is an
+        // auth-service identity token (not a platform token), so it must bypass
+        // JwtAuthMiddleware — the route validates it itself against the JWKS.
+        if ($config->isEnabled('exchange')) {
+            $router->post(
+                "$prefix/exchange",
+                new ExchangeRoute($client, $config->hooks, $config, $rolesResolver),
+                [],
+                true
+            );
+            log_debug("ExternalAuthRoutes: Registered POST $prefix/exchange (public)");
         }
 
         // Protected routes (auth required)
@@ -305,6 +323,9 @@ class ExternalAuthRoutes
         if ($config->isEnabled('health')) {
             $paths[] = "$prefix/health";
         }
+        if ($config->isEnabled('exchange')) {
+            $paths[] = "$prefix/exchange";
+        }
 
         return $paths;
     }
@@ -395,6 +416,7 @@ class ExternalAuthRoutes
             'health' => $options['health'] ?? false,
             'verify_email' => $options['verify_email'] ?? true,
             'resend_code' => $options['resend_code'] ?? true,
+            'exchange' => $options['exchange'] ?? true,
         ];
 
         $isEnabled = fn(string $feature) => $features[$feature] ?? false;
@@ -438,6 +460,9 @@ class ExternalAuthRoutes
         }
         if ($isEnabled('health')) {
             $routes['GET']["$prefix/health"] = AuthHealthRoute::class;
+        }
+        if ($isEnabled('exchange')) {
+            $routes['POST']["$prefix/exchange"] = ExchangeRoute::class;
         }
 
         // Protected routes

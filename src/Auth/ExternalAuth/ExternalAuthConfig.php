@@ -49,6 +49,30 @@ class ExternalAuthConfig
     /** @var string|null Platform secret for server-to-server auth (X-Platform-Secret) */
     public readonly ?string $platformSecret;
 
+    /**
+     * @var string JWKS endpoint used by the token exchange route to validate
+     * inbound identity tokens. Defaults to `{authServiceUrl}/api/auth/jwks`
+     * (matches the auth service's published JWKS path). Override with `jwks_url`.
+     */
+    public readonly string $jwksUrl;
+
+    /** @var int TTL (seconds) for platform tokens issued by the exchange route. */
+    public readonly int $exchangeTtl;
+
+    /**
+     * @var string Private key path used to SIGN platform tokens in the exchange
+     * route. Defaults to the platform's existing JWT_PRIVATE_KEY_PATH so the
+     * issued token is signed with the same key JwtAuthMiddleware validates —
+     * no second keypair to keep in sync. Override with `signing_private_key_path`.
+     */
+    public readonly string $signingPrivateKeyPath;
+
+    /** @var string|null Passphrase for the signing private key (defaults to JWT_PRIVATE_KEY_PASSPHRASE). */
+    public readonly ?string $signingPrivateKeyPassphrase;
+
+    /** @var string Issuer (`iss`) stamped on platform tokens (defaults to JWT_ISSUER). */
+    public readonly string $signingIssuer;
+
     /** @var array<string, callable|null> Lifecycle hooks */
     public readonly array $hooks;
 
@@ -89,6 +113,20 @@ class ExternalAuthConfig
         $this->platformSecret = $options['platform_secret']
             ?? ($env->EXTERNAL_AUTH_CLIENT_SECRET ?? null);
 
+        // Token exchange config. JWKS for inbound identity-token validation, and
+        // signing config for the issued platform token. Signing defaults are
+        // derived from the platform's EXISTING JWT config so there is no second
+        // keypair to keep in sync with JwtAuthMiddleware.
+        $this->jwksUrl = $options['jwks_url']
+            ?? (rtrim($this->authServiceUrl, '/') . '/api/auth/jwks');
+        $this->exchangeTtl = (int) ($options['exchange_ttl'] ?? 3600);
+        $this->signingPrivateKeyPath = $options['signing_private_key_path']
+            ?? $env->JWT_PRIVATE_KEY_PATH;
+        $this->signingPrivateKeyPassphrase = $options['signing_private_key_passphrase']
+            ?? ($env->JWT_PRIVATE_KEY_PASSPHRASE ?? null);
+        $this->signingIssuer = $options['signing_issuer']
+            ?? $env->JWT_ISSUER;
+
         // Hooks
         $this->hooks = [
             'before_register' => $options['before_register'] ?? null,
@@ -121,6 +159,7 @@ class ExternalAuthConfig
             'health' => $options['health'] ?? false,
             'verify_email' => $options['verify_email'] ?? true,
             'resend_code' => $options['resend_code'] ?? true,
+            'exchange' => $options['exchange'] ?? true,
         ];
     }
 

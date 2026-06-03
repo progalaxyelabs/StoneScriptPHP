@@ -182,4 +182,56 @@ class ExternalAuthConfigTest extends TestCase
         $this->assertArrayHasKey('/auth/login', $routes['POST']);
         $this->assertArrayNotHasKey('/api/auth/login', $routes['POST']);
     }
+
+    // ── Token exchange config (task #2877) ──────────────────────────────────
+
+    public function test_exchange_enabled_by_default(): void
+    {
+        $config = new ExternalAuthConfig([]);
+        $this->assertTrue($config->isEnabled('exchange'),
+            'exchange feature must default to enabled');
+    }
+
+    public function test_exchange_can_be_disabled(): void
+    {
+        $config = new ExternalAuthConfig(['exchange' => false]);
+        $this->assertFalse($config->isEnabled('exchange'));
+    }
+
+    public function test_jwks_url_defaults_from_auth_service_url(): void
+    {
+        $config = new ExternalAuthConfig(['auth_service_url' => 'http://auth:3139']);
+        $this->assertSame('http://auth:3139/api/auth/jwks', $config->jwksUrl,
+            'jwksUrl must default to {authServiceUrl}/api/auth/jwks');
+    }
+
+    public function test_jwks_url_override_is_respected(): void
+    {
+        $config = new ExternalAuthConfig(['jwks_url' => 'https://auth.example.com/.well-known/jwks.json']);
+        $this->assertSame('https://auth.example.com/.well-known/jwks.json', $config->jwksUrl);
+    }
+
+    public function test_exchange_ttl_defaults_to_3600(): void
+    {
+        $config = new ExternalAuthConfig([]);
+        $this->assertSame(3600, $config->exchangeTtl);
+    }
+
+    public function test_exchange_ttl_override_is_respected(): void
+    {
+        $config = new ExternalAuthConfig(['exchange_ttl' => 900]);
+        $this->assertSame(900, $config->exchangeTtl);
+    }
+
+    public function test_signing_issuer_override_is_respected(): void
+    {
+        $config = new ExternalAuthConfig(['signing_issuer' => 'https://api.myplatform.com']);
+        $this->assertSame('https://api.myplatform.com', $config->signingIssuer);
+    }
+
+    public function test_signing_private_key_path_override_is_respected(): void
+    {
+        $config = new ExternalAuthConfig(['signing_private_key_path' => '/keys/custom.pem']);
+        $this->assertSame('/keys/custom.pem', $config->signingPrivateKeyPath);
+    }
 }
