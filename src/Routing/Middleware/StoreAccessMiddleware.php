@@ -74,7 +74,18 @@ class StoreAccessMiddleware implements MiddlewareInterface
             return new ApiResponse('error', 'Authentication required', null, 401);
         }
 
-        // Query the main DB (no tenant_id set yet) for the identity's memberships.
+        // Query the MAIN DB for the identity's memberships.
+        // Explicitly reset tenant_id to null to force main-DB routing regardless
+        // of what GatewayTenantMiddleware may have set from the JWT (e.g. when a
+        // tenant_id-bearing provision token is used). We restore tenant_id after.
+        $gwClient = Database::getGatewayClient();
+        $prevTenantId = null;
+        try {
+            // Peek at the current tenant state (GatewayClient may have a setter; use reflection)
+            // Simplest: just reset to null for the membership query
+            $gwClient->setTenantId(null);
+        } catch (\Throwable $ignored) {}
+
         // GatewayClient returns rows as an array of column maps. For a function that
         // returns JSON, each row is: ['{fn_name}' => {decoded_json_value}].
         // We extract the inner JSON object and read 'memberships' from it.

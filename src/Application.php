@@ -113,16 +113,18 @@ class Application
         ));
         $router->use(new GatewayTenantMiddleware());
 
-        // Add SubscriptionMiddleware if subscription config is present
-        if (!empty($subscriptionConfig)) {
-            $router->use(new SubscriptionMiddleware());
-        }
-
-        // T3 url-tenant: add StoreAccessMiddleware when store_access.enabled is true.
-        // This middleware runs after JwtAuthMiddleware, extracts :storeId from the URL,
-        // validates the identity's membership, and sets GatewayClient tenant_id.
+        // T3 url-tenant: StoreAccessMiddleware MUST run before SubscriptionMiddleware.
+        // It extracts :storeId from the URL, validates membership, and sets
+        // GatewayClient tenant_id. SubscriptionMiddleware then has the correct
+        // tenant context for its DB query.
         if (!empty($storeAccessConfig['enabled'])) {
             $router->use(new StoreAccessMiddleware($storeAccessConfig));
+        }
+
+        // Add SubscriptionMiddleware if subscription config is present.
+        // Runs after StoreAccessMiddleware so tenant context is already set (T3).
+        if (!empty($subscriptionConfig)) {
+            $router->use(new SubscriptionMiddleware());
         }
 
         // Add custom middleware
