@@ -74,10 +74,27 @@ class StoreAccessMiddleware implements MiddlewareInterface
             return new ApiResponse('error', 'Authentication required', null, 401);
         }
 
-        // Query the main DB (no tenant_id set yet) for the identity's memberships
+        // Query the main DB (no tenant_id set yet) for the identity's memberships.
+        // GatewayClient returns rows as an array of column maps. For a function that
+        // returns JSON, each row is: ['{fn_name}' => {decoded_json_value}].
+        // We extract the inner JSON object and read 'memberships' from it.
         try {
-            $result = Database::fn($this->membershipFn, [(string) $user->user_id]);
-            $memberships = $result['memberships'] ?? [];
+            $rows = Database::fn($this->membershipFn, [(string) $user->user_id]);
+
+            // Unwrap gateway row format: [[fn_name => {data}], ...]
+            $innerData = [];
+            if (!empty($rows) && is_array($rows[0])) {
+                $firstRow = $rows[0];
+                // The inner value is either already decoded (array) or a JSON string
+                $raw = reset($firstRow);
+                if (is_array($raw)) {
+                    $innerData = $raw;
+                } elseif (is_string($raw)) {
+                    $innerData = json_decode($raw, true) ?? [];
+                }
+            }
+
+            $memberships = $innerData['memberships'] ?? [];
         } catch (\Throwable $e) {
             log_error('StoreAccessMiddleware: membership lookup failed: ' . $e->getMessage());
             return new ApiResponse('error', 'Store access check failed', null, 500);
