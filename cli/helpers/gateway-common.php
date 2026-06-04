@@ -75,11 +75,62 @@ function parseGatewayOptions(array $argv): array
 }
 
 /**
+ * Load the cross-DB-link authorization block from environment variables.
+ *
+ * deploy-manager injects these vars into the schema container when the
+ * `--dangerously-allow-cross-db-link` flag is passed (#2909, deploy-manager v0.10.0):
+ *
+ *   GATEWAY_CROSS_DB_LINK_AUTHORIZED  = "true"
+ *   GATEWAY_CROSS_DB_LINK_DEPLOY_REF  = "<version-tag>"
+ *   GATEWAY_CROSS_DB_LINK_GRANTS      = '<json-array-of-grants>'
+ *
+ * When the vars are absent (normal deploys) this returns null and no
+ * `cross_db_link` block is sent to the gateway — behaviour is unchanged.
+ * When present, the returned array is merged into the /v2/migrate request
+ * body so the gateway can materialise cross-DB staging tables.
+ *
+ * The gateway's fail-closed rule (#2908): any `cross_db/<link>.json`
+ * manifest in the schema bundle is REJECTED when this block is absent.
+ *
+ * @return array{authorized: true, deploy_ref: string|null, grants: array}|null
+ */
+function loadCrossDbLinkAuth(): ?array
+{
+    $authorized = getenv('GATEWAY_CROSS_DB_LINK_AUTHORIZED');
+    if (!$authorized || strtolower(trim($authorized)) !== 'true') {
+        return null;
+    }
+
+    $grantsJson = getenv('GATEWAY_CROSS_DB_LINK_GRANTS');
+    if (!$grantsJson) {
+        fwrite(STDERR, "WARNING: GATEWAY_CROSS_DB_LINK_AUTHORIZED=true but GATEWAY_CROSS_DB_LINK_GRANTS is absent — cross-DB-link authorization will NOT be sent\n");
+        return null;
+    }
+
+    $grants = json_decode($grantsJson, true);
+    if (!is_array($grants)) {
+        fwrite(STDERR, "WARNING: GATEWAY_CROSS_DB_LINK_GRANTS is not valid JSON — cross-DB-link authorization will NOT be sent\n");
+        return null;
+    }
+
+    $deployRef = getenv('GATEWAY_CROSS_DB_LINK_DEPLOY_REF') ?: null;
+    if (!$deployRef) {
+        fwrite(STDERR, "WARNING: GATEWAY_CROSS_DB_LINK_DEPLOY_REF is absent — audit log deploy_ref will be null\n");
+    }
+
+    return [
+        'authorized' => true,
+        'deploy_ref' => $deployRef,
+        'grants'     => $grants,
+    ];
+}
+
+/**
  * Load and validate gateway environment variables.
  *
  * @param array  $options     Parsed CLI options (may override env vars)
  * @param bool   $requireDb   Whether DATABASE_ID is required
- * @return array{gateway_url: string, platform_id: string, schema_name: string, main_schema_name: string, tenant_schema_name: string, database_id: string, admin_token: ?string}
+ * @return array{gateway_url: string, platform_id: string, schema_name: string, main_schema_name: string, tenant_schema_name: string, database_id: string, admin_token: ?string, cross_db_link: array|null}
  */
 function loadGatewayEnv(array $options, bool $requireDb = true): array
 {
@@ -116,13 +167,14 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
     }
 
     return [
-        'gateway_url' => $gatewayUrl,
-        'platform_id' => $platformId,
-        'schema_name' => $schemaName,
-        'main_schema_name' => $mainSchemaName,
+        'gateway_url'   => $gatewayUrl,
+        'platform_id'   => $platformId,
+        'schema_name'   => $schemaName,
+        'main_schema_name'   => $mainSchemaName,
         'tenant_schema_name' => $tenantSchemaName,
-        'database_id' => $databaseId,
-        'admin_token' => $adminToken,
+        'database_id'   => $databaseId,
+        'admin_token'   => $adminToken,
+        'cross_db_link' => loadCrossDbLinkAuth(),
     ];
 }
 
@@ -388,10 +440,20 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
  *
  * @return void Exits on failure.
  */
-function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false): void
+/**
+ * @param array|null $crossDbLink  Authorization block for the gateway's cross-DB-link
+ *   capability (#2908/#2909). When non-null, included in the request body as
+ *   `cross_db_link: {authorized, deploy_ref, grants[]}`. Null (default) = absent, which
+ *   causes the gateway to fail-closed any cross_db manifest in the schema bundle.
+ *   Sourced from deploy-manager env vars via loadGatewayEnv()['cross_db_link'].
+ */
+function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null): void
 {
     if (!$quiet) {
         echo "Migrating database '{$databaseId}'...\n";
+        if ($crossDbLink !== null) {
+            echo "  cross-DB-link: authorized (deploy_ref=" . ($crossDbLink['deploy_ref'] ?? 'null') . ", grants=" . count($crossDbLink['grants'] ?? []) . ")\n";
+        }
     }
 
     $attempt = 1;
@@ -402,14 +464,18 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
             echo "  Attempt {$attempt} of {$retryCount}...\n";
         }
 
-        $payload = json_encode([
-            'platform' => $platformId,
-            'schema_name' => $schemaName,
-            'database_id' => $databaseId,
-            'force' => $force,
-            'allow' => array_values($allow),
+        $body = [
+            'platform'          => $platformId,
+            'schema_name'       => $schemaName,
+            'database_id'       => $databaseId,
+            'force'             => $force,
+            'allow'             => array_values($allow),
             'skip_verification' => $skipVerification,
-        ]);
+        ];
+        if ($crossDbLink !== null) {
+            $body['cross_db_link'] = $crossDbLink;
+        }
+        $payload = json_encode($body);
 
         $headers = gatewayJsonHeaders($payload, $adminToken);
 
@@ -467,10 +533,13 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
  *
  * @return void Exits on failure.
  */
-function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false): void
+function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null): void
 {
     if (!$quiet) {
         echo "Migrating all tenant databases (POST /v2/migrate-all)...\n";
+        if ($crossDbLink !== null) {
+            echo "  cross-DB-link: authorized (deploy_ref=" . ($crossDbLink['deploy_ref'] ?? 'null') . ", grants=" . count($crossDbLink['grants'] ?? []) . ")\n";
+        }
     }
 
     $attempt = 1;
@@ -481,13 +550,17 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
             echo "  Attempt {$attempt} of {$retryCount}...\n";
         }
 
-        $payload = json_encode([
-            'platform' => $platformId,
-            'schema_name' => $schemaName,
-            'force' => $force,
-            'allow' => array_values($allow),
+        $body = [
+            'platform'          => $platformId,
+            'schema_name'       => $schemaName,
+            'force'             => $force,
+            'allow'             => array_values($allow),
             'skip_verification' => $skipVerification,
-        ]);
+        ];
+        if ($crossDbLink !== null) {
+            $body['cross_db_link'] = $crossDbLink;
+        }
+        $payload = json_encode($body);
 
         $headers = gatewayJsonHeaders($payload, $adminToken);
 

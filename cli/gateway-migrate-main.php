@@ -73,7 +73,8 @@ stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
     $env['database_id'], $env['admin_token'], $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
-    $options['allow'], $options['skip_verification']
+    $options['allow'], $options['skip_verification'],
+    $env['cross_db_link']
 );
 
 exit(0);
