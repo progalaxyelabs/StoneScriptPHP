@@ -127,6 +127,30 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
 }
 
 /**
+ * Build JSON request headers, optionally adding the admin bearer token.
+ *
+ * The gateway's /v2/migrate, /v2/migrate-all and /admin/* endpoints are guarded by
+ * admin_auth_middleware (shared admin bearer + IP allowlist). When an admin token is
+ * available it MUST be presented as `Authorization: Bearer <token>`. When no token is
+ * configured (local/ungated gateway) the header is omitted so behaviour is unchanged.
+ *
+ * @param string      $payload     JSON body the request will send (for Content-Length).
+ * @param string|null $adminToken  Admin token, or null to omit the Authorization header.
+ * @return string[] HTTP header lines.
+ */
+function gatewayJsonHeaders(string $payload, ?string $adminToken = null): array
+{
+    $headers = [
+        'Content-Type: application/json',
+        'Content-Length: ' . strlen($payload),
+    ];
+    if ($adminToken) {
+        $headers[] = "Authorization: Bearer {$adminToken}";
+    }
+    return $headers;
+}
+
+/**
  * Make an HTTP request using stream context.
  *
  * @return array{code: int, body: string}
@@ -318,13 +342,7 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
             'database_id' => $databaseId,
         ]);
 
-        $headers = [
-            'Content-Type: application/json',
-            'Content-Length: ' . strlen($payload),
-        ];
-        if ($adminToken) {
-            $headers[] = "Authorization: Bearer {$adminToken}";
-        }
+        $headers = gatewayJsonHeaders($payload, $adminToken);
 
         $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/admin/database/create", $headers, $payload, 60);
 
@@ -370,7 +388,7 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
  *
  * @return void Exits on failure.
  */
-function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false): void
+function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false): void
 {
     if (!$quiet) {
         echo "Migrating database '{$databaseId}'...\n";
@@ -393,10 +411,9 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
             'skip_verification' => $skipVerification,
         ]);
 
-        $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/v2/migrate", [
-            'Content-Type: application/json',
-            'Content-Length: ' . strlen($payload),
-        ], $payload, 120);
+        $headers = gatewayJsonHeaders($payload, $adminToken);
+
+        $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/v2/migrate", $headers, $payload, 120);
 
         if (in_array($resp['code'], [200, 201])) {
             $success = true;
@@ -450,7 +467,7 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
  *
  * @return void Exits on failure.
  */
-function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false): void
+function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false): void
 {
     if (!$quiet) {
         echo "Migrating all tenant databases (POST /v2/migrate-all)...\n";
@@ -472,10 +489,9 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
             'skip_verification' => $skipVerification,
         ]);
 
-        $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/v2/migrate-all", [
-            'Content-Type: application/json',
-            'Content-Length: ' . strlen($payload),
-        ], $payload, 300);
+        $headers = gatewayJsonHeaders($payload, $adminToken);
+
+        $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/v2/migrate-all", $headers, $payload, 300);
 
         if (in_array($resp['code'], [200, 201])) {
             $success = true;

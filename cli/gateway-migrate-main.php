@@ -71,7 +71,7 @@ stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $arc
 if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
-    $env['database_id'], $options['force'],
+    $env['database_id'], $env['admin_token'], $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
     $options['allow'], $options['skip_verification']
 );

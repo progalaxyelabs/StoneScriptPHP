@@ -60,7 +60,7 @@ stepUploadSchema($env['gateway_url'], $env['platform_id'], $tenantSchemaName, $a
 if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateAllDatabases(
     $env['gateway_url'], $env['platform_id'], $tenantSchemaName,
-    $options['force'],
+    $env['admin_token'], $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
     $options['allow'], $options['skip_verification']
 );
