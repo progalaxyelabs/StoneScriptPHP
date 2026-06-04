@@ -1752,11 +1752,16 @@ $packageJson = json_encode([
     'author' => '',
     'license' => 'MIT',
     'peerDependencies' => [
-        '@progalaxyelabs/ngx-stonescriptphp-client' => '^1.6.0'
+        // Use >=2.0.0 to avoid npm installing a pinned v1.x alongside the consuming
+        // app's newer version, which causes TypeScript dual-instance errors.
+        '@progalaxyelabs/ngx-stonescriptphp-client' => '>=2.0.0'
     ],
     'devDependencies' => [
+        // Do NOT include ngx-stonescriptphp-client here — the consuming Angular app
+        // provides it. Including it as a devDependency causes npm to install a local
+        // copy inside the generated client's node_modules, shadowing the app's version
+        // and producing TS2345 "duplicate types" errors.
         'typescript' => '^5.8.0',
-        '@progalaxyelabs/ngx-stonescriptphp-client' => '^1.6.0'
     ],
     'files' => [
         'dist',
