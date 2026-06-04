@@ -20,6 +20,7 @@ use StoneScriptPHP\Auth\AuthContext;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes;
 use StoneScriptPHP\Subscriptions\SubscriptionMiddleware;
 use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
+use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
 
 /**
  * Application entry point
@@ -80,6 +81,7 @@ class Application
         $subscriptionConfig = $config['subscription'] ?? [];
         $jwtConfig          = $config['jwt'] ?? [];
         $customMiddleware   = $config['middleware'] ?? [];
+        $storeAccessConfig  = $config['store_access'] ?? [];
 
         $jwtHandler = self::buildJwtHandler($authConfig, $env);
 
@@ -114,6 +116,13 @@ class Application
         // Add SubscriptionMiddleware if subscription config is present
         if (!empty($subscriptionConfig)) {
             $router->use(new SubscriptionMiddleware());
+        }
+
+        // T3 url-tenant: add StoreAccessMiddleware when store_access.enabled is true.
+        // This middleware runs after JwtAuthMiddleware, extracts :storeId from the URL,
+        // validates the identity's membership, and sets GatewayClient tenant_id.
+        if (!empty($storeAccessConfig['enabled'])) {
+            $router->use(new StoreAccessMiddleware($storeAccessConfig));
         }
 
         // Add custom middleware
