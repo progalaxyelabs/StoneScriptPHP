@@ -764,6 +764,11 @@ function filterRoutesByScope(array $routes, ?string $scopeFilter): array {
             return false;
         }
 
+        // Always exclude internal routes — never leak server-to-server paths into generated clients
+        if (str_starts_with($route['path'] ?? '', '/api/internal/')) {
+            return false;
+        }
+
         // If no scope filter, include all non-alias routes
         if ($scopeFilter === null) {
             return true;
@@ -1417,6 +1422,11 @@ function emitKotlin(array $routes, string $outputDir): void {
         $path = $route['path'];
         $handler = $route['handler'];
 
+        // Skip internal routes — never leak server-to-server paths into generated clients
+        if (str_starts_with($path, '/api/internal/')) {
+            $skippedRoutes[] = $route + ['reason' => 'internal route'];
+            continue;
+        }
         // Skip auth routes
         if (str_starts_with($path, '/auth')) {
             $skippedRoutes[] = $route + ['reason' => 'auth route'];

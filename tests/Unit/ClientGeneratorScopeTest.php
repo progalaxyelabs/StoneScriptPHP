@@ -112,6 +112,85 @@ class ClientGeneratorScopeTest extends TestCase
     }
 
     // =========================================================================
+    // /api/internal/ exclusion
+    // =========================================================================
+
+    public function test_filter_excludes_internal_routes_when_no_scope_filter(): void
+    {
+        $routes = [
+            ['path' => '/api/workspaces', 'handler' => 'A', 'scope' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'scope' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/chat/app-builder/response', 'handler' => 'C', 'scope' => 'shared', 'alias' => false],
+        ];
+
+        $filtered = $this->filterRoutesByScope($routes, null);
+        $paths = array_column($filtered, 'path');
+
+        $this->assertCount(1, $filtered);
+        $this->assertContains('/api/workspaces', $paths);
+        $this->assertNotContains('/api/internal/workspace-events', $paths);
+        $this->assertNotContains('/api/internal/chat/app-builder/response', $paths);
+    }
+
+    public function test_filter_excludes_internal_routes_even_with_matching_scope(): void
+    {
+        // Internal routes must be excluded regardless of their declared scope — the
+        // /api/internal/ prefix is an absolute exclusion, not overridable by scope.
+        $routes = [
+            ['path' => '/api/workspaces', 'handler' => 'A', 'scope' => 'portal', 'alias' => false],
+            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'scope' => 'portal', 'alias' => false],
+            ['path' => '/api/internal/chat/app-builder/response', 'handler' => 'C', 'scope' => 'shared', 'alias' => false],
+        ];
+
+        $filtered = $this->filterRoutesByScope($routes, 'portal');
+        $paths = array_column($filtered, 'path');
+
+        $this->assertCount(1, $filtered);
+        $this->assertContains('/api/workspaces', $paths);
+        $this->assertNotContains('/api/internal/workspace-events', $paths);
+        $this->assertNotContains('/api/internal/chat/app-builder/response', $paths);
+    }
+
+    public function test_filter_internal_prefix_is_exact_prefix_match(): void
+    {
+        // /api/internalized or /api/internal-ish should NOT be excluded — only /api/internal/ prefix
+        $routes = [
+            ['path' => '/api/internalized/something', 'handler' => 'A', 'scope' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/', 'handler' => 'B', 'scope' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/workspace-events', 'handler' => 'C', 'scope' => 'shared', 'alias' => false],
+        ];
+
+        $filtered = $this->filterRoutesByScope($routes, null);
+        $paths = array_column($filtered, 'path');
+
+        // /api/internalized/something does NOT start with '/api/internal/' (trailing slash), so it passes through
+        $this->assertContains('/api/internalized/something', $paths);
+        // /api/internal/ itself starts with '/api/internal/' so it is excluded
+        $this->assertNotContains('/api/internal/', $paths);
+        // /api/internal/workspace-events is excluded
+        $this->assertNotContains('/api/internal/workspace-events', $paths);
+    }
+
+    public function test_filter_known_leak_workspace_events_is_excluded(): void
+    {
+        // Regression test: /api/internal/workspace-events was previously emitted as
+        // 'internalWorkspaceEvents' in the generated TypeScript client. Verify it is
+        // now excluded unconditionally — both with and without a scope filter.
+        $routes = [
+            ['path' => '/api/workspaces', 'handler' => 'A', 'scope' => 'portal', 'alias' => false],
+            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'scope' => 'shared', 'alias' => false],
+        ];
+
+        // No scope filter
+        $withoutScope = array_column($this->filterRoutesByScope($routes, null), 'path');
+        $this->assertNotContains('/api/internal/workspace-events', $withoutScope);
+
+        // With scope filter 'portal'
+        $withScope = array_column($this->filterRoutesByScope($routes, 'portal'), 'path');
+        $this->assertNotContains('/api/internal/workspace-events', $withScope);
+    }
+
+    // =========================================================================
     // collectKnownScopes
     // =========================================================================
 
@@ -205,6 +284,10 @@ class ClientGeneratorScopeTest extends TestCase
     {
         $result = array_filter($routes, function($route) use ($scopeFilter) {
             if ($route['alias'] ?? false) {
+                return false;
+            }
+            // Always exclude internal routes — never leak server-to-server paths into generated clients
+            if (str_starts_with($route['path'] ?? '', '/api/internal/')) {
                 return false;
             }
             if ($scopeFilter === null) {
