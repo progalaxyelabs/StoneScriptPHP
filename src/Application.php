@@ -114,11 +114,17 @@ class Application
         $router->use(new GatewayTenantMiddleware());
 
         // T3 url-tenant: StoreAccessMiddleware MUST run before SubscriptionMiddleware.
-        // It extracts :storeId from the URL, validates membership, and sets
-        // GatewayClient tenant_id. SubscriptionMiddleware then has the correct
-        // tenant context for its DB query.
+        // It extracts :storeId from the URL, validates membership via HTTP to the
+        // auth service (source of truth), and sets GatewayClient tenant_id.
         if (!empty($storeAccessConfig['enabled'])) {
-            $router->use(new StoreAccessMiddleware($storeAccessConfig));
+            // Merge auth service URL + platform code from auth config so the
+            // caller doesn't have to repeat them in store_access config.
+            $authRouteOptions = self::buildAuthRouteOptions($authConfig, $env);
+            $resolvedStoreAccessConfig = array_merge([
+                'auth_service_url' => $authRouteOptions['auth_service_url'],
+                'platform_code'    => $authRouteOptions['platform_code'],
+            ], $storeAccessConfig);
+            $router->use(new StoreAccessMiddleware($resolvedStoreAccessConfig));
         }
 
         // Add SubscriptionMiddleware if subscription config is present.
