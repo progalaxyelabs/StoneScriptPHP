@@ -305,7 +305,12 @@ class Database
                 } else if ($p_type === 'DateTime') {
                     $instance->$p_name = new DateTime($row[$row_key]);
                 } else if ($p_type === 'bool') {
-                    $instance->$p_name = ($row[$row_key] === 't');
+                    // Handle BOTH transport modes: StoneScriptDB Gateway mode
+                    // decodes responses via json_decode() so JSON booleans arrive
+                    // as native PHP `true`/`false`; libpq text mode delivers the
+                    // string 't'/'f'. Strict `===` keeps int/string 0/1 from
+                    // leaking through. (NULL is handled by the branch above.)
+                    $instance->$p_name = ($row[$row_key] === true || $row[$row_key] === 't');
                 } else {
                     $instance->$p_name = $row[$row_key];
                 }

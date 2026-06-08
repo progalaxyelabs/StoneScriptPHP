@@ -205,6 +205,52 @@ class DatabaseTest extends TestCase
     }
 
     /**
+     * Test that array_to_class_object converts a native JSON boolean `true`
+     * (StoneScriptDB Gateway mode, post json_decode) to true.
+     *
+     * Regression guard for alert #5418: gateway-mode boolean output columns
+     * were always coerced to false because the mapper only matched libpq text
+     * 't'. Native PHP `true` from json_decode must map to true.
+     */
+    public function test_array_to_class_object_converts_native_json_bool_true(): void
+    {
+        $testClass = new class {
+            public bool $o_inserted = false;
+        };
+
+        $row = ['o_inserted' => true];
+
+        $result = \StoneScriptPHP\Database::array_to_class_object(
+            'upsert_workspace_event',
+            $row,
+            get_class($testClass)
+        );
+
+        $this->assertTrue($result->o_inserted);
+    }
+
+    /**
+     * Test that array_to_class_object converts a native JSON boolean `false`
+     * (StoneScriptDB Gateway mode, post json_decode) to false.
+     */
+    public function test_array_to_class_object_converts_native_json_bool_false(): void
+    {
+        $testClass = new class {
+            public bool $o_inserted = true;
+        };
+
+        $row = ['o_inserted' => false];
+
+        $result = \StoneScriptPHP\Database::array_to_class_object(
+            'upsert_workspace_event',
+            $row,
+            get_class($testClass)
+        );
+
+        $this->assertFalse($result->o_inserted);
+    }
+
+    /**
      * Test that array_to_class_object handles DateTime conversion
      */
     public function test_array_to_class_object_converts_datetime(): void
