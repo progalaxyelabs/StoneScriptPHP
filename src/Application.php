@@ -83,6 +83,10 @@ class Application
         $customMiddleware   = $config['middleware'] ?? [];
         $storeAccessConfig  = $config['store_access'] ?? [];
 
+        // Subscription wiring is gated on BOTH presence AND the 'enabled' flag
+        // (mirrors the store_access gate below). See self::isSubscriptionEnabled(). (#2987)
+        $subscriptionEnabled = self::isSubscriptionEnabled($subscriptionConfig);
+
         $jwtHandler = self::buildJwtHandler($authConfig, $env);
 
         // Build JWT excluded paths from config
@@ -94,7 +98,7 @@ class Application
         }
 
         // Add subscription public paths if subscription module is enabled
-        if (!empty($subscriptionConfig)) {
+        if ($subscriptionEnabled) {
             $jwtExcludedPaths = array_merge(
                 $jwtExcludedPaths,
                 SubscriptionRoutes::publicPaths($subscriptionConfig)
@@ -129,7 +133,7 @@ class Application
 
         // Add SubscriptionMiddleware if subscription config is present.
         // Runs after StoreAccessMiddleware so tenant context is already set (T3).
-        if (!empty($subscriptionConfig)) {
+        if ($subscriptionEnabled) {
             $router->use(new SubscriptionMiddleware());
         }
 
@@ -157,7 +161,7 @@ class Application
         }
 
         // Register subscription routes if subscription config is present
-        if (!empty($subscriptionConfig)) {
+        if ($subscriptionEnabled) {
             SubscriptionRoutes::register($router, array_merge(
                 $subscriptionConfig,
                 ['platform_code' => $authConfig['platform']['code'] ?? $env->PLATFORM_CODE ?? '']
@@ -239,6 +243,27 @@ class Application
             'user=' . $userId,
             'tenant=' . $tenantId,
         ]) . PHP_EOL);
+    }
+
+    /**
+     * Decide whether subscription wiring (SubscriptionMiddleware + routes +
+     * public paths) should be registered.
+     *
+     * Gated on BOTH presence AND the 'enabled' flag, mirroring the store_access
+     * gate. A platform that explicitly sets subscription => ['enabled' => false]
+     * must NOT get the middleware wired: it would call sub_get_status() against a
+     * sub_* schema that was never installed → fail-open error noise on every
+     * authed request, and a latent fail-closed HTTP 402 landmine.
+     *
+     * Back-compat: `?? true` means a subscription config WITHOUT an 'enabled' key
+     * stays ON, exactly as before this gate existed. (#2987)
+     *
+     * @param array $subscriptionConfig The 'subscription' section of the config
+     * @return bool True if subscription wiring should be registered
+     */
+    private static function isSubscriptionEnabled(array $subscriptionConfig): bool
+    {
+        return !empty($subscriptionConfig) && ($subscriptionConfig['enabled'] ?? true);
     }
 
     /**
