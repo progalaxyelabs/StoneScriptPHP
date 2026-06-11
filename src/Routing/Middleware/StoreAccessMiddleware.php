@@ -157,9 +157,19 @@ class StoreAccessMiddleware implements MiddlewareInterface
             throw new \RuntimeException('Auth service returned invalid JSON (HTTP ' . $httpCode . ')');
         }
 
-        // Auth service returns: {"status":"ok","data":{"memberships":[...]}}
-        if ($httpCode >= 200 && $httpCode < 300 && ($decoded['status'] ?? '') === 'ok') {
-            return $decoded['data']['memberships'] ?? [];
+        // The auth server (progalaxyelabs-auth) returns its native flat shape
+        // {"memberships":[...]}. Older/enveloped responses use
+        // {"status":"ok","data":{"memberships":[...]}}. Accept either so the middleware
+        // doesn't 500 on the live auth contract (AUTH-SPEC §6 — /api/auth/memberships
+        // is a flat {memberships}).
+        if ($httpCode >= 200 && $httpCode < 300) {
+            if (isset($decoded['memberships']) && is_array($decoded['memberships'])) {
+                return $decoded['memberships'];
+            }
+            if (isset($decoded['data']['memberships']) && is_array($decoded['data']['memberships'])) {
+                return $decoded['data']['memberships'];
+            }
+            return [];
         }
 
         throw new \RuntimeException(
