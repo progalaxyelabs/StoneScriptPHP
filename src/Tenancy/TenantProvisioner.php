@@ -59,86 +59,26 @@ abstract class TenantProvisioner
     }
 
     /**
-     * Register tenant with auth service via HTTP (POST /api/internal/create-tenant).
+     * Tenant-record registration step (no-op).
      *
-     * Replaces the previous direct DB write via Database::fn('create_tenant') which
-     * violated the cross-service DB boundary. Auth service now owns the tenant record.
+     * The auth server has NO `/api/internal/create-tenant` endpoint — it never did
+     * (AUTH-SPEC §5a leaves the mechanism unspecified; the auth server exposes
+     * `POST /api/internal/create-membership`, which calls `auth_register_account` and
+     * creates BOTH the tenant record AND the owner membership in one call). That
+     * create-membership call is already made by ProvisionTenantRoute (step 4, via
+     * `$this->client->createMembership($data, $secret)`), so it owns tenant+membership
+     * registration end-to-end.
      *
-     * Idempotent — if the slug already exists for the same identity, auth returns
-     * {created: false, tenant_id, tenant_db_schema}. Different identity with same slug
-     * returns 422 (ValidationException).
+     * The previous implementation POSTed to a non-existent `/api/internal/create-tenant`
+     * and 500'd every provision-tenant. This step is therefore a no-op: the platform's
+     * generated `tenant_id` / `tenant_db_schema` flow unchanged to createDatabase() and
+     * then to the route's create-membership. Override per-platform only if a platform
+     * genuinely needs a separate pre-registration step.
      *
-     * Returns updated $data with canonical tenant_id and tenant_db_schema from auth service.
-     *
-     * @throws \RuntimeException If AUTH_SERVICE_URL or EXTERNAL_AUTH_CLIENT_SECRET missing
-     * @throws \StoneScriptPHP\Exceptions\ValidationException If slug/name already taken by different identity
+     * @return array Unchanged $data.
      */
     protected function createTenantRecord(array $data): array
     {
-        $authUrl = rtrim($this->authServiceUrl ?: ($_SERVER['AUTH_SERVICE_URL'] ?? ''), '/');
-        $secret  = $this->platformSecret ?: ($_SERVER['EXTERNAL_AUTH_CLIENT_SECRET'] ?? '');
-
-        if (!$authUrl || !$secret) {
-            throw new \RuntimeException('TenantProvisioner: AUTH_SERVICE_URL and EXTERNAL_AUTH_CLIENT_SECRET are required');
-        }
-
-        $payload = json_encode([
-            'tenant_id'        => $data['tenant_id'],
-            'tenant_name'      => $data['tenant_name'],
-            'tenant_slug'      => $data['tenant_slug'],
-            'tenant_db_schema' => $data['tenant_db_schema'],
-            'identity_id'      => $data['identity_id'],
-            'platform_code'    => $data['platform_code'],
-            'biz_type'         => $data['biz_type'] ?? null,
-            // business profile fields (all optional)
-            'address'          => $data['address'] ?? null,
-            'city'             => $data['city'] ?? null,
-            'state'            => $data['state'] ?? null,
-            'pincode'          => $data['pincode'] ?? null,
-            'country'          => $data['country'] ?? null,
-            'phone'            => $data['phone'] ?? null,
-            'email'            => $data['email'] ?? null,
-        ]);
-
-        $ch = curl_init("$authUrl/api/internal/create-tenant");
-        curl_setopt_array($ch, [
-            CURLOPT_POST            => true,
-            CURLOPT_POSTFIELDS      => $payload,
-            CURLOPT_RETURNTRANSFER  => true,
-            CURLOPT_HTTPHEADER      => [
-                'Content-Type: application/json',
-                'X-Platform-Secret: ' . $secret,
-            ],
-            CURLOPT_TIMEOUT         => 15,
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($httpCode < 200 || $httpCode >= 300) {
-            log_error("TenantProvisioner: create-tenant HTTP $httpCode: $response");
-            $decoded = json_decode($response, true);
-            $msg = $decoded['message'] ?? 'Failed to register tenant with auth service';
-            // Preserve ValidationException semantics for duplicate slug/name
-            if ($httpCode === 422) {
-                throw new \StoneScriptPHP\Exceptions\ValidationException(
-                    $decoded['errors'] ?? [],
-                    $msg
-                );
-            }
-            throw new \RuntimeException($msg);
-        }
-
-        $result = json_decode($response, true);
-        if (!isset($result['data']['tenant_id'])) {
-            throw new \RuntimeException('TenantProvisioner: auth create-tenant returned no tenant_id');
-        }
-
-        $data['tenant_id']        = $result['data']['tenant_id'];
-        $data['tenant_db_schema'] = $result['data']['tenant_db_schema'];
-
-        log_info("TenantProvisioner: Registered tenant {$data['tenant_id']} slug={$data['tenant_slug']} via auth HTTP");
         return $data;
     }
 
