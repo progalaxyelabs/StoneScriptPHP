@@ -120,6 +120,9 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             'pincode'          => $this->pincode,
             'country'          => $this->country,
             'role'             => 'owner',
+            // AUTH-SPEC §5a/S9 — threaded to create-membership so auth can dedup
+            // on replay and return the existing tenant instead of double-creating.
+            'idempotency_key'  => $this->idempotency_key,
         ];
 
         // 3. Run provisioning — prefer class-based provisioner over legacy hooks
@@ -193,16 +196,26 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // tenant_db_schema, role, roles, is_new_tenant.
         $tenantSlug = $data['tenant_slug'] ?? ($result['tenant_slug'] ?? null);
 
-        return new ApiResponse('ok', 'Tenant created', [
+        // AUTH-SPEC §5a/S9 idempotent replay: when the same idempotency_key is reused,
+        // auth returns is_new_tenant=false + the EXISTING tenant_id. Honor that —
+        // surface the existing tenant_id and respond 200 "Tenant already provisioned"
+        // (not 201, not the locally-generated tenant_id).
+        $isNewTenant      = $result['is_new_tenant'] ?? true;
+        $effectiveTenantId = $result['tenant_id'] ?? $data['tenant_id'];
+        $effectiveDbSchema = $result['tenant_db_schema'] ?? $result['db_schema'] ?? $data['tenant_db_schema'];
+        $statusCode = $isNewTenant ? 201 : 200;
+        $message    = $isNewTenant ? 'Tenant created' : 'Tenant already provisioned';
+
+        return new ApiResponse('ok', $message, [
             'access_token'  => $result['access_token']  ?? null,
             'refresh_token' => $result['refresh_token'] ?? null,
             'token_type'    => $result['token_type']    ?? 'Bearer',
             'expires_in'    => $result['expires_in']    ?? 3600,
             'tenant' => [
-                'id'        => $data['tenant_id'],
+                'id'        => $effectiveTenantId,
                 'name'      => $data['tenant_name'],
                 'slug'      => $tenantSlug,
-                'db_schema' => $data['tenant_db_schema'],
+                'db_schema' => $effectiveDbSchema,
             ],
             'identity' => [
                 'id'           => $identityId,
@@ -211,11 +224,11 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             ],
             'membership' => [
                 'id'        => $result['membership_id'] ?? null,
-                'tenant_id' => $data['tenant_id'],
+                'tenant_id' => $effectiveTenantId,
                 'role'      => $result['role']          ?? 'owner',
                 'roles'     => $result['roles']         ?? ['owner'],
             ],
-        ], 201);
+        ], $statusCode);
     }
 
     /**
