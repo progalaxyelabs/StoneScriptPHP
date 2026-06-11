@@ -107,6 +107,19 @@ class ExchangeRoute extends BaseExternalAuthRoute
             );
         }
 
+        // AUTH-SPEC §4c: exchange "reads tenant_id ... directly from the identity JWT
+        // [and] Rejects tenant-less JWTs with invalid_identity_token." A tenant-less
+        // token has not been through select-tenant/accept-invite yet — nothing to
+        // exchange. (T1/T3 never call exchange; this guards a misrouted T2 call.)
+        if (empty($claims['tenant_id'])) {
+            return new ApiResponse(
+                'error',
+                'Identity token has no tenant context — call select-tenant first',
+                ['error' => 'invalid_identity_token'],
+                401
+            );
+        }
+
         // 3. Resolve platform roles. A missing resolver is a configuration error —
         //    never guess roles.
         if ($this->rolesResolver === null) {
