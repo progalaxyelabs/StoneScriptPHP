@@ -7,13 +7,13 @@ namespace Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Tests for client generator scope support.
+ * Tests for client generator service/route filtering support (v4.0).
  *
- * Loads generate-client.php functions and tests:
- * - filterRoutesByScope()
- * - collectKnownScopes()
- * - extractResourceName() with scope prefixes
- * - pathToMethodName() with scope prefixes
+ * Tests:
+ * - filterRoutesByService()
+ * - collectKnownServices()
+ * - extractResourceName() with service prefixes
+ * - pathToMethodName() with service prefixes
  */
 class ClientGeneratorScopeTest extends TestCase
 {
@@ -22,56 +22,42 @@ class ClientGeneratorScopeTest extends TestCase
     public static function setUpBeforeClass(): void
     {
         if (!self::$functionsLoaded) {
-            // Load just the functions from generate-client.php without executing main code
-            // We need to define ROOT_PATH and SRC_PATH if not already defined
             if (!defined('ROOT_PATH')) {
                 define('ROOT_PATH', realpath(__DIR__ . '/../..') . DIRECTORY_SEPARATOR);
             }
-            // SRC_PATH may already be defined from bootstrap
-            if (!defined('SRC_PATH_CLIENT_GEN')) {
-                // We can't re-define SRC_PATH, so the existing one from bootstrap works fine
-            }
-
-            // Source the file to get the functions, but we need to prevent
-            // the main execution at the bottom. We'll use a workaround:
-            // extract just the function definitions.
             self::$functionsLoaded = true;
-
-            // Define the functions inline since we can't safely require the CLI file
-            // (it has executable code at the bottom that would run).
-            // Instead, we test the pure logic by reimplementing the key functions here.
         }
     }
 
     // =========================================================================
-    // filterRoutesByScope
+    // filterRoutesByService
     // =========================================================================
 
-    public function test_filter_no_scope_returns_all_non_alias_routes(): void
+    public function test_filter_no_service_returns_all_non_alias_routes(): void
     {
         $routes = [
-            ['path' => '/health', 'handler' => 'A', 'scope' => 'shared', 'alias' => false],
-            ['path' => '/portal/dashboard', 'handler' => 'B', 'scope' => 'portal', 'alias' => false],
-            ['path' => '/admin/users', 'handler' => 'C', 'scope' => 'admin', 'alias' => false],
-            ['path' => '/old-dashboard', 'handler' => 'B', 'scope' => 'portal', 'alias' => true],
+            ['path' => '/health', 'handler' => 'A', 'service' => 'shared', 'alias' => false],
+            ['path' => '/portal/dashboard', 'handler' => 'B', 'service' => 'portal', 'alias' => false],
+            ['path' => '/admin/users', 'handler' => 'C', 'service' => 'admin', 'alias' => false],
+            ['path' => '/old-dashboard', 'handler' => 'B', 'service' => 'portal', 'alias' => true],
         ];
 
-        $filtered = $this->filterRoutesByScope($routes, null);
+        $filtered = $this->filterRoutesByService($routes, null);
         $this->assertCount(3, $filtered);
         $this->assertNotContains('/old-dashboard', array_column($filtered, 'path'));
     }
 
-    public function test_filter_portal_scope_includes_portal_and_shared(): void
+    public function test_filter_portal_service_includes_portal_and_shared(): void
     {
         $routes = [
-            ['path' => '/health', 'handler' => 'A', 'scope' => 'shared', 'alias' => false],
-            ['path' => '/auth/profile', 'handler' => 'B', 'scope' => 'shared', 'alias' => false],
-            ['path' => '/portal/dashboard', 'handler' => 'C', 'scope' => 'portal', 'alias' => false],
-            ['path' => '/portal/invoices', 'handler' => 'D', 'scope' => 'portal', 'alias' => false],
-            ['path' => '/admin/users', 'handler' => 'E', 'scope' => 'admin', 'alias' => false],
+            ['path' => '/health', 'handler' => 'A', 'service' => 'shared', 'alias' => false],
+            ['path' => '/auth/profile', 'handler' => 'B', 'service' => 'shared', 'alias' => false],
+            ['path' => '/portal/dashboard', 'handler' => 'C', 'service' => 'portal', 'alias' => false],
+            ['path' => '/portal/invoices', 'handler' => 'D', 'service' => 'portal', 'alias' => false],
+            ['path' => '/admin/users', 'handler' => 'E', 'service' => 'admin', 'alias' => false],
         ];
 
-        $filtered = $this->filterRoutesByScope($routes, 'portal');
+        $filtered = $this->filterRoutesByService($routes, 'portal');
         $paths = array_column($filtered, 'path');
 
         $this->assertContains('/health', $paths);
@@ -81,16 +67,16 @@ class ClientGeneratorScopeTest extends TestCase
         $this->assertNotContains('/admin/users', $paths);
     }
 
-    public function test_filter_admin_scope_includes_admin_and_shared(): void
+    public function test_filter_admin_service_includes_admin_and_shared(): void
     {
         $routes = [
-            ['path' => '/health', 'handler' => 'A', 'scope' => 'shared', 'alias' => false],
-            ['path' => '/portal/dashboard', 'handler' => 'B', 'scope' => 'portal', 'alias' => false],
-            ['path' => '/admin/users', 'handler' => 'C', 'scope' => 'admin', 'alias' => false],
-            ['path' => '/admin/settings', 'handler' => 'D', 'scope' => 'admin', 'alias' => false],
+            ['path' => '/health', 'handler' => 'A', 'service' => 'shared', 'alias' => false],
+            ['path' => '/portal/dashboard', 'handler' => 'B', 'service' => 'portal', 'alias' => false],
+            ['path' => '/admin/users', 'handler' => 'C', 'service' => 'admin', 'alias' => false],
+            ['path' => '/admin/settings', 'handler' => 'D', 'service' => 'admin', 'alias' => false],
         ];
 
-        $filtered = $this->filterRoutesByScope($routes, 'admin');
+        $filtered = $this->filterRoutesByService($routes, 'admin');
         $paths = array_column($filtered, 'path');
 
         $this->assertContains('/health', $paths);
@@ -99,14 +85,14 @@ class ClientGeneratorScopeTest extends TestCase
         $this->assertNotContains('/portal/dashboard', $paths);
     }
 
-    public function test_filter_excludes_aliases_even_with_scope_match(): void
+    public function test_filter_excludes_aliases_even_with_service_match(): void
     {
         $routes = [
-            ['path' => '/portal/dashboard', 'handler' => 'A', 'scope' => 'portal', 'alias' => false],
-            ['path' => '/dashboard', 'handler' => 'A', 'scope' => 'portal', 'alias' => true],
+            ['path' => '/portal/dashboard', 'handler' => 'A', 'service' => 'portal', 'alias' => false],
+            ['path' => '/dashboard', 'handler' => 'A', 'service' => 'portal', 'alias' => true],
         ];
 
-        $filtered = $this->filterRoutesByScope($routes, 'portal');
+        $filtered = $this->filterRoutesByService($routes, 'portal');
         $this->assertCount(1, $filtered);
         $this->assertEquals('/portal/dashboard', $filtered[0]['path']);
     }
@@ -115,15 +101,15 @@ class ClientGeneratorScopeTest extends TestCase
     // /api/internal/ exclusion
     // =========================================================================
 
-    public function test_filter_excludes_internal_routes_when_no_scope_filter(): void
+    public function test_filter_excludes_internal_routes_when_no_service_filter(): void
     {
         $routes = [
-            ['path' => '/api/workspaces', 'handler' => 'A', 'scope' => 'shared', 'alias' => false],
-            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'scope' => 'shared', 'alias' => false],
-            ['path' => '/api/internal/chat/app-builder/response', 'handler' => 'C', 'scope' => 'shared', 'alias' => false],
+            ['path' => '/api/workspaces', 'handler' => 'A', 'service' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'service' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/chat/app-builder/response', 'handler' => 'C', 'service' => 'shared', 'alias' => false],
         ];
 
-        $filtered = $this->filterRoutesByScope($routes, null);
+        $filtered = $this->filterRoutesByService($routes, null);
         $paths = array_column($filtered, 'path');
 
         $this->assertCount(1, $filtered);
@@ -132,17 +118,17 @@ class ClientGeneratorScopeTest extends TestCase
         $this->assertNotContains('/api/internal/chat/app-builder/response', $paths);
     }
 
-    public function test_filter_excludes_internal_routes_even_with_matching_scope(): void
+    public function test_filter_excludes_internal_routes_even_with_matching_service(): void
     {
-        // Internal routes must be excluded regardless of their declared scope — the
-        // /api/internal/ prefix is an absolute exclusion, not overridable by scope.
+        // Internal routes must be excluded regardless of their declared service — the
+        // /api/internal/ prefix is an absolute exclusion, not overridable by service.
         $routes = [
-            ['path' => '/api/workspaces', 'handler' => 'A', 'scope' => 'portal', 'alias' => false],
-            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'scope' => 'portal', 'alias' => false],
-            ['path' => '/api/internal/chat/app-builder/response', 'handler' => 'C', 'scope' => 'shared', 'alias' => false],
+            ['path' => '/api/workspaces', 'handler' => 'A', 'service' => 'portal', 'alias' => false],
+            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'service' => 'portal', 'alias' => false],
+            ['path' => '/api/internal/chat/app-builder/response', 'handler' => 'C', 'service' => 'shared', 'alias' => false],
         ];
 
-        $filtered = $this->filterRoutesByScope($routes, 'portal');
+        $filtered = $this->filterRoutesByService($routes, 'portal');
         $paths = array_column($filtered, 'path');
 
         $this->assertCount(1, $filtered);
@@ -155,12 +141,12 @@ class ClientGeneratorScopeTest extends TestCase
     {
         // /api/internalized or /api/internal-ish should NOT be excluded — only /api/internal/ prefix
         $routes = [
-            ['path' => '/api/internalized/something', 'handler' => 'A', 'scope' => 'shared', 'alias' => false],
-            ['path' => '/api/internal/', 'handler' => 'B', 'scope' => 'shared', 'alias' => false],
-            ['path' => '/api/internal/workspace-events', 'handler' => 'C', 'scope' => 'shared', 'alias' => false],
+            ['path' => '/api/internalized/something', 'handler' => 'A', 'service' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/', 'handler' => 'B', 'service' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/workspace-events', 'handler' => 'C', 'service' => 'shared', 'alias' => false],
         ];
 
-        $filtered = $this->filterRoutesByScope($routes, null);
+        $filtered = $this->filterRoutesByService($routes, null);
         $paths = array_column($filtered, 'path');
 
         // /api/internalized/something does NOT start with '/api/internal/' (trailing slash), so it passes through
@@ -175,114 +161,114 @@ class ClientGeneratorScopeTest extends TestCase
     {
         // Regression test: /api/internal/workspace-events was previously emitted as
         // 'internalWorkspaceEvents' in the generated TypeScript client. Verify it is
-        // now excluded unconditionally — both with and without a scope filter.
+        // now excluded unconditionally — both with and without a service filter.
         $routes = [
-            ['path' => '/api/workspaces', 'handler' => 'A', 'scope' => 'portal', 'alias' => false],
-            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'scope' => 'shared', 'alias' => false],
+            ['path' => '/api/workspaces', 'handler' => 'A', 'service' => 'portal', 'alias' => false],
+            ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'service' => 'shared', 'alias' => false],
         ];
 
-        // No scope filter
-        $withoutScope = array_column($this->filterRoutesByScope($routes, null), 'path');
-        $this->assertNotContains('/api/internal/workspace-events', $withoutScope);
+        // No service filter
+        $withoutFilter = array_column($this->filterRoutesByService($routes, null), 'path');
+        $this->assertNotContains('/api/internal/workspace-events', $withoutFilter);
 
-        // With scope filter 'portal'
-        $withScope = array_column($this->filterRoutesByScope($routes, 'portal'), 'path');
-        $this->assertNotContains('/api/internal/workspace-events', $withScope);
+        // With service filter 'portal'
+        $withFilter = array_column($this->filterRoutesByService($routes, 'portal'), 'path');
+        $this->assertNotContains('/api/internal/workspace-events', $withFilter);
     }
 
     // =========================================================================
-    // collectKnownScopes
+    // collectKnownServices
     // =========================================================================
 
-    public function test_collect_known_scopes(): void
+    public function test_collect_known_services(): void
     {
         $routes = [
-            ['scope' => 'shared'],
-            ['scope' => 'portal'],
-            ['scope' => 'admin'],
-            ['scope' => 'portal'],
-            ['scope' => 'shared'],
+            ['service' => 'shared'],
+            ['service' => 'portal'],
+            ['service' => 'admin'],
+            ['service' => 'portal'],
+            ['service' => 'shared'],
         ];
 
-        $scopes = $this->collectKnownScopes($routes);
-        $this->assertCount(3, $scopes);
-        $this->assertContains('shared', $scopes);
-        $this->assertContains('portal', $scopes);
-        $this->assertContains('admin', $scopes);
+        $services = $this->collectKnownServices($routes);
+        $this->assertCount(3, $services);
+        $this->assertContains('shared', $services);
+        $this->assertContains('portal', $services);
+        $this->assertContains('admin', $services);
     }
 
     // =========================================================================
-    // extractResourceName with scope stripping
+    // extractResourceName with service prefix stripping
     // =========================================================================
 
-    public function test_extract_resource_no_scope(): void
+    public function test_extract_resource_no_service(): void
     {
         $this->assertEquals('health', $this->extractResourceName('/health', []));
         $this->assertEquals('auth', $this->extractResourceName('/auth/login', []));
         $this->assertEquals('projects', $this->extractResourceName('/projects/create', []));
     }
 
-    public function test_extract_resource_strips_scope_prefix(): void
+    public function test_extract_resource_strips_service_prefix(): void
     {
-        $scopes = ['portal', 'admin'];
+        $services = ['portal', 'admin'];
 
-        $this->assertEquals('invoices', $this->extractResourceName('/portal/invoices', $scopes));
-        $this->assertEquals('dashboard', $this->extractResourceName('/portal/dashboard', $scopes));
-        $this->assertEquals('tenants', $this->extractResourceName('/admin/tenants', $scopes));
-        $this->assertEquals('users', $this->extractResourceName('/admin/users', $scopes));
+        $this->assertEquals('invoices', $this->extractResourceName('/portal/invoices', $services));
+        $this->assertEquals('dashboard', $this->extractResourceName('/portal/dashboard', $services));
+        $this->assertEquals('tenants', $this->extractResourceName('/admin/tenants', $services));
+        $this->assertEquals('users', $this->extractResourceName('/admin/users', $services));
     }
 
-    public function test_extract_resource_no_strip_when_not_scope(): void
+    public function test_extract_resource_no_strip_when_not_service(): void
     {
-        $scopes = ['portal', 'admin'];
+        $services = ['portal', 'admin'];
 
-        // 'auth' is not a known scope, so keep as-is
-        $this->assertEquals('auth', $this->extractResourceName('/auth/profile', $scopes));
-        $this->assertEquals('health', $this->extractResourceName('/health', $scopes));
+        // 'auth' is not a known service, so keep as-is
+        $this->assertEquals('auth', $this->extractResourceName('/auth/profile', $services));
+        $this->assertEquals('health', $this->extractResourceName('/health', $services));
     }
 
     public function test_extract_resource_camelcase(): void
     {
-        $scopes = ['portal'];
-        $this->assertEquals('customerBills', $this->extractResourceName('/portal/customer-bills', $scopes));
+        $services = ['portal'];
+        $this->assertEquals('customerBills', $this->extractResourceName('/portal/customer-bills', $services));
     }
 
     // =========================================================================
-    // pathToMethodName with scope stripping
+    // pathToMethodName with service prefix stripping
     // =========================================================================
 
-    public function test_path_to_method_strips_scope(): void
+    public function test_path_to_method_strips_service(): void
     {
-        $scopes = ['portal', 'admin'];
+        $services = ['portal', 'admin'];
 
         // /portal/invoices + GET -> list (strip portal, resource=invoices, no remaining parts)
-        $this->assertEquals('list', $this->pathToMethodName('/portal/invoices', 'GET', $scopes));
+        $this->assertEquals('list', $this->pathToMethodName('/portal/invoices', 'GET', $services));
 
         // /portal/invoices/create + POST -> create
-        $this->assertEquals('create', $this->pathToMethodName('/portal/invoices/create', 'POST', $scopes));
+        $this->assertEquals('create', $this->pathToMethodName('/portal/invoices/create', 'POST', $services));
 
         // /admin/users/:id + GET -> getById
-        $this->assertEquals('getById', $this->pathToMethodName('/admin/users/:id', 'GET', $scopes));
+        $this->assertEquals('getById', $this->pathToMethodName('/admin/users/:id', 'GET', $services));
     }
 
-    public function test_path_to_method_no_scope_stripping(): void
+    public function test_path_to_method_no_service_stripping(): void
     {
-        $scopes = ['portal'];
+        $services = ['portal'];
 
-        // /auth/login -> no stripping ('auth' is not a scope)
-        $this->assertEquals('login', $this->pathToMethodName('/auth/login', 'POST', $scopes));
+        // /auth/login -> no stripping ('auth' is not a service)
+        $this->assertEquals('login', $this->pathToMethodName('/auth/login', 'POST', $services));
 
         // /health -> list
-        $this->assertEquals('list', $this->pathToMethodName('/health', 'GET', $scopes));
+        $this->assertEquals('list', $this->pathToMethodName('/health', 'GET', $services));
     }
 
     // =========================================================================
     // Helper implementations (mirrors the functions from generate-client.php)
     // =========================================================================
 
-    private function filterRoutesByScope(array $routes, ?string $scopeFilter): array
+    private function filterRoutesByService(array $routes, ?string $serviceFilter): array
     {
-        $result = array_filter($routes, function($route) use ($scopeFilter) {
+        $result = array_filter($routes, function($route) use ($serviceFilter) {
             if ($route['alias'] ?? false) {
                 return false;
             }
@@ -290,33 +276,33 @@ class ClientGeneratorScopeTest extends TestCase
             if (str_starts_with($route['path'] ?? '', '/api/internal/')) {
                 return false;
             }
-            if ($scopeFilter === null) {
+            if ($serviceFilter === null) {
                 return true;
             }
-            $routeScope = $route['scope'] ?? 'shared';
-            return $routeScope === $scopeFilter || $routeScope === 'shared';
+            $routeService = $route['service'] ?? 'shared';
+            return $routeService === $serviceFilter || $routeService === 'shared';
         });
         return array_values($result);
     }
 
-    private function collectKnownScopes(array $routes): array
+    private function collectKnownServices(array $routes): array
     {
-        $scopes = [];
+        $services = [];
         foreach ($routes as $route) {
-            $scope = $route['scope'] ?? 'shared';
-            if (!in_array($scope, $scopes)) {
-                $scopes[] = $scope;
+            $service = $route['service'] ?? 'shared';
+            if (!in_array($service, $services)) {
+                $services[] = $service;
             }
         }
-        return $scopes;
+        return $services;
     }
 
-    private function extractResourceName(string $path, array $knownScopes): string
+    private function extractResourceName(string $path, array $knownServices): string
     {
         $path = trim($path, '/');
         $parts = explode('/', $path);
 
-        if (count($parts) > 1 && in_array($parts[0], $knownScopes)) {
+        if (count($parts) > 1 && in_array($parts[0], $knownServices)) {
             $name = $parts[1] ?: 'root';
         } else {
             $name = $parts[0] ?: 'root';
@@ -330,13 +316,13 @@ class ClientGeneratorScopeTest extends TestCase
         return $name;
     }
 
-    private function pathToMethodName(string $path, string $method, array $knownScopes = []): string
+    private function pathToMethodName(string $path, string $method, array $knownServices = []): string
     {
         $path = trim($path, '/');
         $parts = explode('/', $path);
 
-        // Strip scope prefix
-        if (count($parts) > 1 && in_array($parts[0], $knownScopes)) {
+        // Strip service prefix
+        if (count($parts) > 1 && in_array($parts[0], $knownServices)) {
             array_shift($parts);
         }
 

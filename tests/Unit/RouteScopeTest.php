@@ -11,12 +11,12 @@ use StoneScriptPHP\Routing\ScopeMiddlewareBuilder;
 use StoneScriptPHP\Routing\MiddlewarePipeline;
 
 /**
- * Tests for route scope support:
+ * Tests for route service support (v4.0):
  * - RouteEntry value object
  * - Router::normalizeRouteConfig()
- * - Router::loadRoutes() with scope-aware formats
- * - Router::scope() for scope middleware
- * - Scope filtering for client generation
+ * - Router::loadRoutes() with service-aware formats
+ * - Router::scope() for service middleware
+ * - Service filtering for client generation
  */
 class RouteScopeTest extends TestCase
 {
@@ -28,20 +28,20 @@ class RouteScopeTest extends TestCase
     {
         $entry = new RouteEntry(handler: 'App\\Routes\\HomeRoute');
         $this->assertEquals('App\\Routes\\HomeRoute', $entry->handler);
-        $this->assertEquals('shared', $entry->scope);
+        $this->assertEquals('shared', $entry->service);
         $this->assertFalse($entry->isAlias);
     }
 
-    public function test_route_entry_with_scope(): void
+    public function test_route_entry_with_service(): void
     {
-        $entry = new RouteEntry(handler: 'App\\Routes\\DashboardRoute', scope: 'portal');
-        $this->assertEquals('portal', $entry->scope);
+        $entry = new RouteEntry(handler: 'App\\Routes\\DashboardRoute', service: 'portal');
+        $this->assertEquals('portal', $entry->service);
         $this->assertFalse($entry->isAlias);
     }
 
     public function test_route_entry_alias(): void
     {
-        $entry = new RouteEntry(handler: 'App\\Routes\\DashboardRoute', scope: 'portal', isAlias: true);
+        $entry = new RouteEntry(handler: 'App\\Routes\\DashboardRoute', service: 'portal', isAlias: true);
         $this->assertTrue($entry->isAlias);
     }
 
@@ -49,6 +49,14 @@ class RouteScopeTest extends TestCase
     {
         $entry = new RouteEntry(handler: 'App\\Routes\\HomeRoute');
         $this->assertEquals('App\\Routes\\HomeRoute', $entry->getHandlerClass());
+    }
+
+    public function test_route_entry_has_no_scope_field(): void
+    {
+        $entry = new RouteEntry(handler: 'App\\Routes\\HomeRoute', service: 'portal');
+        // v4.0: scope field removed — only service exists
+        $this->assertFalse(property_exists($entry, 'scope'));
+        $this->assertEquals('portal', $entry->service);
     }
 
     // =========================================================================
@@ -59,18 +67,18 @@ class RouteScopeTest extends TestCase
     {
         $entry = Router::normalizeRouteConfig('App\\Routes\\HomeRoute');
         $this->assertEquals('App\\Routes\\HomeRoute', $entry->handler);
-        $this->assertEquals('shared', $entry->scope);
+        $this->assertEquals('shared', $entry->service);
         $this->assertFalse($entry->isAlias);
     }
 
-    public function test_normalize_array_handler_with_scope(): void
+    public function test_normalize_array_handler_with_service(): void
     {
         $entry = Router::normalizeRouteConfig([
             'handler' => 'App\\Routes\\DashboardRoute',
-            'scope' => 'portal',
+            'service' => 'portal',
         ]);
         $this->assertEquals('App\\Routes\\DashboardRoute', $entry->handler);
-        $this->assertEquals('portal', $entry->scope);
+        $this->assertEquals('portal', $entry->service);
         $this->assertFalse($entry->isAlias);
     }
 
@@ -78,7 +86,7 @@ class RouteScopeTest extends TestCase
     {
         $entry = Router::normalizeRouteConfig([
             'handler' => 'App\\Routes\\DashboardRoute',
-            'scope' => 'portal',
+            'service' => 'portal',
             'alias' => true,
         ]);
         $this->assertTrue($entry->isAlias);
@@ -89,12 +97,12 @@ class RouteScopeTest extends TestCase
         $entry = Router::normalizeRouteConfig([
             'handler' => 'App\\Routes\\ProfileRoute',
         ]);
-        $this->assertEquals('shared', $entry->scope);
+        $this->assertEquals('shared', $entry->service);
         $this->assertFalse($entry->isAlias);
     }
 
     // =========================================================================
-    // Router::loadRoutes() with mixed formats
+    // Router::loadRoutes() with multiple formats
     // =========================================================================
 
     public function test_load_routes_legacy_flat_format(): void
@@ -109,19 +117,19 @@ class RouteScopeTest extends TestCase
 
         $meta = $router->getRouteMeta();
         $this->assertCount(2, $meta);
-        // All legacy routes default to scope 'shared'
-        $this->assertEquals('shared', $meta[0]['scope']);
-        $this->assertEquals('shared', $meta[1]['scope']);
+        // All legacy routes default to service 'shared'
+        $this->assertEquals('shared', $meta[0]['service']);
+        $this->assertEquals('shared', $meta[1]['service']);
     }
 
-    public function test_load_routes_with_scope_in_values(): void
+    public function test_load_routes_with_service_in_values(): void
     {
         $router = new Router();
         $router->loadRoutes([
             'GET' => [
                 '/health' => 'App\\Routes\\HealthRoute',
-                '/portal/dashboard' => ['handler' => 'App\\Routes\\DashboardRoute', 'scope' => 'portal'],
-                '/admin/users' => ['handler' => 'App\\Routes\\AdminUsersRoute', 'scope' => 'admin'],
+                '/portal/dashboard' => ['handler' => 'App\\Routes\\DashboardRoute', 'service' => 'portal'],
+                '/admin/users' => ['handler' => 'App\\Routes\\AdminUsersRoute', 'service' => 'admin'],
             ],
         ]);
 
@@ -133,45 +141,25 @@ class RouteScopeTest extends TestCase
             $byPath[$m['path']] = $m;
         }
 
-        $this->assertEquals('shared', $byPath['/health']['scope']);
-        $this->assertEquals('portal', $byPath['/portal/dashboard']['scope']);
-        $this->assertEquals('admin', $byPath['/admin/users']['scope']);
+        $this->assertEquals('shared', $byPath['/health']['service']);
+        $this->assertEquals('portal', $byPath['/portal/dashboard']['service']);
+        $this->assertEquals('admin', $byPath['/admin/users']['service']);
     }
 
-    public function test_load_routes_with_top_level_scopes_key(): void
-    {
-        $router = new Router();
-        $router->loadRoutes([
-            'scopes' => ['portal', 'admin', 'shared'],
-            'GET' => [
-                '/health' => 'App\\Routes\\HealthRoute',
-                '/portal/dashboard' => ['handler' => 'App\\Routes\\DashboardRoute', 'scope' => 'portal'],
-            ],
-        ]);
-
-        $meta = $router->getRouteMeta();
-        $this->assertCount(2, $meta);
-
-        $scopes = $router->getKnownScopes();
-        $this->assertContains('portal', $scopes);
-        $this->assertContains('admin', $scopes);
-        $this->assertContains('shared', $scopes);
-    }
-
-    public function test_load_routes_public_protected_format_with_scope(): void
+    public function test_load_routes_public_protected_format_with_service(): void
     {
         $router = new Router();
         $router->loadRoutes([
             'public' => [
                 'GET' => [
                     '/health' => 'App\\Routes\\HealthRoute',
-                    '/portal/status' => ['handler' => 'App\\Routes\\StatusRoute', 'scope' => 'portal'],
+                    '/portal/status' => ['handler' => 'App\\Routes\\StatusRoute', 'service' => 'portal'],
                 ],
             ],
             'protected' => [
                 'GET' => [
-                    '/portal/dashboard' => ['handler' => 'App\\Routes\\DashboardRoute', 'scope' => 'portal'],
-                    '/admin/users' => ['handler' => 'App\\Routes\\AdminUsersRoute', 'scope' => 'admin'],
+                    '/portal/dashboard' => ['handler' => 'App\\Routes\\DashboardRoute', 'service' => 'portal'],
+                    '/admin/users' => ['handler' => 'App\\Routes\\AdminUsersRoute', 'service' => 'admin'],
                 ],
             ],
         ]);
@@ -184,11 +172,11 @@ class RouteScopeTest extends TestCase
             $byPath[$m['path']] = $m;
         }
 
-        // Verify scopes
-        $this->assertEquals('shared', $byPath['/health']['scope']);
-        $this->assertEquals('portal', $byPath['/portal/status']['scope']);
-        $this->assertEquals('portal', $byPath['/portal/dashboard']['scope']);
-        $this->assertEquals('admin', $byPath['/admin/users']['scope']);
+        // Verify services
+        $this->assertEquals('shared', $byPath['/health']['service']);
+        $this->assertEquals('portal', $byPath['/portal/status']['service']);
+        $this->assertEquals('portal', $byPath['/portal/dashboard']['service']);
+        $this->assertEquals('admin', $byPath['/admin/users']['service']);
 
         // Verify public/protected
         $this->assertTrue($byPath['/health']['is_public']);
@@ -226,26 +214,28 @@ class RouteScopeTest extends TestCase
     // Route meta extraction
     // =========================================================================
 
-    public function test_get_route_meta_includes_all_fields(): void
+    public function test_get_route_meta_includes_all_v4_fields(): void
     {
         $router = new Router();
-        $router->addRoute('GET', '/test', 'TestRoute', [], false, 'portal');
+        $router->addRoute('GET', '/test', 'TestRoute', [], false, null, null, false, null, 'portal');
 
         $meta = $router->getRouteMeta();
         $this->assertCount(1, $meta);
         $this->assertEquals('GET', $meta[0]['method']);
         $this->assertEquals('/test', $meta[0]['path']);
         $this->assertEquals('TestRoute', $meta[0]['handler']);
-        $this->assertEquals('portal', $meta[0]['scope']);
+        $this->assertEquals('portal', $meta[0]['service']);
         $this->assertFalse($meta[0]['is_public']);
+        // v4.0: no 'scope' key in output
+        $this->assertArrayNotHasKey('scope', $meta[0]);
     }
 
-    public function test_add_route_with_scope(): void
+    public function test_add_route_with_service(): void
     {
         $router = new Router();
-        $router->get('/portal/invoices', 'InvoicesRoute', [], false, 'portal');
-        $router->post('/portal/invoices', 'CreateInvoiceRoute', [], false, 'portal');
-        $router->get('/health', 'HealthRoute', [], true, 'shared');
+        $router->get('/portal/invoices', 'InvoicesRoute', [], false, null, null, false, null, 'portal');
+        $router->post('/portal/invoices', 'CreateInvoiceRoute', [], false, null, null, false, null, 'portal');
+        $router->get('/health', 'HealthRoute', [], true, null, null, false, null, 'shared');
 
         $meta = $router->getRouteMeta();
         $this->assertCount(3, $meta);

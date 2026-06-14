@@ -16,13 +16,19 @@ class Router
     private array $routeMiddleware = [];
     private array $routes = [];
     private array $routeParams = [];
-    private array $routeMeta = []; // ['METHOD:path' => ['is_public' => bool, 'scope' => string]]
+    private array $routeMeta = []; // ['METHOD:path' => ['is_public' => bool, 'service' => string, ...]]
 
-    /** @var array<string, MiddlewarePipeline> Scope-specific middleware pipelines */
+    /** @var array<string, MiddlewarePipeline> Scope/service-specific middleware pipelines */
     private array $scopeMiddleware = [];
 
-    /** @var string[] Known scope names (from routes config or scope() calls) */
+    /** @var string[] Known service names (from routes config or scope()/service() calls) */
     private array $knownScopes = [];
+
+    /**
+     * Context set by group() — carried into individual route registrations.
+     * Reset to null after each group() callback returns.
+     */
+    private ?array $groupContext = null;
 
     public function __construct()
     {
@@ -54,7 +60,7 @@ class Router
     }
 
     /**
-     * Define scope-specific middleware.
+     * Define scope/service-specific middleware.
      *
      * When a request matches a route with the given scope, these middleware
      * run AFTER global middleware but BEFORE the route handler.
@@ -65,7 +71,7 @@ class Router
      *       $r->use(new SubscriptionMiddleware());
      *   });
      *
-     * @param string $scopeName The scope name (e.g., 'portal', 'admin')
+     * @param string $scopeName The scope/service name (e.g., 'portal', 'admin')
      * @param callable $callback Receives a ScopeMiddlewareBuilder to add middleware
      * @return self
      */
@@ -86,63 +92,190 @@ class Router
     }
 
     /**
-     * Register a GET route
+     * Register a group of routes sharing a common path prefix and attributes.
      *
-     * @param string $path
-     * @param string|object $handler Handler class name or pre-instantiated handler object
-     * @param array $middleware Route-specific middleware
+     * This is the v4.0 route-grouping API (CLIENT-SDK-SPEC §0 A2). Individual routes
+     * inside the callback receive `group:`, `action:`, `streaming:`, and `param:` named
+     * arguments to carry client-generation metadata.
+     *
+     * Usage:
+     *   $router->group('/portal/tenant/{tenantId}', ['service' => 'portal', 'middleware' => 'tenant-access'], function() use ($router) {
+     *       $router->get('/items',           ListItemsRoute::class,   group: 'inventory');
+     *       $router->post('/items/create',   CreateItemRoute::class,  group: 'inventory');
+     *       $router->get('/ws/{id}/events',  WsEventsRoute::class,    group: 'workspaces', streaming: true);
+     *   });
+     *
+     *   // Excluded routes (no group required):
+     *   $router->group('/', [], function() use ($router) {
+     *       $router->get('/health',                HealthRoute::class,   service: 'infra');
+     *       $router->post('/payments/webhook',     WebhookRoute::class,  service: 'webhook');
+     *   });
+     *
+     * @param string   $prefix     URL prefix for all routes in this group
+     * @param array    $attributes Group-level attributes: 'service', 'middleware', 'is_public'
+     * @param callable $callback   Registers routes via $router->get()/post() inside the group
      * @return self
      */
-    public function get(string $path, string|object $handler, array $middleware = [], bool $isPublic = false, string $scope = 'shared'): self
+    public function group(string $prefix, array $attributes, callable $callback): self
     {
-        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $scope);
+        // Resolve service from attributes
+        $service = $attributes['service'] ?? 'shared';
+        $isPublic = $attributes['is_public'] ?? false;
+
+        // Save previous context (supports nested groups)
+        $previousContext = $this->groupContext;
+
+        $this->groupContext = [
+            'prefix'    => $prefix,
+            'service'   => $service,
+            'is_public' => $isPublic,
+        ];
+
+        // Register scope-level middleware if declared via 'middleware' key
+        if (isset($attributes['middleware'])) {
+            $middlewareName = $attributes['middleware'];
+            if (!isset($this->scopeMiddleware[$service])) {
+                $this->scopeMiddleware[$service] = new MiddlewarePipeline();
+            }
+            if (!in_array($service, $this->knownScopes)) {
+                $this->knownScopes[] = $service;
+            }
+            // Note: string middleware names are resolved at dispatch time by the platform's
+            // index.php. The group() API records the intent; it doesn't wire a PHP object here.
+            // Platforms that use named middleware pass objects via scope() — this is fine for
+            // recording metadata (the generator reads service/group/action, not middleware).
+        }
+
+        $callback();
+
+        // Restore previous context
+        $this->groupContext = $previousContext;
+
+        return $this;
     }
 
     /**
-     * Register a POST route
+     * Register a GET route.
      *
-     * @param string $path
+     * v4.0 named parameters (CLIENT-SDK-SPEC §0 A2):
+     *   group:     domain-concept grouping for the generated client (MANDATORY on includable routes)
+     *   action:    optional explicit method name override (kebab→camelCase)
+     *   streaming: when true, exclude from generated client (A1)
+     *   param:     documentation label for the tail :id parameter (A5, doc-only)
+     *   service:   service partition key override (overrides group-level service when set)
+     *
+     * @param string      $path      Route path (relative to group prefix when inside group())
      * @param string|object $handler Handler class name or pre-instantiated handler object
-     * @param array $middleware Route-specific middleware
-     * @param bool $isPublic Whether this route is public (no JWT required)
+     * @param array       $middleware Route-specific middleware
+     * @param bool        $isPublic  Whether this route is public (no JWT required)
+     * @param string|null $group     Domain-concept group for the generated client
+     * @param string|null $action    Explicit action name override
+     * @param bool        $streaming When true, exclude from client generation (A1)
+     * @param string|null $param     Tail :id param documentation label (A5, doc-only)
+     * @param string|null $service   Service partition key (overrides group-level service)
      * @return self
      */
-    public function post(string $path, string|object $handler, array $middleware = [], bool $isPublic = false, string $scope = 'shared'): self
-    {
-        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic, $scope);
+    public function get(
+        string $path,
+        string|object $handler,
+        array $middleware = [],
+        bool $isPublic = false,
+        ?string $group = null,
+        ?string $action = null,
+        bool $streaming = false,
+        ?string $param = null,
+        ?string $service = null,
+    ): self {
+        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service);
     }
 
     /**
-     * Register a route
+     * Register a POST route.
      *
-     * @param string $method HTTP method
-     * @param string $path Route path
+     * v4.0 named parameters — same as get(). See get() for full documentation.
+     */
+    public function post(
+        string $path,
+        string|object $handler,
+        array $middleware = [],
+        bool $isPublic = false,
+        ?string $group = null,
+        ?string $action = null,
+        bool $streaming = false,
+        ?string $param = null,
+        ?string $service = null,
+    ): self {
+        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service);
+    }
+
+    /**
+     * Register a route.
+     *
+     * @param string      $method    HTTP method
+     * @param string      $path      Route path (relative to group prefix when inside group())
      * @param string|object $handler Handler class name or pre-instantiated handler object
-     * @param array $middleware Route-specific middleware
-     * @param bool $isPublic Whether this route is public (no JWT required). Default false (protected).
-     * @param string $scope Route scope (e.g., 'portal', 'admin', 'shared'). Default 'shared'.
+     * @param array       $middleware Route-specific middleware
+     * @param bool        $isPublic  Whether this route is public (no JWT required). Default false (protected).
+     * @param string|null $group     Domain-concept group for the generated client (v4.0, A2)
+     * @param string|null $action    Explicit action name override (v4.0, A2)
+     * @param bool        $streaming When true, exclude from client generation (v4.0, A1)
+     * @param string|null $param     Tail :id param documentation label (v4.0, A5, doc-only)
+     * @param string|null $service   Service partition key override (v4.0, A2/A3)
      * @return self
      */
-    public function addRoute(string $method, string $path, string|object $handler, array $middleware = [], bool $isPublic = false, string $scope = 'shared'): self
-    {
+    public function addRoute(
+        string $method,
+        string $path,
+        string|object $handler,
+        array $middleware = [],
+        bool $isPublic = false,
+        ?string $group = null,
+        ?string $action = null,
+        bool $streaming = false,
+        ?string $param = null,
+        ?string $service = null,
+    ): self {
         $method = strtoupper($method);
+
+        // Resolve full path and service from group context (if inside group())
+        $fullPath = $path;
+        $effectiveService = $service ?? 'shared';
+        $effectiveIsPublic = $isPublic;
+
+        if ($this->groupContext !== null) {
+            $prefix = rtrim($this->groupContext['prefix'], '/');
+            $fullPath = $prefix . '/' . ltrim($path, '/');
+            // Group service wins unless route explicitly sets its own service
+            if ($service === null) {
+                $effectiveService = $this->groupContext['service'];
+            } else {
+                $effectiveService = $service;
+            }
+            if (!$isPublic) {
+                $effectiveIsPublic = $this->groupContext['is_public'];
+            }
+        }
 
         if (!isset($this->routes[$method])) {
             $this->routes[$method] = [];
         }
 
-        $this->routes[$method][$path] = $handler;
+        $this->routes[$method][$fullPath] = $handler;
 
-        // Store route-level metadata (auth requirement + scope)
-        $routeKey = "$method:$path";
+        // Store route-level metadata
+        $routeKey = "$method:$fullPath";
         $this->routeMeta[$routeKey] = [
-            'is_public' => $isPublic,
-            'scope' => $scope,
+            'is_public' => $effectiveIsPublic,
+            'service'   => $effectiveService,
+            'group'     => $group,
+            'action'    => $action,
+            'streaming' => $streaming,
+            'param'     => $param,
         ];
 
-        // Track known scopes
-        if (!in_array($scope, $this->knownScopes)) {
-            $this->knownScopes[] = $scope;
+        // Track known services/scopes
+        if (!in_array($effectiveService, $this->knownScopes)) {
+            $this->knownScopes[] = $effectiveService;
         }
 
         // Store route-specific middleware
@@ -154,11 +287,11 @@ class Router
     }
 
     /**
-     * Normalize a route config value to extract handler, scope, and alias.
+     * Normalize a route config value to extract handler, service, group, and other metadata.
      *
-     * Supports both old format (string handler) and new format (array with scope):
-     *   Old: '/health' => HealthRoute::class
-     *   New: '/portal/dashboard' => ['handler' => GetDashboardRoute::class, 'scope' => 'portal']
+     * Supports multiple formats:
+     *   String handler: '/health' => HealthRoute::class
+     *   Array (v4.0):   ['handler' => ListItemsRoute::class, 'service' => 'portal', 'group' => 'inventory']
      *
      * @param string|array|object $config The route config value
      * @return RouteEntry
@@ -166,15 +299,20 @@ class Router
     public static function normalizeRouteConfig(string|array|object $config): RouteEntry
     {
         if (is_string($config) || is_object($config)) {
-            // Old format: handler class string or pre-instantiated object
-            return new RouteEntry(handler: $config, scope: 'shared', isAlias: false);
+            // Handler class string or pre-instantiated object
+            return new RouteEntry(handler: $config, service: 'shared', isAlias: false);
         }
 
-        // New array format
+        // Array format — v4.0 uses 'service'
+        $service = $config['service'] ?? 'shared';
         return new RouteEntry(
-            handler: $config['handler'],
-            scope: $config['scope'] ?? 'shared',
-            isAlias: $config['alias'] ?? false,
+            handler:   $config['handler'],
+            service:   $service,
+            isAlias:   $config['alias']     ?? false,
+            group:     $config['group']     ?? null,
+            action:    $config['action']    ?? null,
+            streaming: $config['streaming'] ?? false,
+            param:     $config['param']     ?? null,
         );
     }
 
@@ -187,38 +325,25 @@ class Router
      *   ['public'    => ['GET' => ['/health' => HealthRoute::class]],
      *    'protected' => ['GET' => ['/dashboard' => DashboardRoute::class]]]
      *
-     * Format 2 (legacy flat format):
+     * Format 2 (flat format):
      *   ['GET' => ['/health' => HealthRoute::class]]
      *
-     * Format 3 (with scopes):
-     *   ['scopes' => ['portal', 'admin', 'shared'],
-     *    'GET' => ['/portal/dashboard' => ['handler' => DashboardRoute::class, 'scope' => 'portal']]]
-     *
      * Route values can be:
-     *   - string: Handler class name (scope defaults to 'shared')
-     *   - array:  ['handler' => class, 'scope' => 'portal', 'alias' => false]
+     *   - string: Handler class name (service defaults to 'shared')
+     *   - array:  ['handler' => class, 'service' => 'portal', 'group' => 'billing', 'alias' => false]
      *
      * @param array $routesConfig
      * @return self
      */
     public function loadRoutes(array $routesConfig): self
     {
-        // Extract optional top-level 'scopes' declaration
-        if (isset($routesConfig['scopes']) && is_array($routesConfig['scopes'])) {
-            foreach ($routesConfig['scopes'] as $scopeName) {
-                if (!in_array($scopeName, $this->knownScopes)) {
-                    $this->knownScopes[] = $scopeName;
-                }
-            }
-        }
-
         if (array_key_exists('public', $routesConfig) || array_key_exists('protected', $routesConfig)) {
             // Format 1: public/protected sections
             foreach ($routesConfig['public'] ?? [] as $method => $routes) {
                 if (is_array($routes)) {
                     foreach ($routes as $path => $config) {
                         $entry = self::normalizeRouteConfig($config);
-                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], true, $entry->scope);
+                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], true, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null);
                     }
                 }
             }
@@ -226,21 +351,21 @@ class Router
                 if (is_array($routes)) {
                     foreach ($routes as $path => $config) {
                         $entry = self::normalizeRouteConfig($config);
-                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], false, $entry->scope);
+                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], false, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null);
                     }
                 }
             }
         } else {
-            // Format 2/3: flat format with optional scope in route values
+            // Format 2: flat format with optional service in route values
             foreach ($routesConfig as $method => $routes) {
-                // Skip non-HTTP-method keys like 'scopes'
-                if (!is_array($routes) || $method === 'scopes') {
+                // Skip non-HTTP-method keys
+                if (!is_array($routes)) {
                     continue;
                 }
                 $method = strtoupper($method);
                 foreach ($routes as $path => $config) {
                     $entry = self::normalizeRouteConfig($config);
-                    $this->addRoute($method, $path, $entry->handler, [], false, $entry->scope);
+                    $this->addRoute($method, $path, $entry->handler, [], false, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null);
                 }
             }
         }
@@ -250,8 +375,21 @@ class Router
     /**
      * Get route metadata for all routes.
      *
-     * Returns an array of route info suitable for client generation:
-     * [['method' => 'GET', 'path' => '/health', 'handler' => 'HealthRoute', 'scope' => 'shared', 'is_alias' => false], ...]
+     * Returns an array of route info suitable for client generation (v4.0):
+     * [
+     *   [
+     *     'method'    => 'GET',
+     *     'path'      => '/portal/tenant/{tenantId}/items',
+     *     'handler'   => 'App\Routes\ListItemsRoute',
+     *     'service'   => 'portal',          // partition key (A2)
+     *     'group'     => 'inventory',       // domain-concept group (null = not declared)
+     *     'action'    => null,              // explicit action override (null = derive)
+     *     'streaming' => false,             // SSE/streaming route flag (A1)
+     *     'param'     => null,              // tail :id documentation label (A5)
+     *     'is_public' => false,
+     *   ],
+     *   ...
+     * ]
      *
      * @return array
      */
@@ -263,10 +401,14 @@ class Router
                 $routeKey = "$method:$path";
                 $meta = $this->routeMeta[$routeKey] ?? [];
                 $result[] = [
-                    'method' => $method,
-                    'path' => $path,
-                    'handler' => is_object($handler) ? get_class($handler) : $handler,
-                    'scope' => $meta['scope'] ?? 'shared',
+                    'method'    => $method,
+                    'path'      => $path,
+                    'handler'   => is_object($handler) ? get_class($handler) : $handler,
+                    'service'   => $meta['service']   ?? 'shared',
+                    'group'     => $meta['group']     ?? null,
+                    'action'    => $meta['action']    ?? null,
+                    'streaming' => $meta['streaming'] ?? false,
+                    'param'     => $meta['param']     ?? null,
                     'is_public' => $meta['is_public'] ?? false,
                 ];
             }
@@ -309,7 +451,7 @@ class Router
             'route'   => $match ? [
                 'pattern'       => $match['pattern'],
                 'is_public'     => $match['is_public'] ?? false,
-                'scope'         => $match['scope'] ?? 'shared',
+                'service'       => $match['service'] ?? 'shared',
                 'handler_class' => is_object($match['handler']) ? get_class($match['handler']) : $match['handler'],
             ] : null,
         ];
@@ -327,8 +469,8 @@ class Router
             $request['handler_class'] = is_object($handler) ? get_class($handler) : $handler;
             $this->routeParams = $match['params'];
 
-            // Determine the scope for this route
-            $routeScope = $match['scope'] ?? 'shared';
+            // Determine the service for this route (for middleware pipeline lookup)
+            $routeScope = $match['service'] ?? 'shared';
 
             // Build the middleware chain: scope middleware first, then route-specific middleware
             $routeKey = "$method:" . $match['pattern'];
@@ -389,7 +531,7 @@ class Router
                     'params'    => [],
                     'pattern'   => $pattern,
                     'is_public' => $this->routeMeta[$routeKey]['is_public'] ?? false,
-                    'scope'     => $this->routeMeta[$routeKey]['scope'] ?? 'shared',
+                    'service'   => $this->routeMeta[$routeKey]['service'] ?? 'shared',
                 ];
             }
 
@@ -404,7 +546,7 @@ class Router
                     'params'    => $params,
                     'pattern'   => $pattern,
                     'is_public' => $this->routeMeta[$routeKey]['is_public'] ?? false,
-                    'scope'     => $this->routeMeta[$routeKey]['scope'] ?? 'shared',
+                    'service'   => $this->routeMeta[$routeKey]['service'] ?? 'shared',
                 ];
             }
         }
