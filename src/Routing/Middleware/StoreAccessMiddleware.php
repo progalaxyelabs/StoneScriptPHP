@@ -15,7 +15,7 @@ use StoneScriptPHP\Database;
  * store identified by :storeId in the request URL by calling the auth service
  * over HTTP — no local mirror table, no cross-DB query.
  *
- * The auth service owns membership data (progalaxyelabs_auth_main.tenant_memberships).
+ * The auth service owns membership data (its own tenant_memberships table).
  * Platforms call it over HTTP. This keeps the boundary clean.
  *
  * MUST run after JwtAuthMiddleware in the global middleware chain.
