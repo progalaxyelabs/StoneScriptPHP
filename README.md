@@ -74,7 +74,7 @@ Built for developers who value clean architecture and rapid API development, Sto
 ### Security & Auth
 
 * **JWT Authentication** - RSA & HMAC support, built-in OAuth (Google)
-* **Auth Service Integration** - HTTP clients for ProGalaxy Auth Service (memberships, invitations)
+* **Auth Service Integration** - HTTP clients for the Auth Service (memberships, invitations)
 * **Token Validation** - Middleware for validating JWT tokens
 * **RBAC** - Role-Based Access Control with permissions
 * **Security Middleware** - CORS, rate limiting, security headers
@@ -292,9 +292,9 @@ This approach:
 
 ## Auth Service Integration
 
-### ProGalaxy Auth Service Clients
+### Auth Service Clients
 
-StoneScriptPHP includes HTTP clients for backend-to-backend operations with the ProGalaxy Auth Service.
+StoneScriptPHP includes HTTP clients for backend-to-backend operations with the Auth Service.
 
 **Use these for:**
 - System automation (e.g., auto-create membership after payment)

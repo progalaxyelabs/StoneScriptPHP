@@ -12,13 +12,13 @@ namespace StoneScriptPHP\Config;
  *
  * T2 — JWT-tenant (default): tenant_id is stamped into the JWT at login via
  *       the token exchange step. All platform API calls carry the tenant context
- *       via the JWT claim. Used by webmeteor, progalaxy, etc.
+ *       via the JWT claim. Used by T2 platforms (e.g. an app-builder or analytics platform).
  *
  * T3 — URL-tenant: tenant_id is NEVER in the JWT. User navigates to
  *       /stores/:storeId/* and every API call carries the storeId in the URL.
  *       The StoreAccessMiddleware validates the identity's membership in storeId
  *       and sets the GatewayClient tenant_id per-request.
- *       Used by medstoreapp, logisticsapp, restrantapp, instituteapp.
+ *       Used by multi-tenant platforms (e.g. a store, logistics, or hospitality app).
  */
 class TenancyMode
 {

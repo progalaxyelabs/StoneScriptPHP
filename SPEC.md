@@ -503,7 +503,7 @@ $platformCode = auth()->platform_code;
 $tenant = tenant();                // Returns Tenant or null
 $tenantId = tenant_id();           // UUID or null
 $tenantSlug = tenant_slug();       // e.g., "acme"
-$tenantDb = tenant_db_name();      // e.g., "medstoreapp_acme"
+$tenantDb = tenant_db_name();      // e.g., "acme_store_main"
 ```
 
 ### Middleware Configuration
@@ -514,7 +514,7 @@ In `Application::run()`:
 Application::run([
     'auth' => [
         'mode' => 'external',       // 'external' or 'self'
-        'jwks_url' => 'https://auth.progalaxyelabs.com/.well-known/jwks.json',
+        'jwks_url' => 'https://auth.example.com/.well-known/jwks.json',
     ],
     'jwt' => [
         'excluded_paths' => ['/health', '/auth/login'],

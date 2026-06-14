@@ -8,7 +8,7 @@ namespace StoneScriptPHP\Auth;
  * Platform Token Service
  *
  * Manages platform JWT lifecycle in Redis for instant invalidation.
- * Platform JWTs are issued by token exchange (medstoreapp-api /api/auth/exchange).
+ * Platform JWTs are issued by token exchange (the platform API's /api/auth/exchange).
  * Stored in Redis keyed by identity_id; deleting the key forces re-exchange on next request.
  *
  * Usage:

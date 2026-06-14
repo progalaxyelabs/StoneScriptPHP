@@ -77,8 +77,8 @@ function parseGatewayOptions(array $argv): array
 /**
  * Load the cross-DB-link authorization block from environment variables.
  *
- * deploy-manager injects these vars into the schema container when the
- * `--dangerously-allow-cross-db-link` flag is passed (#2909, deploy-manager v0.10.0):
+ * The deployment tooling injects these vars into the schema container when the
+ * `--dangerously-allow-cross-db-link` flag is passed:
  *
  *   GATEWAY_CROSS_DB_LINK_AUTHORIZED  = "true"
  *   GATEWAY_CROSS_DB_LINK_DEPLOY_REF  = "<version-tag>"
@@ -89,7 +89,7 @@ function parseGatewayOptions(array $argv): array
  * When present, the returned array is merged into the /v2/migrate request
  * body so the gateway can materialise cross-DB staging tables.
  *
- * The gateway's fail-closed rule (#2908): any `cross_db/<link>.json`
+ * The gateway's fail-closed rule: any `cross_db/<link>.json`
  * manifest in the schema bundle is REJECTED when this block is absent.
  *
  * @return array{authorized: true, deploy_ref: string|null, grants: array}|null
@@ -442,10 +442,10 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
  */
 /**
  * @param array|null $crossDbLink  Authorization block for the gateway's cross-DB-link
- *   capability (#2908/#2909). When non-null, included in the request body as
+ *   capability. When non-null, included in the request body as
  *   `cross_db_link: {authorized, deploy_ref, grants[]}`. Null (default) = absent, which
  *   causes the gateway to fail-closed any cross_db manifest in the schema bundle.
- *   Sourced from deploy-manager env vars via loadGatewayEnv()['cross_db_link'].
+ *   Sourced from deployment tooling env vars via loadGatewayEnv()['cross_db_link'].
  */
 function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null): void
 {

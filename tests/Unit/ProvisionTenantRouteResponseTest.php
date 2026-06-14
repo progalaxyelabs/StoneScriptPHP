@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\ApiResponse;
 
 /**
- * Unit tests for ProvisionTenantRoute response envelope (AUTH-SPEC §5a, task #2662).
+ * Unit tests for ProvisionTenantRoute response envelope (AUTH-SPEC §5a).
  *
  * Tests the shape and correctness of the 201 response returned by
  * ProvisionTenantRoute after a successful tenant provisioning + membership creation.
@@ -29,7 +29,7 @@ class ProvisionTenantRouteResponseTest extends TestCase
             'membership_id'  => 'mem-uuid-123',
             'tenant_id'      => 'tenant-uuid-456',
             'tenant_slug'    => null,
-            'tenant_db_schema' => 'medstoreapp_tenant_uuid_456',
+            'tenant_db_schema' => 'acme_tenant_uuid_456',
             'role'           => 'owner',
             'roles'          => ['owner'],
             'is_new_tenant'  => true,
@@ -48,13 +48,13 @@ class ProvisionTenantRouteResponseTest extends TestCase
         return array_merge([
             'identity_id'      => 'identity-uuid-789',
             'tenant_id'        => 'tenant-uuid-456',
-            'tenant_name'      => 'Sharma Medical Store',
+            'tenant_name'      => 'Acme Store',
             'tenant_slug'      => null,
-            'tenant_db_schema' => 'medstoreapp_tenant_uuid_456',
-            'display_name'     => 'Pradeep Sharma',
-            'email'            => 'pradeep@test.com',
+            'tenant_db_schema' => 'acme_tenant_uuid_456',
+            'display_name'     => 'Jane Smith',
+            'email'            => 'jane@example.com',
             'phone'            => '',
-            'platform_code'    => 'medstoreapp',
+            'platform_code'    => 'acme-store',
             'role'             => 'owner',
         ], $overrides);
     }
@@ -166,16 +166,16 @@ class ProvisionTenantRouteResponseTest extends TestCase
     {
         $data = $this->makeProvisionData([
             'tenant_id'        => 'tenant-uuid-456',
-            'tenant_name'      => 'Sharma Medical Store',
-            'tenant_db_schema' => 'medstoreapp_tenant_uuid_456',
+            'tenant_name'      => 'Acme Store',
+            'tenant_db_schema' => 'acme_tenant_uuid_456',
             'tenant_slug'      => null,
         ]);
         $response = $this->buildResponse($data, $this->makeMembershipResult(), 'id1');
         $tenant   = $response->data['tenant'];
 
-        $this->assertSame('tenant-uuid-456',              $tenant['id']);
-        $this->assertSame('Sharma Medical Store',         $tenant['name']);
-        $this->assertSame('medstoreapp_tenant_uuid_456',  $tenant['db_schema']);
+        $this->assertSame('tenant-uuid-456',    $tenant['id']);
+        $this->assertSame('Acme Store',         $tenant['name']);
+        $this->assertSame('acme_tenant_uuid_456', $tenant['db_schema']);
         $this->assertNull($tenant['slug'], 'slug is null by default (shared-portal platforms)');
     }
 
@@ -211,15 +211,15 @@ class ProvisionTenantRouteResponseTest extends TestCase
     public function test_identity_object_has_correct_values(): void
     {
         $data = $this->makeProvisionData([
-            'email'        => 'pradeep@test.com',
-            'display_name' => 'Pradeep Sharma',
+            'email'        => 'jane@example.com',
+            'display_name' => 'Jane Smith',
         ]);
         $response = $this->buildResponse($data, $this->makeMembershipResult(), 'identity-uuid-789');
         $identity = $response->data['identity'];
 
         $this->assertSame('identity-uuid-789', $identity['id']);
-        $this->assertSame('pradeep@test.com',  $identity['email']);
-        $this->assertSame('Pradeep Sharma',    $identity['display_name']);
+        $this->assertSame('jane@example.com',  $identity['email']);
+        $this->assertSame('Jane Smith',        $identity['display_name']);
     }
 
     public function test_identity_email_is_null_when_empty(): void
@@ -284,11 +284,11 @@ class ProvisionTenantRouteResponseTest extends TestCase
         }
     }
 
-    // ── Backward-compat: MedstoreProvisionTenantRoute still passes access_token through ──
+    // ── Backward-compat: platform overrides still pass access_token through ──
     //
-    // The platform override (MedstoreProvisionTenantRoute) returns a flat envelope
+    // A platform may override ProvisionTenantRoute to return a flat envelope
     // (access_token at top level rather than nested). The framework route's consumer
-    // (Angular portal) reads data.access_token — both flat and this new nested form
+    // reads data.access_token — both flat and this new nested form
     // keep access_token at the top level. Verify this contract is not broken.
 
     public function test_access_token_is_at_top_level_not_nested(): void

@@ -84,7 +84,7 @@ class Application
         $storeAccessConfig  = $config['store_access'] ?? [];
 
         // Subscription wiring is gated on BOTH presence AND the 'enabled' flag
-        // (mirrors the store_access gate below). See self::isSubscriptionEnabled(). (#2987)
+        // (mirrors the store_access gate below). See self::isSubscriptionEnabled().
         $subscriptionEnabled = self::isSubscriptionEnabled($subscriptionConfig);
 
         $jwtHandler = self::buildJwtHandler($authConfig, $env);
@@ -256,7 +256,7 @@ class Application
      * authed request, and a latent fail-closed HTTP 402 landmine.
      *
      * Back-compat: `?? true` means a subscription config WITHOUT an 'enabled' key
-     * stays ON, exactly as before this gate existed. (#2987)
+     * stays ON, exactly as before this gate existed.
      *
      * @param array $subscriptionConfig The 'subscription' section of the config
      * @return bool True if subscription wiring should be registered

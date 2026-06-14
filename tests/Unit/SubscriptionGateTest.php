@@ -9,7 +9,7 @@ use ReflectionMethod;
 use StoneScriptPHP\Application;
 
 /**
- * Tests the subscription wiring gate (#2987).
+ * Tests the subscription wiring gate.
  *
  * Application::run() registers SubscriptionMiddleware + subscription routes +
  * subscription public JWT-excluded paths only when subscriptions are enabled.

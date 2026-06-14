@@ -16,14 +16,14 @@
  *   - Routes with streaming:true are SKIPPED + listed in a comment block (A1)
  *   - Missing `group` on an includable route = HARD ERROR that aborts generation (A2)
  *   - T3 platforms: URL shape /{service}/tenant/{tenantId}/{group}/{action}[/{id}]
- *   - T2 platforms: no /tenant/{tenantId} segment, no setTenant() (webmeteor mode)
+ *   - T2 platforms: no /tenant/{tenantId} segment, no setTenant() (T2/JWT-tenant mode)
  *   - Generated method signature: api.{group}.{action}(id?: string | number, data?)
  *   - Tail path parameter always typed as `id: string | number` regardless of param: name (A5)
  *
  * Usage:
  *   php stone generate client
  *   php stone generate client --tenancy=T3   (default for most platforms)
- *   php stone generate client --tenancy=T2   (webmeteor — no URL tenant)
+ *   php stone generate client --tenancy=T2   (T2/JWT-tenant — no URL tenant segment)
  *   php stone generate client --tenancy=T1   (no tenant at all)
  *   php stone generate client --output=client --service=portal  (single package)
  *
@@ -79,8 +79,8 @@ Options:
                       One subdirectory per service is created inside:
                         client/portal/   client/admin/
   --tenancy=<mode>    T3 (default) | T2 | T1
-                      T3: multi-tenant/URL (medstoreapp, logisticsapp, …)
-                      T2: tenant in JWT (webmeteor — no /tenant/{id} segment)
+                      T3: multi-tenant/URL (e.g. a store or logistics platform)
+                      T2: tenant in JWT (e.g. an app-builder — no /tenant/{id} segment)
                       T1: no tenant scope
   --service=<name>    Generate only the named service package (default: all)
   --language=<lang>   typescript (only option in v4.0)

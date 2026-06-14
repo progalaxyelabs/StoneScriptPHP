@@ -45,7 +45,7 @@ abstract class AuthServiceClient
      * The previous version only consulted (3) and (4), and (4) was hard-coded as
      * 'http://localhost:3139' — which silently broke every platform whose framework
      * config file lived under src/config/ instead of ROOT_PATH/config/ (e.g.
-     * medstoreapp). Reading env first removes the trap entirely.
+     * platforms where the config file lives under src/config/ instead of ROOT_PATH/config/). Reading env first removes the trap entirely.
      */
     protected function getDefaultAuthServiceUrl(): string
     {

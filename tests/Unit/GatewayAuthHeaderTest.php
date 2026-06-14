@@ -5,10 +5,10 @@ namespace Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Gateway admin-auth header tests (#2915).
+ * Gateway admin-auth header tests.
  *
- * Companion to gateway #2913, which placed POST /v2/migrate and /v2/migrate-all
- * behind admin_auth_middleware (shared admin bearer + IP allowlist). The migrate
+ * The gateway places POST /v2/migrate and /v2/migrate-all behind
+ * admin_auth_middleware (shared admin bearer + IP allowlist). The migrate
  * CLI helpers must present `Authorization: Bearer <token>` when an admin token is
  * configured, and MUST omit it when none is set (back-compat for local/ungated
  * gateways). gatewayJsonHeaders() is the single source of that header logic, used
@@ -81,7 +81,7 @@ class GatewayAuthHeaderTest extends TestCase
         $this->assertTrue($migrateAll->getParameters()[3]->allowsNull());
     }
 
-    // ── cross-DB-link authorization tests (#2908/#2909) ─────────────────────
+    // ── cross-DB-link authorization tests ───────────────────────────────────
 
     public function test_load_cross_db_link_auth_returns_null_when_env_absent(): void
     {
@@ -133,7 +133,7 @@ class GatewayAuthHeaderTest extends TestCase
     public function test_load_cross_db_link_auth_returns_authorization_block(): void
     {
         $grantsJson = json_encode([[
-            'foreign_db'      => 'progalaxyelabs_auth_main',
+            'foreign_db'      => 'example_auth_main',
             'foreign_table'   => 'identities',
             'allowed_columns' => ['id', 'platform_code', 'email'],
             'scope_column'    => 'platform_code',
@@ -148,7 +148,7 @@ class GatewayAuthHeaderTest extends TestCase
         $this->assertTrue($result['authorized']);
         $this->assertSame('v2026.06.04.1', $result['deploy_ref']);
         $this->assertCount(1, $result['grants']);
-        $this->assertSame('progalaxyelabs_auth_main', $result['grants'][0]['foreign_db']);
+        $this->assertSame('example_auth_main', $result['grants'][0]['foreign_db']);
         $this->assertSame('identities', $result['grants'][0]['foreign_table']);
         $this->assertSame('platform_code', $result['grants'][0]['scope_column']);
 
@@ -167,7 +167,7 @@ class GatewayAuthHeaderTest extends TestCase
             'authorized' => true,
             'deploy_ref' => 'v2026.06.04.1',
             'grants'     => [[
-                'foreign_db'      => 'progalaxyelabs_auth_main',
+                'foreign_db'      => 'example_auth_main',
                 'foreign_table'   => 'identities',
                 'allowed_columns' => ['id', 'email'],
                 'scope_column'    => 'platform_code',
@@ -175,7 +175,7 @@ class GatewayAuthHeaderTest extends TestCase
         ];
 
         $body = [
-            'platform'          => 'webmeteor',
+            'platform'          => 'example-builder',
             'schema_name'       => 'main_v1',
             'database_id'       => 'main',
             'force'             => false,
@@ -197,7 +197,7 @@ class GatewayAuthHeaderTest extends TestCase
         $crossDbLink = null;
 
         $body = [
-            'platform'          => 'webmeteor',
+            'platform'          => 'example-builder',
             'schema_name'       => 'main_v1',
             'database_id'       => 'main',
             'force'             => false,

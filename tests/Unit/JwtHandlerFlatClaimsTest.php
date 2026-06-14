@@ -149,7 +149,7 @@ class JwtHandlerFlatClaimsTest extends TestCase
             'identity_id'   => 'uuid-identity-1',
             'tenant_id'     => 'uuid-tenant-1',
             'tenant_slug'   => 'my-store',
-            'platform_code' => 'medstoreapp',
+            'platform_code' => 'acme-store',
             'roles'         => ['owner'],
             'token_type'    => 'platform',
         ];
