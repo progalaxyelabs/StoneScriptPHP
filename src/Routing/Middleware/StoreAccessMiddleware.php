@@ -12,8 +12,15 @@ use StoneScriptPHP\Database;
  * StoreAccessMiddleware — T3 url-tenant access control (AUTH-SPEC §T3).
  *
  * Validates that the authenticated identity has an active membership in the
- * store identified by :storeId in the request URL by calling the auth service
- * over HTTP — no local mirror table, no cross-DB query.
+ * tenant identified by the canonical {tenantId} URL segment by calling the auth
+ * service over HTTP — no local mirror table, no cross-DB query.
+ *
+ * Canonical tenant-scoped URL shape (CLIENT-SDK-SPEC §0):
+ *   /{service}/tenant/{tenantId}/...
+ * The tenant param is named `tenantId` (v4.0.1 — formerly the platform-specific
+ * `:storeId`). Only routes whose pattern matches this canonical second-segment
+ * shape are treated as tenant-scoped; routes that merely contain `/tenant/`
+ * deeper in the path (e.g. `/api/auth/tenant/{slug}/info`) are NOT.
  *
  * The auth service owns membership data (its own tenant_memberships table).
  * Platforms call it over HTTP. This keeps the boundary clean.
@@ -21,14 +28,17 @@ use StoneScriptPHP\Database;
  * MUST run after JwtAuthMiddleware in the global middleware chain.
  *
  * How it works:
- *  1. Router pre-matches the route; :storeId is in $request['params'].
- *     Paths without :storeId pass through unchanged.
- *  2. Gets the Bearer token from the Authorization header.
- *  3. Calls GET {auth_service_url}/api/auth/memberships?platform_code={platform}
+ *  1. Router pre-matches the route; {tenantId} is in $request['params'] and the
+ *     matched pattern is in $request['route']['pattern'].
+ *  2. Non-tenant-scoped routes pass through unchanged.
+ *  3. FAIL CLOSED: a tenant-scoped route whose {tenantId} param does not resolve
+ *     (param-name drift, e.g. a botched rename) is DENIED, never passed through.
+ *  4. Gets the Bearer token from the Authorization header.
+ *  5. Calls GET {auth_service_url}/api/auth/memberships?platform_code={platform}
  *     with the Bearer token — auth service returns memberships for this identity.
- *  4. If storeId is in the active memberships: sets GatewayClient tenant_id and
+ *  6. If tenantId is in the active memberships: sets GatewayClient tenant_id and
  *     calls $next($request).
- *  5. If storeId is NOT in memberships: returns 403 store_access_denied.
+ *  7. If tenantId is NOT in memberships: returns 403 store_access_denied.
  *
  * Usage in Application::run() config:
  *
@@ -59,12 +69,30 @@ class StoreAccessMiddleware implements MiddlewareInterface
 
     public function handle(array $request, callable $next): ?ApiResponse
     {
-        // Extract :storeId from route params (set by Router pre-match)
-        $storeId = $request['params']['storeId'] ?? null;
+        // Determine tenant-scope from the matched route pattern. The canonical
+        // tenant-scoped shape is /{service}/tenant/{param}/... (tenant as the
+        // SECOND path segment). This deliberately excludes routes that contain
+        // `/tenant/` deeper in the path (e.g. /api/auth/tenant/{slug}/info).
+        $pattern = $request['route']['pattern'] ?? '';
 
-        if (!$storeId) {
-            // Not a /stores/:storeId/* route — pass through
+        if (!preg_match('#^/[^/]+/tenant/\{([^}]+)\}#', $pattern, $segMatch)) {
+            // Not a tenant-scoped route — pass through.
             return $next($request);
+        }
+
+        // FAIL CLOSED: tenant-scoped route, so the canonical {tenantId} param
+        // MUST be present and resolved. A missing/empty value — or a param named
+        // anything other than `tenantId` (param-name drift, e.g. a botched
+        // storeId->tenantId rename) — is denied, never silently passed through.
+        $tenantId = $request['params']['tenantId'] ?? null;
+
+        if ($segMatch[1] !== 'tenantId' || $tenantId === null || $tenantId === '') {
+            log_error(sprintf(
+                'StoreAccessMiddleware: tenant-scoped route %s did not resolve a {tenantId} param (got param "%s") — denying (fail-closed)',
+                $pattern,
+                $segMatch[1]
+            ));
+            return new ApiResponse('error', 'store_access_denied', ['error' => 'store_access_denied'], 403);
         }
 
         // JwtAuthMiddleware already verified the token; get the raw Bearer for the auth call
@@ -88,11 +116,11 @@ class StoreAccessMiddleware implements MiddlewareInterface
             return new ApiResponse('error', 'Store access check failed', null, 500);
         }
 
-        // Validate identity has active membership in the requested store
+        // Validate identity has active membership in the requested tenant
         $hasMembership = false;
         foreach ($memberships as $membership) {
             if (
-                ($membership['tenant_id'] ?? '') === $storeId &&
+                ($membership['tenant_id'] ?? '') === $tenantId &&
                 ($membership['status']    ?? '') === 'active'
             ) {
                 $hasMembership = true;
@@ -103,15 +131,15 @@ class StoreAccessMiddleware implements MiddlewareInterface
         if (!$hasMembership) {
             $user = auth();
             log_warning(sprintf(
-                'StoreAccessMiddleware: identity=%s denied access to store=%s',
+                'StoreAccessMiddleware: identity=%s denied access to tenant=%s',
                 $user?->user_id ?? 'unknown',
-                $storeId
+                $tenantId
             ));
             return new ApiResponse('error', 'store_access_denied', ['error' => 'store_access_denied'], 403);
         }
 
         // Grant access: set tenant context for all downstream GatewayClient calls
-        Database::getGatewayClient()->setTenantId($storeId);
+        Database::getGatewayClient()->setTenantId($tenantId);
 
         return $next($request);
     }

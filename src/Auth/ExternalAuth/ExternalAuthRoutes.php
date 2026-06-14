@@ -148,8 +148,8 @@ class ExternalAuthRoutes
         }
 
         if ($config->isEnabled('check_slug')) {
-            $router->get("$prefix/check-tenant-slug/:slug", new CheckTenantSlugRoute($client, $config->hooks, $config), [], true);
-            log_debug("ExternalAuthRoutes: Registered GET $prefix/check-tenant-slug/:slug");
+            $router->get("$prefix/check-tenant-slug/{slug}", new CheckTenantSlugRoute($client, $config->hooks, $config), [], true);
+            log_debug("ExternalAuthRoutes: Registered GET $prefix/check-tenant-slug/{slug}");
         }
 
         if ($config->isEnabled('onboarding_status')) {
@@ -231,10 +231,10 @@ class ExternalAuthRoutes
             );
             $router->addRoute(
                 'PUT',
-                "$prefix/memberships/:id",
+                "$prefix/memberships/{id}",
                 new UpdateMembershipRoute($client, $config->hooks, $config)
             );
-            log_debug("ExternalAuthRoutes: Registered GET $prefix/memberships, PUT $prefix/memberships/:id (protected)");
+            log_debug("ExternalAuthRoutes: Registered GET $prefix/memberships, PUT $prefix/memberships/{id} (protected)");
         }
 
         if ($config->isEnabled('profile')) {
@@ -443,7 +443,7 @@ class ExternalAuthRoutes
             $routes['POST']["$prefix/accept-invite"] = AcceptInviteRoute::class;
         }
         if ($isEnabled('check_slug')) {
-            $routes['GET']["$prefix/check-tenant-slug/:slug"] = CheckTenantSlugRoute::class;
+            $routes['GET']["$prefix/check-tenant-slug/{slug}"] = CheckTenantSlugRoute::class;
         }
         if ($isEnabled('onboarding_status')) {
             $routes['GET']["$prefix/onboarding/status"] = OnboardingStatusRoute::class;
@@ -480,7 +480,7 @@ class ExternalAuthRoutes
         }
         if ($isEnabled('memberships')) {
             $routes['GET']["$prefix/memberships"] = MembershipsRoute::class;
-            $routes['PUT']["$prefix/memberships/:id"] = UpdateMembershipRoute::class;
+            $routes['PUT']["$prefix/memberships/{id}"] = UpdateMembershipRoute::class;
         }
         if ($isEnabled('profile')) {
             $routes['GET']["$prefix/me"] = ProfileRoute::class;

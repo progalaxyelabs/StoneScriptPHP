@@ -7,7 +7,7 @@ namespace StoneScriptPHP\Auth\ExternalAuth\Routes;
 use StoneScriptPHP\ApiResponse;
 
 /**
- * PUT {prefix}/memberships/:id (PROTECTED)
+ * PUT {prefix}/memberships/{id} (PROTECTED)
  *
  * Proxies membership updates (role/status changes) to the auth service.
  * Requires Authorization header forwarding.

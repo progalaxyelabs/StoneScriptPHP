@@ -332,9 +332,9 @@ export class MinimalHttp {
   constructor(
     private readonly baseUrl: string,
     private readonly tokens: TokenStore,
-    // Refresh endpoint pinned to AUTH-SPEC token contract.
+    // Refresh endpoint pinned to AUTH-SPEC §4a: POST /api/auth/refresh.
     // Do not change without updating AUTH-SPEC §token-contract.
-    private readonly refreshEndpoint: string = '/api/auth/token/refresh',
+    private readonly refreshEndpoint: string = '/api/auth/refresh',
   ) {}
 
   async get<T = unknown>(path: string, params?: HttpParams): Promise<T> {
@@ -633,6 +633,11 @@ import { MinimalHttp, HttpParams } from './http';
 import { TokenStore }              from './tokens';
 import * as T                      from './types';
 
+// NOTE: this client is intentionally ZERO-dependency and self-contained. It
+// structurally satisfies the shared IApiClient contract so the ngx wrapper can
+// accept it under the API_CLIENT token — that compatibility is checked at the
+// platform provide-site, NOT via `implements` here (importing the interface
+// would break self-containment / the zero-dep invariant).
 export class ApiClient {{$tenantIdField}
 {$tokensExport}
   private readonly http: MinimalHttp;
@@ -640,6 +645,24 @@ export class ApiClient {{$tenantIdField}
   constructor(baseUrl: string) {
     this.tokens = new TokenStore();
     this.http   = new MinimalHttp(baseUrl, this.tokens);
+  }
+
+  /**
+   * ⚠️ INFRA-PROBE ESCAPE HATCH ONLY (IApiClient / CLIENT-SDK-SPEC §433). ⚠️
+   * Low-level GET passthrough for cross-cutting infrastructure probes with no
+   * typed business method (e.g. subscriptionGuard, health probes). Bypasses the
+   * tenant base — pass a full path. NEVER call from business/feature code:
+   * use the typed api.<group>.<action>() methods. Reaching for this in a
+   * component/feature service means a route is missing its group:/action:
+   * declaration — fix that instead (this is the §433 dead-weight guard).
+   */
+  get<R = unknown>(path: string, params?: HttpParams): Promise<R> {
+    return this.http.get<R>(path, params);
+  }
+
+  /** ⚠️ INFRA-PROBE ESCAPE HATCH ONLY — see {@link ApiClient.get}. */
+  post<R = unknown>(path: string, body?: unknown): Promise<R> {
+    return this.http.post<R>(path, body);
   }
 {$tenantCode}{$streamingNotice}{$groupBlocks}}
 TS;
@@ -853,7 +876,7 @@ function generatePackageJson(string $serviceName): string
         'scripts'     => [
             'build' => 'tsc',
         ],
-        'dependencies'    => new stdClass(), // empty object
+        'dependencies'    => new stdClass(), // empty object — fully self-contained (§13)
         'peerDependencies' => new stdClass(),
         'devDependencies' => [
             'typescript' => '^5.0.0',

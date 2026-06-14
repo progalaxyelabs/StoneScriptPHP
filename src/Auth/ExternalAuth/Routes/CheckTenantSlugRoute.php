@@ -7,7 +7,7 @@ namespace StoneScriptPHP\Auth\ExternalAuth\Routes;
 use StoneScriptPHP\ApiResponse;
 
 /**
- * GET {prefix}/check-tenant-slug/:slug
+ * GET {prefix}/check-tenant-slug/{slug}
  *
  * Proxies tenant slug availability check to the auth service.
  *

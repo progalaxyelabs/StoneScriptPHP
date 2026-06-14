@@ -535,7 +535,7 @@ class Router
                 ];
             }
 
-            // Pattern match (with parameters like /users/:id)
+            // Pattern match (with parameters like /users/{id})
             $regex = $this->buildRegex($pattern);
             if (preg_match($regex, $path, $matches)) {
                 array_shift($matches); // Remove full match
@@ -562,8 +562,13 @@ class Router
      */
     private function buildRegex(string $pattern): string
     {
-        // Convert :param to named capture group
-        $regex = preg_replace('/\/:([a-zA-Z0-9_]+)/', '/(?P<$1>[^/]+)', $pattern);
+        // {curly}-ONLY param syntax (v4.0.1). The legacy ":colon" syntax is no
+        // longer supported — runtime matching now agrees with the client
+        // generator (CLIENT-SDK-SPEC §0), which emits {curly} placeholders.
+        // preg_quote first so any other regex-special chars in the path are
+        // safely escaped, then turn each {param} into a named capture group.
+        $regex = preg_quote($pattern, '#');
+        $regex = preg_replace('/\\\{([a-zA-Z0-9_]+)\\\}/', '(?P<$1>[^/]+)', $regex);
         return '#^' . $regex . '$#';
     }
 

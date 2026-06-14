@@ -498,6 +498,34 @@ class ClientGeneratorV4Test extends TestCase
         }
     }
 
+    /**
+     * The generated ApiClient must expose the IApiClient infra-probe passthroughs
+     * (get/post delegating to MinimalHttp) so it structurally satisfies the shared
+     * IApiClient contract — without importing client-core (zero-dep invariant).
+     * (Task #3033 / CLIENT-SDK-SPEC §12.)
+     */
+    public function test_generator_emits_iapiclient_passthroughs_without_importing_contract(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+
+            // Infra-probe passthroughs present (structural IApiClient conformance).
+            $this->assertStringContainsString('get<R = unknown>(path: string', $clientTs, 'generated client must expose get() passthrough');
+            $this->assertStringContainsString('post<R = unknown>(path: string', $clientTs, 'generated client must expose post() passthrough');
+            $this->assertStringContainsString('return this.http.get<R>(path, params);', $clientTs);
+            $this->assertStringContainsString('return this.http.post<R>(path, body);', $clientTs);
+
+            // Must NOT import or `implements` the interface — self-containment / zero-dep.
+            $this->assertStringNotContainsString("from '@progalaxyelabs/stonescriptphp-client-core'", $clientTs, 'generated client must not import the contract package');
+            $this->assertStringNotContainsString('implements IApiClient', $clientTs, 'conformance is structural, not via implements');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
     // =========================================================================
     // Fixture helpers
     // =========================================================================
