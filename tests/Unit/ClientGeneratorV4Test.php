@@ -366,6 +366,11 @@ class ClientGeneratorV4Test extends TestCase
             $clientTs = file_get_contents($adminDir . '/src/client.ts');
             $this->assertStringNotContainsString('setTenant', $clientTs, 'Admin client must NOT have setTenant() (A6)');
             $this->assertStringNotContainsString('_tenantId', $clientTs);
+            // A6: admin is not tenant-scoped — no escapePath() and the escape hatch
+            // must be a PLAIN passthrough (no /portal/tenant/{id}/ rewriting).
+            $this->assertStringNotContainsString('escapePath', $clientTs, 'Admin client must NOT have escapePath() (A6)');
+            $this->assertStringContainsString('return this.http.get<R>(path, params);', $clientTs, 'Admin escape hatch must be a plain passthrough');
+            $this->assertStringContainsString('return this.http.post<R>(path, body);', $clientTs);
         } finally {
             $this->rmdir($outputDir);
         }
@@ -380,6 +385,9 @@ class ClientGeneratorV4Test extends TestCase
 
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
             $this->assertStringNotContainsString('setTenant', $clientTs, 'T2 client must not have setTenant()');
+            // T2 is not url-tenant-scoped — no escapePath(); escape hatch is a plain passthrough.
+            $this->assertStringNotContainsString('escapePath', $clientTs, 'T2 client must NOT have escapePath()');
+            $this->assertStringContainsString('return this.http.get<R>(path, params);', $clientTs, 'T2 escape hatch must be a plain passthrough');
             // Check that generated METHOD URLs do not include /tenant/ — strip comments first
             $codeOnly = preg_replace('#//[^\n]*\n#', '', $clientTs);
             $this->assertStringNotContainsString('/tenant/', $codeOnly, 'T2 method URLs must not include /tenant/ segment');
@@ -515,8 +523,13 @@ class ClientGeneratorV4Test extends TestCase
             // Infra-probe passthroughs present (structural IApiClient conformance).
             $this->assertStringContainsString('get<R = unknown>(path: string', $clientTs, 'generated client must expose get() passthrough');
             $this->assertStringContainsString('post<R = unknown>(path: string', $clientTs, 'generated client must expose post() passthrough');
-            $this->assertStringContainsString('return this.http.get<R>(path, params);', $clientTs);
-            $this->assertStringContainsString('return this.http.post<R>(path, body);', $clientTs);
+            // T3 (tenant-scoped, non-admin) escape hatch is TENANT-AWARE (CLIENT-SDK-SPEC
+            // §12, proven by the #3033 medstoreapp e2e): get/post route the logical
+            // `/portal/...` path through escapePath() so the CLIENT applies the active
+            // tenant prefix. (Admin/T2 clients use a plain passthrough — asserted in
+            // test_generator_admin_client_has_no_set_tenant / _t2_client_*.)
+            $this->assertStringContainsString('return this.http.get<R>(this.escapePath(path), params);', $clientTs);
+            $this->assertStringContainsString('return this.http.post<R>(this.escapePath(path), body);', $clientTs);
 
             // Must NOT import or `implements` the interface — self-containment / zero-dep.
             $this->assertStringNotContainsString("from '@progalaxyelabs/stonescriptphp-client-core'", $clientTs, 'generated client must not import the contract package');

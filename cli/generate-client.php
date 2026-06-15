@@ -653,11 +653,15 @@ TS;
         ? "\n  private _tenantId: string | number | null = null;"
         : '';
 
-    // Escape-hatch path resolver. Tenant-scoped (T3) clients apply the active
-    // tenant prefix to logical `/portal/...` paths so the CLIENT owns the URL
-    // scheme (CLIENT-SDK-SPEC §12) — non-/portal paths and non-tenant clients
-    // pass the path through verbatim.
+    // Escape-hatch behaviour (CLIENT-SDK-SPEC §12/§433). Only tenant-scoped
+    // (T3 non-admin) clients rewrite logical `/portal/...` paths to carry the active
+    // tenant prefix (via escapePath() + the `t` getter). Admin and T2 clients are NOT
+    // tenant-scoped (A6): their escape hatch passes paths through verbatim, with NO
+    // escapePath()/setTenant() at all.
     if ($isTenantScoped) {
+        $getArg        = 'this.escapePath(path)';
+        $postArg       = 'this.escapePath(path)';
+        $postDocSuffix = ' Tenant-aware for /portal/* paths.';
         $escapePathMethod = "\n"
             . "  /**\n"
             . "   * Tenant-aware escape-hatch path resolver (CLIENT-SDK-SPEC §12). Logical\n"
@@ -668,12 +672,31 @@ TS;
             . "  private escapePath(path: string): string {\n"
             . "    return path.startsWith('/portal/') ? `\${this.t}\${path.substring(7)}` : path;\n"
             . "  }\n";
+        $hatchDoc = "  /**\n"
+            . "   * Escape hatch for endpoints with no typed business method (CLIENT-SDK-SPEC §12/§433).\n"
+            . "   * Two legitimate uses:\n"
+            . "   *   1. Cross-cutting infra/auth probes (e.g. /api/devices/register, /subscription/status) —\n"
+            . "   *      non-/portal paths pass through verbatim.\n"
+            . "   *   2. Genuinely-generic / metadata-driven tenant endpoints (e.g. a table-driven\n"
+            . "   *      list view at /portal/{group}/{table}) where a per-table typed method would be\n"
+            . "   *      wrong — pass the logical `/portal/...` path and the CLIENT applies the active\n"
+            . "   *      tenant prefix via setTenant() (the platform NEVER builds /portal/tenant/{id}/…).\n"
+            . "   * NEVER use this for an endpoint that SHOULD have a typed api.<group>.<action>() —\n"
+            . "   * if you reach for it there, the route is missing its group:/action: declaration; fix that.\n"
+            . "   */";
     } else {
-        $escapePathMethod = "\n"
-            . "  /** Escape-hatch path resolver — non-tenant client; paths pass through. */\n"
-            . "  private escapePath(path: string): string {\n"
-            . "    return path;\n"
-            . "  }\n";
+        $getArg        = 'path';
+        $postArg       = 'path';
+        $postDocSuffix = '';
+        $escapePathMethod = '';
+        $hatchDoc = "  /**\n"
+            . "   * Escape hatch for endpoints with no typed business method (CLIENT-SDK-SPEC §12/§433).\n"
+            . "   * Use for cross-cutting infra/auth probes (e.g. /api/devices/register,\n"
+            . "   * /subscription/status). This client is NOT tenant-scoped, so paths pass through\n"
+            . "   * verbatim (no tenant-prefix rewriting).\n"
+            . "   * NEVER use this for an endpoint that SHOULD have a typed api.<group>.<action>() —\n"
+            . "   * if you reach for it there, the route is missing its group:/action: declaration; fix that.\n"
+            . "   */";
     }
 
     $tokensExport = '  /** Exposed so ngx wrapper and streaming helpers can read auth state. */' . "\n" .
@@ -706,25 +729,14 @@ export class ApiClient {{$tenantIdField}
     this.http   = new MinimalHttp(baseUrl, this.tokens);
   }
 
-  /**
-   * Escape hatch for endpoints with no typed business method (CLIENT-SDK-SPEC §12/§433).
-   * Two legitimate uses:
-   *   1. Cross-cutting infra/auth probes (e.g. /api/devices/register, /subscription/status) —
-   *      non-/portal paths pass through verbatim.
-   *   2. Genuinely-generic / metadata-driven tenant endpoints (e.g. a table-driven
-   *      list view at /portal/{group}/{table}) where a per-table typed method would be
-   *      wrong — pass the logical `/portal/...` path and the CLIENT applies the active
-   *      tenant prefix via setTenant() (the platform NEVER builds /portal/tenant/{id}/…).
-   * NEVER use this for an endpoint that SHOULD have a typed api.<group>.<action>() —
-   * if you reach for it there, the route is missing its group:/action: declaration; fix that.
-   */
+{$hatchDoc}
   get<R = unknown>(path: string, params?: HttpParams): Promise<R> {
-    return this.http.get<R>(this.escapePath(path), params);
+    return this.http.get<R>({$getArg}, params);
   }
 
-  /** Escape hatch — see {@link ApiClient.get}. Tenant-aware for /portal/* paths. */
+  /** Escape hatch — see {@link ApiClient.get}.{$postDocSuffix} */
   post<R = unknown>(path: string, body?: unknown): Promise<R> {
-    return this.http.post<R>(this.escapePath(path), body);
+    return this.http.post<R>({$postArg}, body);
   }
 {$escapePathMethod}
 
