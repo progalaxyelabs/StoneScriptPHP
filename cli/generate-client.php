@@ -328,14 +328,37 @@ export interface HttpParams {
   [key: string]: string | number | boolean | null | undefined;
 }
 
+/**
+ * Injected refresh strategy (CLIENT-SDK-SPEC §12/§14). Resolves true if a fresh
+ * access token is now present in the TokenStore (the handler is responsible for
+ * performing the refresh AND writing the new token into the same TokenStore this
+ * client reads). Lets external-auth / T3 platforms route refresh through their
+ * auth-client (e.g. a central accounts server) instead of the built-in
+ * same-origin POST, without baking auth topology into the generated client.
+ */
+export type RefreshHandler = () => Promise<boolean>;
+
 export class MinimalHttp {
+  private refreshHandler: RefreshHandler | null = null;
+
   constructor(
     private readonly baseUrl: string,
     private readonly tokens: TokenStore,
-    // Refresh endpoint pinned to AUTH-SPEC §4a: POST /api/auth/refresh.
+    // Default same-origin refresh endpoint, AUTH-SPEC §4a: POST /api/auth/refresh.
+    // Used ONLY when no refresh handler is injected (self-contained / T2 same-origin).
     // Do not change without updating AUTH-SPEC §token-contract.
     private readonly refreshEndpoint: string = '/api/auth/refresh',
   ) {}
+
+  /**
+   * Inject a refresh strategy (CLIENT-SDK-SPEC §12/§14). When set, the 401 path
+   * delegates to this instead of the built-in same-origin POST. The client still
+   * owns token storage, attachment, and 401-detect+retry — only the refresh
+   * transport is injected. Pass null to restore the built-in default.
+   */
+  setRefreshHandler(handler: RefreshHandler | null): void {
+    this.refreshHandler = handler;
+  }
 
   async get<T = unknown>(path: string, params?: HttpParams): Promise<T> {
     return this.request<T>('GET', path, undefined, params);
@@ -408,6 +431,19 @@ export class MinimalHttp {
   }
 
   private async attemptRefresh(): Promise<boolean> {
+    // Injected strategy wins (external-auth / T3): the handler refreshes and
+    // writes the new token into this client's TokenStore; we just retry on true.
+    if (this.refreshHandler) {
+      try {
+        return await this.refreshHandler();
+      } catch {
+        return false;
+      }
+    }
+    return this.defaultRefresh();
+  }
+
+  private async defaultRefresh(): Promise<boolean> {
     const refresh = this.tokens.getRefresh();
     if (!refresh) return false;
 
@@ -617,6 +653,29 @@ TS;
         ? "\n  private _tenantId: string | number | null = null;"
         : '';
 
+    // Escape-hatch path resolver. Tenant-scoped (T3) clients apply the active
+    // tenant prefix to logical `/portal/...` paths so the CLIENT owns the URL
+    // scheme (CLIENT-SDK-SPEC §12) — non-/portal paths and non-tenant clients
+    // pass the path through verbatim.
+    if ($isTenantScoped) {
+        $escapePathMethod = "\n"
+            . "  /**\n"
+            . "   * Tenant-aware escape-hatch path resolver (CLIENT-SDK-SPEC §12). Logical\n"
+            . "   * `/portal/...` paths receive the active tenant prefix from the CLIENT; the\n"
+            . "   * platform passes only the logical path and never builds /portal/tenant/{id}/…\n"
+            . "   * itself (§433). Non-/portal paths (infra/auth) pass through untouched.\n"
+            . "   */\n"
+            . "  private escapePath(path: string): string {\n"
+            . "    return path.startsWith('/portal/') ? `\${this.t}\${path.substring(7)}` : path;\n"
+            . "  }\n";
+    } else {
+        $escapePathMethod = "\n"
+            . "  /** Escape-hatch path resolver — non-tenant client; paths pass through. */\n"
+            . "  private escapePath(path: string): string {\n"
+            . "    return path;\n"
+            . "  }\n";
+    }
+
     $tokensExport = '  /** Exposed so ngx wrapper and streaming helpers can read auth state. */' . "\n" .
                     '  readonly tokens: TokenStore;';
 
@@ -629,7 +688,7 @@ TS;
  * CLIENT-SDK-SPEC §0 A1–A6 (approved 2026-06-14)
  */
 
-import { MinimalHttp, HttpParams } from './http';
+import { MinimalHttp, HttpParams, RefreshHandler } from './http';
 import { TokenStore }              from './tokens';
 import * as T                      from './types';
 
@@ -648,21 +707,37 @@ export class ApiClient {{$tenantIdField}
   }
 
   /**
-   * ⚠️ INFRA-PROBE ESCAPE HATCH ONLY (IApiClient / CLIENT-SDK-SPEC §433). ⚠️
-   * Low-level GET passthrough for cross-cutting infrastructure probes with no
-   * typed business method (e.g. subscriptionGuard, health probes). Bypasses the
-   * tenant base — pass a full path. NEVER call from business/feature code:
-   * use the typed api.<group>.<action>() methods. Reaching for this in a
-   * component/feature service means a route is missing its group:/action:
-   * declaration — fix that instead (this is the §433 dead-weight guard).
+   * Escape hatch for endpoints with no typed business method (CLIENT-SDK-SPEC §12/§433).
+   * Two legitimate uses:
+   *   1. Cross-cutting infra/auth probes (e.g. /api/devices/register, /subscription/status) —
+   *      non-/portal paths pass through verbatim.
+   *   2. Genuinely-generic / metadata-driven tenant endpoints (e.g. a table-driven
+   *      list view at /portal/{group}/{table}) where a per-table typed method would be
+   *      wrong — pass the logical `/portal/...` path and the CLIENT applies the active
+   *      tenant prefix via setTenant() (the platform NEVER builds /portal/tenant/{id}/…).
+   * NEVER use this for an endpoint that SHOULD have a typed api.<group>.<action>() —
+   * if you reach for it there, the route is missing its group:/action: declaration; fix that.
    */
   get<R = unknown>(path: string, params?: HttpParams): Promise<R> {
-    return this.http.get<R>(path, params);
+    return this.http.get<R>(this.escapePath(path), params);
   }
 
-  /** ⚠️ INFRA-PROBE ESCAPE HATCH ONLY — see {@link ApiClient.get}. */
+  /** Escape hatch — see {@link ApiClient.get}. Tenant-aware for /portal/* paths. */
   post<R = unknown>(path: string, body?: unknown): Promise<R> {
-    return this.http.post<R>(path, body);
+    return this.http.post<R>(this.escapePath(path), body);
+  }
+{$escapePathMethod}
+
+  /**
+   * Inject the refresh strategy (CLIENT-SDK-SPEC §12/§14). ngx wires this to the
+   * auth-client's refresh so external-auth / T3 platforms refresh against their
+   * central accounts server while this client keeps ownership of token storage,
+   * attachment, and 401-detect+retry. Pass null to use the built-in same-origin
+   * default.
+   */
+  setRefreshHandler(handler: RefreshHandler | null): this {
+    this.http.setRefreshHandler(handler);
+    return this;
   }
 {$tenantCode}{$streamingNotice}{$groupBlocks}}
 TS;
