@@ -72,9 +72,13 @@ if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
     echo "    {schema}/postgresql/ ∪ top-level shared/  (same union the archive packs)\n";
     echo "  A missing table = the gateway will DROP it on schema-sync → 500 at runtime.\n";
     echo "  Cross-schema refs (main fn referencing a tenant table) = ERROR.\n\n";
-    echo "  Note: TRIM(BOTH x FROM y) / EXTRACT(field FROM ts) — the FROM in these SQL\n";
-    echo "  standard function forms is NOT treated as a table ref (no false positives).\n";
-    echo "  FROM inside EXECUTE format(…) dynamic SQL is also not checked.\n\n";
+    echo "  Static-analysis limits:\n";
+    echo "  · TRIM(BOTH x FROM y) / EXTRACT(field FROM ts): FROM in SQL standard function\n";
+    echo "    forms is not treated as a table ref — no false positives.\n";
+    echo "  · FROM inside EXECUTE format(…) dynamic SQL is not checked.\n";
+    echo "  · Data-modifying CTEs: WITH x AS (INSERT INTO t …) — the target table t is\n";
+    echo "    not checked (no SELECT precedes FROM at that depth). Zero occurrences in\n";
+    echo "    the current fleet; flag manually if you add one.\n\n";
     echo "Phase 2 — Column name integrity (tokenizer + scope tree, per-schema):\n";
     echo "  Checks qualified refs (alias.column / table.column) against column lists\n";
     echo "  parsed from the scoped table definitions for that schema.\n\n";
