@@ -72,7 +72,9 @@ if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
     echo "    {schema}/postgresql/ ∪ top-level shared/  (same union the archive packs)\n";
     echo "  A missing table = the gateway will DROP it on schema-sync → 500 at runtime.\n";
     echo "  Cross-schema refs (main fn referencing a tenant table) = ERROR.\n\n";
-    echo "  Note: tables in EXECUTE format(…) dynamic SQL are not checked (static limit).\n\n";
+    echo "  Note: TRIM(BOTH x FROM y) / EXTRACT(field FROM ts) — the FROM in these SQL\n";
+    echo "  standard function forms is NOT treated as a table ref (no false positives).\n";
+    echo "  FROM inside EXECUTE format(…) dynamic SQL is also not checked.\n\n";
     echo "Phase 2 — Column name integrity (tokenizer + scope tree, per-schema):\n";
     echo "  Checks qualified refs (alias.column / table.column) against column lists\n";
     echo "  parsed from the scoped table definitions for that schema.\n\n";
@@ -229,17 +231,27 @@ function extractReferences(string $body, int $bodyStartLine): array
     $tablesSeen   = [];     // lower(name) → true, for this whole body
     $prevWasAs    = false;  // previous meaningful token was AS keyword
 
+    // Track whether SELECT has been seen at each non-zero paren depth.
+    // Distinguishes table-introducing FROM from SQL-function FROM-syntax:
+    //   TRIM(BOTH x FROM y)        → depth=1, no SELECT seen → FROM is not a table ref
+    //   EXTRACT(YEAR FROM ts)      → depth=1, no SELECT seen → FROM is not a table ref
+    //   (SELECT ... FROM table)    → depth=1, SELECT seen    → FROM IS a table ref
+    //   EXISTS(SELECT 1 FROM tbl)  → depth=1, SELECT seen    → FROM IS a table ref
+    $depthSelectSeen = [];  // depth → bool
+
     for ($i = 0; $i < $n; $i++) {
         $tok = $tokens[$i];
 
         // ── Depth ─────────────────────────────────────────────────────────────
         if ($tok->type === SqlToken::PAREN_OPEN) {
             $depth++;
-            $expectTable = false; // never extract table from inside parens
+            $depthSelectSeen[$depth] = false; // new paren level: SELECT not yet seen here
+            $expectTable = false; // reset — table name cannot span a paren boundary
             $inFromCtx   = false;
             continue;
         }
         if ($tok->type === SqlToken::PAREN_CLOSE) {
+            unset($depthSelectSeen[$depth]);
             $depth = max(0, $depth - 1);
             continue;
         }
@@ -263,6 +275,12 @@ function extractReferences(string $body, int $bodyStartLine): array
             $kw        = $tok->upper;
             $prevWasAs = ($kw === 'AS');
 
+            // Track SELECT inside parens so we can distinguish subquery FROM from
+            // SQL-function FROM (TRIM/EXTRACT/SUBSTRING use FROM in their arg list).
+            if ($kw === 'SELECT' && $depth > 0) {
+                $depthSelectSeen[$depth] = true;
+            }
+
             if ($kw === 'EXECUTE' || $kw === 'RAISE') {
                 $skipDynamic = true;
                 $expectTable = false;
@@ -272,8 +290,10 @@ function extractReferences(string $body, int $bodyStartLine): array
 
             // TRUNCATE [TABLE] — skip optional TABLE keyword
             if ($kw === 'TRUNCATE') {
-                $expectTable = true;
-                $inFromCtx   = false;
+                if ($depth === 0) {
+                    $expectTable = true;
+                }
+                $inFromCtx = false;
                 if ($i + 1 < $n && $tokens[$i + 1]->isKeyword('TABLE')) {
                     $i++;
                 }
@@ -281,8 +301,21 @@ function extractReferences(string $body, int $bodyStartLine): array
             }
 
             if (in_array($kw, $tableKws, true)) {
-                $expectTable = true;
-                $inFromCtx   = ($kw === 'FROM' || $kw === 'DELETE FROM');
+                // At depth 0, always treat as a table-introducing keyword.
+                // At depth > 0 (inside parens), only activate if we've seen SELECT at this
+                // depth — meaning we're inside a subquery, not a SQL function arg list:
+                //   TRIM(BOTH '-' FROM v_slug)    → depth=1, no SELECT → NOT a table ref ✓
+                //   EXTRACT(YEAR FROM created_at) → depth=1, no SELECT → NOT a table ref ✓
+                //   (SELECT ... FROM table)        → depth=1, SELECT seen → IS a table ref ✓
+                //   EXISTS(SELECT 1 FROM table)    → depth=1, SELECT seen → IS a table ref ✓
+                $isSubqueryContext = ($depth === 0) || ($depthSelectSeen[$depth] ?? false);
+                if ($isSubqueryContext) {
+                    $expectTable = true;
+                    $inFromCtx   = ($kw === 'FROM' || $kw === 'DELETE FROM');
+                } else {
+                    $expectTable = false;
+                    $inFromCtx   = false;
+                }
                 continue;
             }
 
@@ -307,7 +340,10 @@ function extractReferences(string $body, int $bodyStartLine): array
         }
 
         // ── Table name token ──────────────────────────────────────────────────
+        // Belt-and-suspenders: never record a table if we're inside a non-subquery paren
+        // (e.g. $expectTable somehow leaked from a prior keyword before paren entry).
         if ($expectTable
+            && ($depth === 0 || ($depthSelectSeen[$depth] ?? false))
             && ($tok->type === SqlToken::IDENT || $tok->type === SqlToken::QUALIFIED)
         ) {
             // For schema.table qualified names — take the right-hand part,
