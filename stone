@@ -59,6 +59,10 @@ $commands = [
         'description' => 'Run database migrations',
         'file' => 'cli/migrate.php',
     ],
+    'validate' => [
+        'description' => 'Validate project integrity (sqlintegrity: check SQL for undefined table/fn refs)',
+        'file' => 'cli/validate-dispatcher.php',
+    ],
     'test' => [
         'description' => 'Run PHPUnit tests',
         'handler' => 'test',
@@ -160,6 +164,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone generate cache:redis          # Generate Redis caching\n";
     echo "  php stone generate jwt                  # Generate JWT RSA keys\n";
     echo "  php stone migrate verify                # Check database drift\n";
+    echo "  php stone validate sqlintegrity         # Check SQL for undefined table/fn refs\n";
     echo "  php stone tenant:create \"Acme\" acme    # Create new tenant\n";
     echo "  php stone tenant:list                   # List all tenants\n";
     echo "  php stone gateway:register-main          # Register platform + create main DB\n";
