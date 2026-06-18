@@ -23,11 +23,14 @@ if ($argc === 1 || in_array($argv[1] ?? '', ['--help', '-h', 'help'], true)) {
     echo "Available subcommands:\n";
     echo "  sqlintegrity     Check SQL functions for references to undefined tables or functions\n\n";
     echo "Options (sqlintegrity):\n";
-    echo "  --strict         Treat warnings as errors (for CI)\n";
-    echo "  --json           Machine-readable JSON output\n\n";
+    echo "  --schema=main|tenant  Scope Phase 1+2 checks to a single DB schema\n";
+    echo "  --strict              Treat warnings as errors (for CI)\n";
+    echo "  --json                Machine-readable JSON output\n\n";
     echo "Examples:\n";
-    echo "  php stone validate sqlintegrity\n";
-    echo "  php stone validate sqlintegrity --strict\n";
+    echo "  php stone validate sqlintegrity                    # Phase 0 layout check only\n";
+    echo "  php stone validate sqlintegrity --schema=main      # main schema ref check\n";
+    echo "  php stone validate sqlintegrity --schema=tenant    # tenant schema ref check\n";
+    echo "  php stone validate sqlintegrity --schema=main --strict\n";
     echo "  php stone validate sqlintegrity --json\n\n";
     echo "Exit codes:\n";
     echo "  0  Clean — no issues found\n";

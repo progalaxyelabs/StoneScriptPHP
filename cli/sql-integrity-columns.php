@@ -22,13 +22,13 @@ require_once __DIR__ . '/sql-integrity-tree.php';
 /**
  * Discover all CREATE TABLE definitions with their column names.
  *
+ * @param  string[] $tableFiles  Pre-built list of table .pgsql files (schema-scoped by caller).
  * @return array<string, array{file:string, columns:array<string,true>}>
  *         table_lower_name → { file, columns }
  */
-function discoverTableColumns(string $srcPath): array
+function discoverTableColumns(array $tableFiles): array
 {
-    $result     = [];
-    $tableFiles = findFiles($srcPath, 'tables'); // defined in validate-sqlintegrity.php
+    $result = [];
 
     foreach ($tableFiles as $file) {
         $content = file_get_contents($file);
@@ -252,8 +252,7 @@ function checkColumnIntegrity(
                     'fn'   => $fn['name'],
                     'line' => $e->parserLine,
                     'msg'  => "Parser skipped — {$e->getMessage()}. "
-                            . "Column-checking disabled for this function. "
-                            . "Use --max-depth=N (current={$maxDepth}) to increase.",
+                            . "Column-checking disabled for this function (depth guard hit).",
                 ];
                 continue;
             }

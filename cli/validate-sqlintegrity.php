@@ -35,26 +35,47 @@ $argv   = $_SERVER['argv'] ?? [];
 $strict = in_array('--strict', $argv, true);
 $json   = in_array('--json', $argv, true);
 
+// --schema main|tenant  — restrict Phase 1+2 to a single schema.
+// When omitted, all detected schemas (main + tenant) are checked.
+$schemaFilter = null;
+foreach ($argv as $arg) {
+    if (preg_match('/^--schema=(main|tenant)$/', $arg, $m)) {
+        $schemaFilter = $m[1];
+        break;
+    }
+}
+
 // Internal paren-nesting limit for the Phase 2 column parser.
 // Functions deeper than this have column-checking skipped (emitted as NOTICE).
 // 8 handles all but the most extreme aggregation queries; not exposed as a flag.
 const MAX_COLUMN_DEPTH = 8;
 
+// The canonical allowed subdirectories — same list the archive builder packs.
+// Single source of truth: both layout check and per-schema scoping use this.
+const SCHEMA_SUBDIRS = ['functions', 'tables', 'views', 'migrations', 'seeders', 'extensions', 'types'];
+
 if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
-    echo "Usage: php stone validate sqlintegrity [--strict] [--json]\n\n";
+    echo "Usage: php stone validate sqlintegrity [--schema=main|tenant] [--strict] [--json]\n\n";
     echo "Options:\n";
-    echo "  --strict   Treat warnings (unknown function calls) as errors (for CI)\n";
-    echo "  --json     Machine-readable JSON output\n\n";
-    echo "Phase 1 — Table existence (tokenizer-based):\n";
+    echo "  --schema=main|tenant   Scope Phase 1+2 to a single DB schema.\n";
+    echo "                         Without this, all detected schemas are checked.\n";
+    echo "  --strict               Treat warnings (unknown function calls) as errors (CI)\n";
+    echo "  --json                 Machine-readable JSON output\n\n";
+    echo "Phase 0 — Layout conformance (always runs):\n";
+    echo "  Every *.pgsql file under src/postgresql/ must sit in a gateway-packed\n";
+    echo "  location: {main|tenant}/postgresql/{subdir}/ or top-level {subdir}/\n";
+    echo "  (where subdir ∈ {" . implode(',', SCHEMA_SUBDIRS) . "}).\n";
+    echo "  Files outside these paths are never deployed — flagged as ERROR.\n\n";
+    echo "Phase 1 — Table existence (tokenizer-based, per-schema):\n";
     echo "  Checks every function body for FROM/JOIN/INSERT INTO/UPDATE/DELETE FROM\n";
-    echo "  references to tables that have no matching tables/*.pgsql definition.\n";
-    echo "  A missing table = the gateway will DROP it on schema-sync → 500 at runtime.\n\n";
-    echo "  Note: tables referenced inside EXECUTE format(…) dynamic SQL are NOT\n";
-    echo "  checked (static analysis limitation).\n\n";
-    echo "Phase 2 — Column name integrity (tokenizer + scope tree):\n";
-    echo "  Checks qualified refs (alias.column / table.column) against the parsed\n";
-    echo "  column list from each table's tables/*.pgsql definition.\n";
-    echo "  Catches typos like  users.is_email_verified  when column is  email_verified.\n\n";
+    echo "  references against the scoped table set for that database:\n";
+    echo "    {schema}/postgresql/ ∪ top-level shared/  (same union the archive packs)\n";
+    echo "  A missing table = the gateway will DROP it on schema-sync → 500 at runtime.\n";
+    echo "  Cross-schema refs (main fn referencing a tenant table) = ERROR.\n\n";
+    echo "  Note: tables in EXECUTE format(…) dynamic SQL are not checked (static limit).\n\n";
+    echo "Phase 2 — Column name integrity (tokenizer + scope tree, per-schema):\n";
+    echo "  Checks qualified refs (alias.column / table.column) against column lists\n";
+    echo "  parsed from the scoped table definitions for that schema.\n\n";
     echo "Exit codes:  0 clean,  1 errors,  2 warnings only\n\n";
     exit(0);
 }
@@ -69,12 +90,12 @@ if (!is_dir($srcPath)) {
 // ── Step 1: Discover all table definitions ───────────────────────────────────
 
 /**
+ * @param  string[] $tableFiles  Schema-scoped list from findSchemaFiles().
  * @return array<string, string>  table_name => file_path
  */
-function discoverTables(string $srcPath): array
+function discoverTables(array $tableFiles): array
 {
     $tables = [];
-    $tableFiles = findFiles($srcPath, 'tables');
 
     foreach ($tableFiles as $file) {
         $content = file_get_contents($file);
@@ -99,12 +120,12 @@ function discoverTables(string $srcPath): array
 // ── Step 2: Discover all function definitions ─────────────────────────────────
 
 /**
+ * @param  string[] $fnFiles  Schema-scoped list from findSchemaFiles().
  * @return array<string, string>  fn_name => file_path
  */
-function discoverFunctions(string $srcPath): array
+function discoverFunctions(array $fnFiles): array
 {
     $functions = [];
-    $fnFiles = findFiles($srcPath, 'functions');
 
     foreach ($fnFiles as $file) {
         $content = file_get_contents($file);
@@ -458,36 +479,112 @@ function parseFunctionBodies(string $file): array
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Recursively find all .pgsql files inside directories named $dirName.
+ * Find .pgsql files for a given schema and subdir, using the same union the
+ * archive builder packs:
+ *   primary:  {postgresqlPath}/{schema}/postgresql/{subdir}/
+ *   shared:   {postgresqlPath}/{subdir}/
+ *
+ * Migrations are excluded (one-off scripts, not live definitions).
  *
  * @return string[]
  */
-function findFiles(string $srcPath, string $dirName): array
+function findSchemaFiles(string $postgresqlPath, string $schema, string $subdir): array
 {
-    $result = [];
+    if ($subdir === 'migrations') {
+        return []; // never check migrations as live definitions
+    }
+
+    $dirs = [
+        $postgresqlPath . '/' . $schema . '/postgresql/' . $subdir, // primary
+        $postgresqlPath . '/' . $subdir,                             // shared
+    ];
+
+    $files = [];
+    foreach ($dirs as $dir) {
+        if (!is_dir($dir)) {
+            continue;
+        }
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS)
+        );
+        foreach ($it as $file) {
+            if ($file->isFile() && $file->getExtension() === 'pgsql') {
+                $files[] = $file->getPathname();
+            }
+        }
+    }
+
+    return $files;
+}
+
+/**
+ * Phase 0: Layout conformance check.
+ *
+ * Every *.pgsql (and *.sql / *.pssql) file under $postgresqlPath must sit in
+ * one of the canonical locations the archive builder actually packs:
+ *
+ *   {schema}/postgresql/{subdir}/   (primary, per-schema)
+ *   {subdir}/                       (shared, top-level)
+ *
+ * Files outside these paths are silently ignored by the archive builder —
+ * they are NEVER deployed to the database. Flag them as errors.
+ *
+ * @return array<array{file:string, relative:string, message:string}>
+ */
+function checkLayoutConformance(string $postgresqlPath): array
+{
+    if (!is_dir($postgresqlPath)) {
+        return [];
+    }
+
+    $allowedSchemas = ['main', 'tenant'];
+    $allowedSubdirs = SCHEMA_SUBDIRS;
+    $errors         = [];
+
     $it = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($srcPath, RecursiveDirectoryIterator::SKIP_DOTS)
+        new RecursiveDirectoryIterator($postgresqlPath, RecursiveDirectoryIterator::SKIP_DOTS)
     );
 
     foreach ($it as $file) {
         if (!$file->isFile()) {
             continue;
         }
-        // Only .pgsql files inside a directory named $dirName
-        $parts = explode(DIRECTORY_SEPARATOR, $file->getPath());
-        if (!in_array($dirName, $parts, true)) {
+        if (!in_array($file->getExtension(), ['pgsql', 'sql', 'pssql'], true)) {
             continue;
         }
-        // Exclude migration files — they're one-off scripts, not live definitions
-        if (in_array('migrations', $parts, true)) {
-            continue;
+
+        $rel   = str_replace('\\', '/', substr($file->getPathname(), strlen($postgresqlPath) + 1));
+        $parts = explode('/', $rel);
+
+        $valid = false;
+
+        // Pattern A: {schema}/postgresql/{subdir}/...
+        if (count($parts) >= 3
+            && in_array($parts[0], $allowedSchemas, true)
+            && $parts[1] === 'postgresql'
+            && in_array($parts[2], $allowedSubdirs, true)
+        ) {
+            $valid = true;
         }
-        if ($file->getExtension() === 'pgsql') {
-            $result[] = $file->getPathname();
+
+        // Pattern B: {subdir}/... (shared top-level)
+        if (!$valid && count($parts) >= 1 && in_array($parts[0], $allowedSubdirs, true)) {
+            $valid = true;
+        }
+
+        if (!$valid) {
+            $errors[] = [
+                'file'     => $file->getPathname(),
+                'relative' => $rel,
+                'message'  => "Non-shipping file — not in any gateway-packed location.\n"
+                            . "             Expected: {schema}/postgresql/{subdir}/ or {subdir}/\n"
+                            . "             (schema ∈ {main,tenant}; subdir ∈ {" . implode(',', $allowedSubdirs) . "})\n"
+                            . "             This file will NEVER be deployed to the database.",
+            ];
         }
     }
 
-    return $result;
+    return $errors;
 }
 
 /**
@@ -644,89 +741,126 @@ function relativePath(string $path): string
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-if (!$json) {
-    echo Color::blue("SQL Integrity Check") . "\n";
-    echo "Scanning: " . relativePath($srcPath) . "\n\n";
-}
-
-$knownTables    = discoverTables($srcPath);
-$knownFunctions = discoverFunctions($srcPath);
-
-// Phase 2: column schema (parsed columns from tables/*.pgsql)
-$tableSchema = discoverTableColumns($srcPath);
+$postgresqlPath = $srcPath . '/postgresql';
 
 if (!$json) {
-    echo "  Tables defined:    " . count($knownTables) . "\n";
-    echo "  Functions defined: " . count($knownFunctions) . "\n";
-    $colCount = array_sum(array_map(fn($t) => count($t['columns']), $tableSchema));
-    echo "  Columns indexed:   $colCount across " . count($tableSchema) . " tables\n";
-    echo "\n";
+    $label = $schemaFilter !== null ? " [--schema=$schemaFilter]" : '';
+    echo Color::blue("SQL Integrity Check$label") . "\n";
+    echo "Scanning: " . relativePath($postgresqlPath) . "\n\n";
 }
 
-// Find all function files to analyse
-$allFunctionFiles = findFiles($srcPath, 'functions');
+// ── Phase 0: Layout conformance (always) ─────────────────────────────────────
 
-$errors   = [];  // table not in definitions → gateway will drop it
-$warnings = [];  // called function not in inventory
+$layoutErrors = checkLayoutConformance($postgresqlPath);
 
-// Phase 2 input: collect all parsed function bodies keyed by file
-// (built during the Phase 1 loop so we only parse files once)
-$fnBodiesByFile = [];
-
-foreach ($allFunctionFiles as $file) {
-    $fnBodies = parseFunctionBodies($file);
-    $fnBodiesByFile[$file] = $fnBodies;
-
-    foreach ($fnBodies as $fn) {
-        $refs = extractReferences($fn['body'], $fn['body_start_line']);
-
-        // Check table references
-        foreach ($refs['tables'] as $ref) {
-            $tbl = $ref['name'];
-            if (!isset($knownTables[$tbl])) {
-                $errors[] = [
-                    'type'    => 'missing_table',
-                    'file'    => $file,
-                    'fn'      => $fn['name'],
-                    'ref'     => $tbl,
-                    'line'    => $ref['line'],
-                    'message' => "Table '$tbl' is not defined in any tables/*.pgsql file.\n"
-                               . "             The gateway will DROP this table on schema-sync → 500 at runtime.",
-                ];
-            }
-        }
-
-        // Check function calls (warnings unless --strict)
-        foreach ($refs['functions'] as $ref) {
-            $callee = $ref['name'];
-            if (!isset($knownFunctions[$callee])) {
-                $warnings[] = [
-                    'type'    => 'missing_function',
-                    'file'    => $file,
-                    'fn'      => $fn['name'],
-                    'ref'     => $callee,
-                    'line'    => $ref['line'],
-                    'message' => "Function '$callee' is called but has no definition in any functions/*.pgsql file.",
-                ];
-            }
-        }
+if (!$json && !empty($layoutErrors)) {
+    echo Color::red("ERRORS [Phase 0] — non-shipping schema files (wrong folder structure):") . "\n\n";
+    foreach ($layoutErrors as $le) {
+        echo Color::red("  ERROR") . "  " . $le['relative'] . "\n";
+        echo "         " . $le['message'] . "\n\n";
     }
 }
 
-// ── Phase 2: Column name integrity ───────────────────────────────────────────
+// ── Phase 1 + 2: per-schema ref checks ───────────────────────────────────────
+// Run for each schema in scope ($schemaFilter restricts to one; default = both)
 
-$colResult     = checkColumnIntegrity($tableSchema, $fnBodiesByFile, MAX_COLUMN_DEPTH);
-$columnErrors  = $colResult['errors'];
-$columnNotices = $colResult['notices'];
+$schemasToCheck = $schemaFilter !== null ? [$schemaFilter] : ['main', 'tenant'];
+
+// Aggregated across all schemas
+$errors        = [];
+$warnings      = [];
+$columnErrors  = [];
+$columnNotices = [];
+$totalFnFiles  = 0;
+
+foreach ($schemasToCheck as $schema) {
+    $primaryDir = $postgresqlPath . '/' . $schema . '/postgresql';
+    if (!is_dir($primaryDir)) {
+        // This schema doesn't exist in this project — skip silently
+        continue;
+    }
+
+    // Build the scoped file sets
+    $tableFiles = findSchemaFiles($postgresqlPath, $schema, 'tables');
+    $fnFiles    = findSchemaFiles($postgresqlPath, $schema, 'functions');
+
+    $knownTables    = discoverTables($tableFiles);
+    $knownFunctions = discoverFunctions($fnFiles);
+    $tableSchema    = discoverTableColumns($tableFiles);
+
+    if (!$json) {
+        $colCount = array_sum(array_map(fn($t) => count($t['columns']), $tableSchema));
+        echo Color::blue("Schema: $schema") . "\n";
+        echo "  Tables:    " . count($knownTables)    . "  Functions: " . count($knownFunctions) . "\n";
+        echo "  Columns:   $colCount across " . count($tableSchema) . " tables\n";
+        echo "  Fn files:  " . count($fnFiles) . "\n\n";
+    }
+
+    $totalFnFiles += count($fnFiles);
+
+    // ── Phase 1: ref checks ───────────────────────────────────────────────────
+    $fnBodiesByFile = [];
+
+    foreach ($fnFiles as $file) {
+        $fnBodies              = parseFunctionBodies($file);
+        $fnBodiesByFile[$file] = $fnBodies;
+
+        foreach ($fnBodies as $fn) {
+            $refs = extractReferences($fn['body'], $fn['body_start_line']);
+
+            foreach ($refs['tables'] as $ref) {
+                $tbl = $ref['name'];
+                if (!isset($knownTables[$tbl])) {
+                    $errors[] = [
+                        'type'    => 'missing_table',
+                        'schema'  => $schema,
+                        'file'    => $file,
+                        'fn'      => $fn['name'],
+                        'ref'     => $tbl,
+                        'line'    => $ref['line'],
+                        'message' => "Table '$tbl' is not in the $schema schema's table set.\n"
+                                   . "             Cross-DB ref or missing tables/*.pgsql definition.\n"
+                                   . "             The gateway will DROP undefined tables on schema-sync → 500.",
+                    ];
+                }
+            }
+
+            foreach ($refs['functions'] as $ref) {
+                $callee = $ref['name'];
+                if (!isset($knownFunctions[$callee])) {
+                    $warnings[] = [
+                        'type'    => 'missing_function',
+                        'schema'  => $schema,
+                        'file'    => $file,
+                        'fn'      => $fn['name'],
+                        'ref'     => $callee,
+                        'line'    => $ref['line'],
+                        'message' => "Function '$callee' is called but has no definition in the $schema function set.",
+                    ];
+                }
+            }
+        }
+    }
+
+    // ── Phase 2: column integrity ─────────────────────────────────────────────
+    $colResult      = checkColumnIntegrity($tableSchema, $fnBodiesByFile, MAX_COLUMN_DEPTH);
+    $columnErrors   = array_merge($columnErrors,  $colResult['errors']);
+    $columnNotices  = array_merge($columnNotices, $colResult['notices']);
+}
 
 // ── Output ────────────────────────────────────────────────────────────────────
 
 if ($json) {
     echo json_encode([
-        'tables_defined'    => count($knownTables),
-        'functions_defined' => count($knownFunctions),
+        'schemas_checked'   => $schemasToCheck,
+        'layout_errors'     => array_map(fn($le) => [
+            'type'     => 'layout',
+            'file'     => relativePath($le['file']),
+            'relative' => $le['relative'],
+        ], $layoutErrors),
         'errors'            => array_map(fn($e) => [
             'type'    => $e['type'],
+            'schema'  => $e['schema'],
             'file'    => relativePath($e['file']),
             'fn'      => $e['fn'],
             'ref'     => $e['ref'],
@@ -734,6 +868,7 @@ if ($json) {
         ], $errors),
         'warnings'          => array_map(fn($w) => [
             'type'    => $w['type'],
+            'schema'  => $w['schema'],
             'file'    => relativePath($w['file']),
             'fn'      => $w['fn'],
             'ref'     => $w['ref'],
@@ -755,7 +890,7 @@ if ($json) {
             'msg'     => $n['msg'],
         ], $columnNotices),
     ], JSON_PRETTY_PRINT) . "\n";
-    $hasFailure  = !empty($errors) || !empty($columnErrors) || ($strict && !empty($warnings));
+    $hasFailure  = !empty($layoutErrors) || !empty($errors) || !empty($columnErrors) || ($strict && !empty($warnings));
     $hasWarnings = !empty($warnings);
     exit($hasFailure ? 1 : ($hasWarnings ? 2 : 0));
 }
@@ -764,9 +899,9 @@ if ($json) {
 
 // Phase 1: Table existence errors
 if (!empty($errors)) {
-    echo Color::red("ERRORS [Phase 1] — missing table definitions (will cause runtime 500s):") . "\n\n";
+    echo Color::red("ERRORS [Phase 1] — cross-DB / missing table definitions:") . "\n\n";
     foreach ($errors as $e) {
-        echo Color::red("  ERROR") . " in " . Color::yellow($e['fn'] . "()") . "\n";
+        echo Color::red("  ERROR") . " [" . $e['schema'] . "] in " . Color::yellow($e['fn'] . "()") . "\n";
         echo "        " . $e['message'] . "\n";
         echo "        → " . relativePath($e['file']) . ":" . $e['line'] . "\n\n";
     }
@@ -775,10 +910,10 @@ if (!empty($errors)) {
 // Phase 1: Missing function warnings
 if (!empty($warnings)) {
     $label = $strict ? Color::red("ERRORS [Phase 1, --strict]") : Color::yellow("WARNINGS [Phase 1]");
-    echo $label . " — called functions not found in definitions:\n\n";
+    echo $label . " — called functions not found in schema:\n\n";
     foreach ($warnings as $w) {
         $tag = $strict ? Color::red("  ERROR") : Color::yellow("  WARN ");
-        echo "$tag in " . Color::yellow($w['fn'] . "()") . "\n";
+        echo "$tag [" . $w['schema'] . "] in " . Color::yellow($w['fn'] . "()") . "\n";
         echo "        " . $w['message'] . "\n";
         echo "        → " . relativePath($w['file']) . ":" . $w['line'] . "\n\n";
     }
@@ -806,18 +941,19 @@ if (!empty($columnNotices)) {
 }
 
 // Summary
-$errCount    = count($errors);
-$warnCount   = count($warnings);
-$colErrCount = count($columnErrors);
-$noticeCount = count($columnNotices);
+$layoutErrCount = count($layoutErrors);
+$errCount       = count($errors);
+$warnCount      = count($warnings);
+$colErrCount    = count($columnErrors);
+$noticeCount    = count($columnNotices);
 
-$totalErrors = $errCount + $colErrCount + ($strict ? $warnCount : 0);
+$hasFailure  = $layoutErrCount > 0 || $errCount > 0 || $colErrCount > 0 || ($strict && $warnCount > 0);
+$hasWarnings = $warnCount > 0;
 
-if ($totalErrors === 0 && $warnCount === 0) {
+if (!$hasFailure && !$hasWarnings) {
     echo Color::green("✓ All clear.") . " "
-        . count($knownTables) . " tables, "
-        . count($knownFunctions) . " functions, "
-        . count($allFunctionFiles) . " function files checked — no issues found.";
+        . implode('+', $schemasToCheck) . " schema(s) checked, "
+        . "$totalFnFiles function file(s).";
     if ($noticeCount > 0) {
         echo " ($noticeCount function(s) skipped by depth guard)";
     }
@@ -826,17 +962,17 @@ if ($totalErrors === 0 && $warnCount === 0) {
 }
 
 $summary = [];
-if ($errCount > 0)    $summary[] = Color::red("$errCount table-existence error(s)");
-if ($colErrCount > 0) $summary[] = Color::red("$colErrCount column-name error(s)");
-if ($warnCount > 0)   $summary[] = ($strict ? Color::red("$warnCount warning(s) [--strict]") : Color::yellow("$warnCount warning(s)"));
-if ($noticeCount > 0) $summary[] = Color::yellow("$noticeCount notice(s) (parser skipped)");
+if ($layoutErrCount > 0) $summary[] = Color::red("$layoutErrCount layout error(s)");
+if ($errCount > 0)        $summary[] = Color::red("$errCount table/fn ref error(s)");
+if ($colErrCount > 0)     $summary[] = Color::red("$colErrCount column-name error(s)");
+if ($warnCount > 0)       $summary[] = ($strict ? Color::red("$warnCount warning(s) [--strict]") : Color::yellow("$warnCount warning(s)"));
+if ($noticeCount > 0)     $summary[] = Color::yellow("$noticeCount notice(s) (parser skipped)");
 
-echo implode(', ', $summary) . " found across "
-    . count($allFunctionFiles) . " function file(s).\n";
+echo implode(', ', $summary) . " — schemas: " . implode('+', $schemasToCheck)
+    . ", $totalFnFiles function file(s) checked.\n";
 
-if (!$strict && $errCount === 0 && $colErrCount === 0 && $warnCount > 0) {
+if (!$strict && $errCount === 0 && $colErrCount === 0 && $layoutErrCount === 0 && $warnCount > 0) {
     echo Color::yellow("Tip:") . " Use --strict to treat function-call warnings as errors in CI.\n";
 }
 
-$hasFailure = $errCount > 0 || $colErrCount > 0 || ($strict && $warnCount > 0);
 exit($hasFailure ? 1 : 2);
