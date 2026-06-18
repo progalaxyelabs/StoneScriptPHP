@@ -31,39 +31,31 @@ if (!defined('ROOT_PATH')) {
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 
-$argv          = $_SERVER['argv'] ?? [];
-$strict        = in_array('--strict', $argv, true);
-$json          = in_array('--json', $argv, true);
-$noColumnCheck = in_array('--no-column-check', $argv, true);
+$argv   = $_SERVER['argv'] ?? [];
+$strict = in_array('--strict', $argv, true);
+$json   = in_array('--json', $argv, true);
 
-$maxDepth = 5;
-foreach ($argv as $arg) {
-    if (preg_match('/^--max-depth=(\d+)$/', $arg, $m)) {
-        $maxDepth = max(1, (int) $m[1]);
-        break;
-    }
-}
+// Internal paren-nesting limit for the Phase 2 column parser.
+// Functions deeper than this have column-checking skipped (emitted as NOTICE).
+// 8 handles all but the most extreme aggregation queries; not exposed as a flag.
+const MAX_COLUMN_DEPTH = 8;
 
 if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
-    echo "Usage: php stone validate sqlintegrity [options]\n\n";
+    echo "Usage: php stone validate sqlintegrity [--strict] [--json]\n\n";
     echo "Options:\n";
-    echo "  --strict             Treat warnings (unknown function calls) as errors\n";
-    echo "  --json               Machine-readable JSON output\n";
-    echo "  --no-column-check    Skip Phase 2 column-name integrity check\n";
-    echo "  --max-depth=N        Max paren nesting depth for column parser (default: 5)\n\n";
-    echo "Phase 1 — Table existence:\n";
-    echo "  Scans src/postgresql/ for table + function definitions, then checks\n";
-    echo "  every function body for references to tables or functions with no\n";
-    echo "  matching definition file. Critical check:\n\n";
-    echo "    INSERT INTO <table>  when <table> has no tables/*.pgsql file\n";
-    echo "    → gateway schema-sync will DROP the table → 500 at runtime\n\n";
-    echo "Phase 2 — Column name integrity:\n";
-    echo "  Parses table definitions for column names, then checks qualified refs\n";
-    echo "  (alias.column / table.column) inside function bodies to detect typos\n";
-    echo "  like  users.is_email_verified  when the column is  email_verified.\n\n";
-    echo "  Uses a tokenizer + keyword-segmented tree with depth tracking.\n";
-    echo "  Functions that exceed --max-depth have column checking skipped\n";
-    echo "  (emitted as NOTICE, not an error).\n\n";
+    echo "  --strict   Treat warnings (unknown function calls) as errors (for CI)\n";
+    echo "  --json     Machine-readable JSON output\n\n";
+    echo "Phase 1 — Table existence (tokenizer-based):\n";
+    echo "  Checks every function body for FROM/JOIN/INSERT INTO/UPDATE/DELETE FROM\n";
+    echo "  references to tables that have no matching tables/*.pgsql definition.\n";
+    echo "  A missing table = the gateway will DROP it on schema-sync → 500 at runtime.\n\n";
+    echo "  Note: tables referenced inside EXECUTE format(…) dynamic SQL are NOT\n";
+    echo "  checked (static analysis limitation).\n\n";
+    echo "Phase 2 — Column name integrity (tokenizer + scope tree):\n";
+    echo "  Checks qualified refs (alias.column / table.column) against the parsed\n";
+    echo "  column list from each table's tables/*.pgsql definition.\n";
+    echo "  Catches typos like  users.is_email_verified  when column is  email_verified.\n\n";
+    echo "Exit codes:  0 clean,  1 errors,  2 warnings only\n\n";
     exit(0);
 }
 
@@ -134,86 +126,227 @@ function discoverFunctions(string $srcPath): array
     return $functions;
 }
 
-// ── Step 3: Extract references from a function body ──────────────────────────
+// ── Step 3: Extract references from a function body (tokenizer-based) ───────
+//
+// Replaces the old line-by-line regex approach.
+// Using the tokenizer means DELETE FROM, multi-line UPDATE … SET, and any
+// other cross-line construct are all handled correctly by the same parser
+// that Phase 2 uses — one parser, no disagreements between phases.
+//
+// Documented limitation: tables referenced only inside EXECUTE format(…) or
+// other dynamic SQL strings are NOT checked — static analysis can't see them.
 
 /**
  * @return array{tables: array<array{name:string,line:int}>, functions: array<array{name:string,line:int}>}
  */
 function extractReferences(string $body, int $bodyStartLine): array
 {
+    $tokenizer = new SqlTokenizer();
+    $tokens    = $tokenizer->tokenize($body);
+    $n         = count($tokens);
+
     $tableRefs = [];
     $fnRefs    = [];
-    $lines     = explode("\n", $body);
 
-    // First pass: collect CTE names so we don't flag them as missing tables
+    // ── Pass 1: collect CTE names ─────────────────────────────────────────────
+    // WITH name AS ( … ) — skip the body (at depth > 0), collect name.
     $cteNames = [];
-    if (preg_match_all('/\bWITH\s+([a-z_][a-z0-9_]*)\s+AS\s*\(/i', $body, $m)) {
-        foreach ($m[1] as $cte) {
-            $cteNames[strtolower($cte)] = true;
+    $depth    = 0;
+    for ($i = 0; $i < $n; $i++) {
+        $tok = $tokens[$i];
+        if ($tok->type === SqlToken::PAREN_OPEN)  { $depth++; continue; }
+        if ($tok->type === SqlToken::PAREN_CLOSE) { $depth = max(0, $depth - 1); continue; }
+        if ($depth > 0) { continue; } // inside CTE/subquery body — skip
+
+        if (!$tok->isKeyword('WITH')) { continue; }
+
+        // Collect CTE names: WITH name AS (, and subsequent , name AS (
+        // Must track paren depth so we don't break on SELECT *inside* a CTE body.
+        $innerDepth = 0;
+        for ($j = $i + 1; $j < $n; $j++) {
+            $t = $tokens[$j];
+            if ($t->type === SqlToken::PAREN_OPEN)  { $innerDepth++; continue; }
+            if ($t->type === SqlToken::PAREN_CLOSE) { $innerDepth = max(0, $innerDepth - 1); continue; }
+            if ($innerDepth > 0) { continue; } // inside a CTE body — skip but don't break
+
+            if ($t->type === SqlToken::IDENT) {
+                $cteName = strtolower($t->value);
+                // Confirm it's followed by AS (= CTE name, not a regular ident)
+                if ($j + 1 < $n && $tokens[$j + 1]->isKeyword('AS')) {
+                    $cteNames[$cteName] = true;
+                }
+            } elseif ($t->isKeyword('SELECT', 'INSERT', 'UPDATE', 'DELETE')) {
+                break; // main statement at depth 0 — done collecting CTEs
+            }
         }
-    }
-    // Comma CTEs:  , name AS (
-    if (preg_match_all('/,\s*([a-z_][a-z0-9_]*)\s+AS\s*\(/i', $body, $m)) {
-        foreach ($m[1] as $cte) {
-            $cteNames[strtolower($cte)] = true;
-        }
+        break; // WITH appears at most once per statement in our functions
     }
 
-    foreach ($lines as $i => $line) {
-        $lineNo = $bodyStartLine + $i;
-        $trimmed = ltrim($line);
+    // ── Pass 2: table refs + function calls ───────────────────────────────────
+    //
+    // Keywords that introduce a table name as the NEXT non-keyword token:
+    //   FROM, JOIN variants, INSERT INTO, DELETE FROM, TRUNCATE [TABLE]
+    //   UPDATE  (table follows immediately; SET comes later — no need to wait)
+    //
+    // Function calls: IDENT immediately followed by PAREN_OPEN
+    // (but not if the IDENT is itself a table name we just recorded)
 
-        // Skip pure comment lines
-        if (str_starts_with($trimmed, '--')) {
+    // Table-introducing keywords (all normalised to uppercase, multi-word already merged by tokenizer)
+    static $tableKws = [
+        'FROM', 'JOIN',
+        'INNER JOIN', 'LEFT JOIN', 'LEFT OUTER JOIN',
+        'RIGHT JOIN', 'RIGHT OUTER JOIN',
+        'FULL JOIN', 'FULL OUTER JOIN', 'CROSS JOIN',
+        'INSERT INTO', 'DELETE FROM',
+        'UPDATE', 'TRUNCATE',
+    ];
+
+    $depth        = 0;
+    $expectTable  = false;  // next IDENT/QUALIFIED should be recorded as a table
+    $inFromCtx    = false;  // inside FROM — commas introduce additional sources
+    $skipDynamic  = false;  // inside EXECUTE/RAISE — skip until next real keyword
+    $tablesSeen   = [];     // lower(name) → true, for this whole body
+    $prevWasAs    = false;  // previous meaningful token was AS keyword
+
+    for ($i = 0; $i < $n; $i++) {
+        $tok = $tokens[$i];
+
+        // ── Depth ─────────────────────────────────────────────────────────────
+        if ($tok->type === SqlToken::PAREN_OPEN) {
+            $depth++;
+            $expectTable = false; // never extract table from inside parens
+            $inFromCtx   = false;
+            continue;
+        }
+        if ($tok->type === SqlToken::PAREN_CLOSE) {
+            $depth = max(0, $depth - 1);
             continue;
         }
 
-        // Strip inline comments (-- ...) and single-quoted string literals
-        // before applying regex — prevents false positives from comment text
-        // and string content containing word( patterns.
-        $cleanLine = preg_replace("/--[^\n]*/", '', $line);          // strip -- comment
-        $cleanLine = preg_replace("/'(?:[^'\\\\]|\\\\.)*'/", "''", $cleanLine); // strip 'string'
-        $line = $cleanLine;   // use cleaned line for all regex below
-
-        // Table references: FROM table, JOIN table, INSERT INTO table, UPDATE table SET
-        $tablePatterns = [
-            '/\bFROM\s+([a-z_][a-z0-9_]*)\b/i',
-            '/\bJOIN\s+([a-z_][a-z0-9_]*)\b/i',
-            '/\bINSERT\s+INTO\s+([a-z_][a-z0-9_]*)\b/i',
-            '/\bUPDATE\s+([a-z_][a-z0-9_]*)\s+SET\b/i',
-            // TRUNCATE (we also want to know about these)
-            '/\bTRUNCATE\s+(?:TABLE\s+)?([a-z_][a-z0-9_]*)\b/i',
-        ];
-
-        // Track table names found on THIS line — these are not function calls
-        $lineTableNames = [];
-
-        foreach ($tablePatterns as $pattern) {
-            if (preg_match_all($pattern, $line, $matches)) {
-                foreach ($matches[1] as $name) {
-                    $lower = strtolower($name);
-                    // Skip: system tables, CTEs, and PG built-in functions used as
-                    // set-returning functions in FROM/JOIN (e.g. FROM jsonb_array_elements(...))
-                    if (!isset($cteNames[$lower]) && !isPgSystemTable($lower) && !isPgBuiltinFunction($lower) && !isSqlKeyword($lower)) {
-                        $tableRefs[] = ['name' => $lower, 'line' => $lineNo];
-                    }
-                    $lineTableNames[$lower] = true;  // always record to suppress fn-call false positive
-                }
+        // ── Skip EXECUTE / RAISE dynamic SQL ──────────────────────────────────
+        // Content is a string literal — nothing to check. Skip until the next
+        // real keyword resets the context.
+        if ($skipDynamic) {
+            if ($tok->type === SqlToken::KEYWORD
+                && !in_array($tok->upper, ['THEN', 'ELSE', 'ELSIF'], true)
+            ) {
+                $skipDynamic = false;
+                // fall through to handle this keyword
+            } else {
+                continue;
             }
         }
 
-        // INTO varname FROM table  (PL/pgSQL SELECT ... INTO var FROM table)
-        // already covered by FROM pattern above
+        // ── Keywords ──────────────────────────────────────────────────────────
+        if ($tok->type === SqlToken::KEYWORD) {
+            $kw        = $tok->upper;
+            $prevWasAs = ($kw === 'AS');
 
-        // Function calls: fn_name( — but not SQL keywords, pg built-ins, or table names on this line
-        if (preg_match_all('/\b([a-z_][a-z0-9_]+)\s*\(/i', $line, $matches)) {
-            foreach ($matches[1] as $name) {
-                $lower = strtolower($name);
-                // Skip if: pg built-in, SQL keyword, or already identified as a table ref on this line
-                if (!isPgBuiltinFunction($lower) && !isSqlKeyword($lower) && !isset($lineTableNames[$lower])) {
-                    $fnRefs[] = ['name' => $lower, 'line' => $lineNo];
-                }
+            if ($kw === 'EXECUTE' || $kw === 'RAISE') {
+                $skipDynamic = true;
+                $expectTable = false;
+                $inFromCtx   = false;
+                continue;
             }
+
+            // TRUNCATE [TABLE] — skip optional TABLE keyword
+            if ($kw === 'TRUNCATE') {
+                $expectTable = true;
+                $inFromCtx   = false;
+                if ($i + 1 < $n && $tokens[$i + 1]->isKeyword('TABLE')) {
+                    $i++;
+                }
+                continue;
+            }
+
+            if (in_array($kw, $tableKws, true)) {
+                $expectTable = true;
+                $inFromCtx   = ($kw === 'FROM' || $kw === 'DELETE FROM');
+                continue;
+            }
+
+            // SET after UPDATE clears the table-expectation (UPDATE tbl alias SET …)
+            if ($kw === 'SET') {
+                $expectTable = false;
+                $inFromCtx   = false;
+                continue;
+            }
+
+            // Any other clause keyword — reset expectation
+            $expectTable = false;
+            $inFromCtx   = false;
+            continue;
+        }
+
+        // ── Comma at depth 0 inside a FROM source list ────────────────────────
+        // e.g. FROM a, b  or  FROM a a1, b b1
+        if ($tok->type === SqlToken::COMMA && $depth === 0 && $inFromCtx) {
+            $expectTable = true;
+            continue;
+        }
+
+        // ── Table name token ──────────────────────────────────────────────────
+        if ($expectTable
+            && ($tok->type === SqlToken::IDENT || $tok->type === SqlToken::QUALIFIED)
+        ) {
+            // For schema.table qualified names — take the right-hand part,
+            // but suppress system-schema refs entirely (information_schema.*, pg_catalog.*)
+            if ($tok->type === SqlToken::QUALIFIED) {
+                $parts     = explode('.', strtolower($tok->value), 2);
+                $qualifier = $parts[0];
+                $name      = $parts[1];
+
+                // System schema → never a user table
+                static $systemSchemas = ['information_schema', 'pg_catalog', 'pg_toast'];
+                if (in_array($qualifier, $systemSchemas, true)) {
+                    $tablesSeen[$name] = true; // prevent fn-call detection
+                    $expectTable       = false;
+                    continue;
+                }
+            } else {
+                $name = strtolower($tok->value);
+            }
+
+            if (!isset($cteNames[$name])
+                && !isPgSystemTable($name)
+                && !isPgBuiltinFunction($name)
+                && !isSqlKeyword($name)
+            ) {
+                $tableRefs[]       = ['name' => $name, 'line' => $bodyStartLine + $tok->line - 1];
+                $tablesSeen[$name] = true;
+            } else {
+                $tablesSeen[$name] = true; // suppress fn-call false positive even for builtins
+            }
+
+            // After UPDATE table, there may be an alias IDENT before SET — keep
+            // expectTable=false so the alias isn't flagged as another table.
+            $expectTable = false;
+            continue;
+        }
+
+        // ── Function call: IDENT ( ────────────────────────────────────────────
+        // Guard: skip if preceded by AS — that's a table/column alias declaration
+        // e.g.  ) AS v(name)  or  table AS t(col)
+        if ($tok->type === SqlToken::IDENT
+            && !$prevWasAs
+            && $i + 1 < $n
+            && $tokens[$i + 1]->type === SqlToken::PAREN_OPEN
+        ) {
+            $name = strtolower($tok->value);
+            // Skip builtins, SQL keywords, and any name we already recorded as a table
+            if (!isPgBuiltinFunction($name)
+                && !isSqlKeyword($name)
+                && !isset($tablesSeen[$name])
+                && !isset($cteNames[$name])
+            ) {
+                $fnRefs[] = ['name' => $name, 'line' => $bodyStartLine + $tok->line - 1];
+            }
+            $expectTable = false;
+        }
+
+        // Reset prevWasAs after any non-keyword token (IDENT, QUALIFIED, etc.)
+        if ($tok->type !== SqlToken::KEYWORD) {
+            $prevWasAs = false;
         }
     }
 
@@ -520,15 +653,13 @@ $knownTables    = discoverTables($srcPath);
 $knownFunctions = discoverFunctions($srcPath);
 
 // Phase 2: column schema (parsed columns from tables/*.pgsql)
-$tableSchema = $noColumnCheck ? [] : discoverTableColumns($srcPath);
+$tableSchema = discoverTableColumns($srcPath);
 
 if (!$json) {
     echo "  Tables defined:    " . count($knownTables) . "\n";
     echo "  Functions defined: " . count($knownFunctions) . "\n";
-    if (!$noColumnCheck) {
-        $colCount = array_sum(array_map(fn($t) => count($t['columns']), $tableSchema));
-        echo "  Columns indexed:   $colCount across " . count($tableSchema) . " tables\n";
-    }
+    $colCount = array_sum(array_map(fn($t) => count($t['columns']), $tableSchema));
+    echo "  Columns indexed:   $colCount across " . count($tableSchema) . " tables\n";
     echo "\n";
 }
 
@@ -584,14 +715,9 @@ foreach ($allFunctionFiles as $file) {
 
 // ── Phase 2: Column name integrity ───────────────────────────────────────────
 
-$columnErrors  = [];
-$columnNotices = [];
-
-if (!$noColumnCheck && !empty($tableSchema)) {
-    $colResult    = checkColumnIntegrity($tableSchema, $fnBodiesByFile, $maxDepth);
-    $columnErrors = $colResult['errors'];
-    $columnNotices = $colResult['notices'];
-}
+$colResult     = checkColumnIntegrity($tableSchema, $fnBodiesByFile, MAX_COLUMN_DEPTH);
+$columnErrors  = $colResult['errors'];
+$columnNotices = $colResult['notices'];
 
 // ── Output ────────────────────────────────────────────────────────────────────
 
@@ -629,8 +755,9 @@ if ($json) {
             'msg'     => $n['msg'],
         ], $columnNotices),
     ], JSON_PRETTY_PRINT) . "\n";
-    $hasFailure = !empty($errors) || !empty($columnErrors) || ($strict && !empty($warnings));
-    exit($hasFailure ? 1 : 0);
+    $hasFailure  = !empty($errors) || !empty($columnErrors) || ($strict && !empty($warnings));
+    $hasWarnings = !empty($warnings);
+    exit($hasFailure ? 1 : ($hasWarnings ? 2 : 0));
 }
 
 // Human-readable output
@@ -675,8 +802,7 @@ if (!empty($columnNotices)) {
         echo "         " . $n['msg'] . "\n";
         echo "         → " . relativePath($n['file']) . ":" . $n['line'] . "\n\n";
     }
-    echo Color::yellow("Tip:") . " Use --max-depth=N (current: $maxDepth) to analyse deeper functions,\n";
-    echo "     or --no-column-check to skip Phase 2 entirely.\n\n";
+    echo "\n";
 }
 
 // Summary
