@@ -65,6 +65,43 @@ class Env
 
     public string $ALLOWED_ORIGINS = 'http://localhost:3000,http://localhost:4200';
 
+    // Redis / cache (v4.1.0+) — typed so they flow through the central secret
+    // resolution chain instead of Cache.php reading $_ENV directly.
+    public string $REDIS_HOST = '127.0.0.1';
+    public int $REDIS_PORT = 6379;
+    public ?string $REDIS_PASSWORD = null;
+    public int $REDIS_DATABASE = 0;
+    public string $REDIS_PREFIX = 'stonescript:';
+    public int $CACHE_DEFAULT_TTL = 3600;
+    public bool $CACHE_ENABLED = true;
+
+    /**
+     * Config keys that MUST be present and non-empty for the framework to
+     * boot. A missing one fails fast at construction time with a clear
+     * message rather than surfacing as a silent runtime 500.
+     *
+     * Note: these are also covered by the typed properties above; they are
+     * listed here so the boot-time validation is explicit and auditable.
+     *
+     * @var string[]
+     */
+    protected array $requiredSecrets = [
+        'DB_GATEWAY_URL',
+        'DB_GATEWAY_PLATFORM',
+    ];
+
+    /**
+     * Raw resolved string values for every key that went through the
+     * secret-resolution chain, keyed by the original (un-lowercased) name.
+     * Populated for typed properties during construction, and lazily for
+     * ad-hoc keys requested via secret(). Used by secret() so callers can
+     * read secrets that are NOT declared as typed properties (e.g.
+     * REDIS_PASSWORD historically, JWT_PRIVATE_KEY) through one path.
+     *
+     * @var array<string, ?string>
+     */
+    protected array $resolved = [];
+
     protected function __construct()
     {
         // Load .env file if it exists (optional for Docker environments)
@@ -81,26 +118,131 @@ class Env
         foreach ($properties as $property) {
             $propName = $property->getName();
 
-            // Check if environment variable is set
-            $envValue = getenv($propName);
-            if ($envValue === false && isset($_ENV[$propName])) {
-                $envValue = $_ENV[$propName];
-            }
+            // Resolve via the full chain:
+            //   1. getenv(VAR) / $_ENV[VAR]           (existing behaviour)
+            //   2. getenv(VAR_FILE) -> read that file (Docker secret convention)
+            //   3. /run/secrets/<lowercase var>       (Docker Swarm default mount)
+            // Tiers 2-3 read FILES inside the PHP worker, so they are immune to
+            // PHP-FPM clear_env stripping bash-exported vars.
+            $rawValue = $this->resolveRaw($propName);
 
-            if ($envValue !== false) {
+            // Record the raw resolved value so secret() can serve it without
+            // re-running the chain (and so ad-hoc, non-typed keys share the path).
+            $this->resolved[$propName] = $rawValue;
+
+            if ($rawValue !== null) {
                 // Cast value based on property type
-                $this->$propName = $this->castValue($envValue, $property->getType());
+                $this->$propName = $this->castValue($rawValue, $property->getType());
             }
-            // If no env var set, property keeps its default value
+            // If nothing resolved, property keeps its default value
         }
 
-        // Validate required gateway configuration (v3+ gateway-only)
-        if (empty($this->DB_GATEWAY_URL)) {
-            throw new Exception('DB_GATEWAY_URL is required. StoneScriptPHP v3+ uses gateway-only mode. Run: php stone setup');
+        // Validate required secrets/config are present and non-empty.
+        // Fail fast at boot with a clear message instead of a silent runtime 500.
+        foreach ($this->requiredSecrets as $required) {
+            $value = $this->resolved[$required] ?? $this->resolveRaw($required);
+            if ($value === null || trim($value) === '') {
+                throw new Exception(sprintf(
+                    "Required configuration '%s' is missing or empty. "
+                    . "Set the %s env var, the %s_FILE env var pointing at a file, "
+                    . "or mount a Docker secret at /run/secrets/%s. "
+                    . "(StoneScriptPHP v3+ uses gateway-only mode. Run: php stone setup)",
+                    $required,
+                    $required,
+                    $required,
+                    strtolower($required)
+                ));
+            }
         }
-        if (empty($this->DB_GATEWAY_PLATFORM)) {
-            throw new Exception('DB_GATEWAY_PLATFORM is required. Run: php stone setup');
+    }
+
+    /**
+     * Resolve a config/secret value through the native chain. Returns the
+     * raw (uncast) string, or null when nothing resolves.
+     *
+     * Priority order (mirrors the Rust auth service config.rs and the Docker
+     * community standard):
+     *   1. getenv(VAR) (non-empty)  OR  $_ENV[VAR]
+     *   2. getenv(VAR . "_FILE") -> read the file at that path
+     *   3. /run/secrets/<lowercase VAR> -> read the file
+     */
+    protected function resolveRaw(string $name): ?string
+    {
+        // Tier 1: direct env var (existing behaviour, unchanged).
+        $envValue = getenv($name);
+        if ($envValue === false && isset($_ENV[$name])) {
+            $envValue = $_ENV[$name];
         }
+        if ($envValue !== false && $envValue !== '') {
+            return $envValue;
+        }
+
+        // Tier 2: <VAR>_FILE convention — explicit file path passed via env.
+        $filePathEnv = getenv($name . '_FILE');
+        if ($filePathEnv === false && isset($_ENV[$name . '_FILE'])) {
+            $filePathEnv = $_ENV[$name . '_FILE'];
+        }
+        if ($filePathEnv !== false && $filePathEnv !== '' && is_file($filePathEnv) && is_readable($filePathEnv)) {
+            $contents = @file_get_contents($filePathEnv);
+            if ($contents !== false) {
+                return $this->trimSecret($contents);
+            }
+        }
+
+        // Tier 3: /run/secrets/<lowercase var> — Docker Swarm default mount.
+        $secretPath = '/run/secrets/' . strtolower($name);
+        if (is_file($secretPath) && is_readable($secretPath)) {
+            $contents = @file_get_contents($secretPath);
+            if ($contents !== false) {
+                return $this->trimSecret($contents);
+            }
+        }
+
+        // Tier 1 returned an empty string (env var explicitly set to "") —
+        // preserve that as-is so callers can distinguish "" from "unset".
+        if ($envValue === '') {
+            return '';
+        }
+
+        return null;
+    }
+
+    /**
+     * Trim a single trailing newline (and surrounding whitespace) from a
+     * secret file's contents. Secret files commonly have a trailing newline
+     * that would corrupt tokens/keys if not stripped.
+     */
+    private function trimSecret(string $value): string
+    {
+        return rtrim($value, "\r\n");
+    }
+
+    /**
+     * Resolve a config/secret by name through the native chain
+     * (env -> <NAME>_FILE -> /run/secrets/<name>).
+     *
+     * Prefer this over raw getenv()/$_ENV[]/$_SERVER[] for ANY config or
+     * secret access — it reads /run/secrets/<name> and <NAME>_FILE natively
+     * and is immune to PHP-FPM clear_env. Works for keys that are NOT declared
+     * as typed Env properties (e.g. JWT_PRIVATE_KEY, REDIS_PASSWORD).
+     *
+     * @param string      $name    The config/secret variable name.
+     * @param string|null $default Returned when nothing resolves.
+     */
+    public static function secret(string $name, ?string $default = null): ?string
+    {
+        $env = self::get_instance();
+
+        // Serve a previously-resolved typed property value if we have it.
+        if (array_key_exists($name, $env->resolved)) {
+            $value = $env->resolved[$name];
+            return $value ?? $default;
+        }
+
+        // Ad-hoc key (not a typed property): run the chain and memoize.
+        $value = $env->resolveRaw($name);
+        $env->resolved[$name] = $value;
+        return $value ?? $default;
     }
 
     /**

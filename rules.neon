@@ -1,0 +1,20 @@
+# StoneScriptPHP framework PHPStan rules.
+#
+# Platforms inherit the framework's advisory config/secret rules by adding
+# this file to their phpstan.neon `includes:` section, e.g.:
+#
+#   includes:
+#       - vendor/progalaxyelabs/stonescriptphp/rules.neon
+#
+# The RawEnvAccessRule flags raw getenv()/putenv()/$_ENV[]/$_SERVER[] config
+# and secret access outside StoneScriptPHP\Env, nudging callers toward
+# Env::secret('X') (which reads /run/secrets/X and <X>_FILE natively and is
+# immune to PHP-FPM clear_env).
+#
+# It is ADVISORY: it carries the stable identifier `stonescriptphp.rawEnvAccess`
+# so any legitimate exception can be silenced with `@phpstan-ignore` inline or
+# via `ignoreErrors` in the consuming project's phpstan.neon. It is NOT meant to
+# fail a build by itself; treat it as guidance alongside scripts/drift-check.py.
+
+rules:
+    - StoneScriptPHP\PHPStan\Rules\RawEnvAccessRule

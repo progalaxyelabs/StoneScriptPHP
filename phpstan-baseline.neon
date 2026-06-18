@@ -1,0 +1,571 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$ALLOWED_ORIGINS \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Application.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$AUTH_MODE \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 2
+			path: src/Application.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$AUTH_SERVICE_URL \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 2
+			path: src/Application.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$PLATFORM_CODE \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 2
+			path: src/Application.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: src/Auth/AuthService.php
+
+		-
+			message: '#^Parameter \#1 \$ch of method StoneScriptPHP\\Auth\\Client\\AuthServiceClient\:\:executeCurl\(\) expects resource, CurlHandle given\.$#'
+			identifier: argument.type
+			count: 3
+			path: src/Auth/Client/AuthServiceClient.php
+
+		-
+			message: '#^Parameter \#1 \$handle of function curl_close expects CurlHandle, resource given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Auth/Client/AuthServiceClient.php
+
+		-
+			message: '#^Parameter \#1 \$handle of function curl_errno expects CurlHandle, resource given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Auth/Client/AuthServiceClient.php
+
+		-
+			message: '#^Parameter \#1 \$handle of function curl_error expects CurlHandle, resource given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Auth/Client/AuthServiceClient.php
+
+		-
+			message: '#^Parameter \#1 \$handle of function curl_exec expects CurlHandle, resource given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Auth/Client/AuthServiceClient.php
+
+		-
+			message: '#^Parameter \#1 \$handle of function curl_getinfo expects CurlHandle, resource given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Auth/Client/AuthServiceClient.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$AUTH_COOKIE_DOMAIN \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 4
+			path: src/Auth/CookieHelper.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$JWT_REFRESH_TOKEN_EXPIRY \(int\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 2
+			path: src/Auth/CookieHelper.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$PLATFORM_CODE \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Auth/ExternalAuth/ExternalAuthConfig.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$PLATFORM_CODE \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Auth/ExternalAuth/ExternalAuthServiceClient.php
+
+		-
+			message: '#^Offset ''REDIRECT_HTTP…'' on \*NEVER\* in isset\(\) always exists and is not nullable\.$#'
+			identifier: isset.offset
+			count: 1
+			path: src/Auth/ExternalAuth/Routes/BaseExternalAuthRoute.php
+
+		-
+			message: '#^Method StoneScriptPHP\\Auth\\ExternalAuth\\Routes\\ProvisionTenantRoute\:\:slugify\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/Auth/ExternalAuth/Routes/ProvisionTenantRoute.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Auth\\AuthenticatedUser\:\:\$user_id \(int\|string\) in isset\(\) is not nullable\.$#'
+			identifier: isset.property
+			count: 1
+			path: src/Auth/ExternalAuth/Routes/ProvisionTenantRoute.php
+
+		-
+			message: '#^Trait StoneScriptPHP\\Auth\\RequestContextTrait is used zero times and is not analysed\.$#'
+			identifier: trait.unused
+			count: 1
+			path: src/Auth/RequestContextTrait.php
+
+		-
+			message: '#^Call to an undefined static method StoneScriptPHP\\Auth\\AuthContext\:\:user\(\)\.$#'
+			identifier: staticMethod.notFound
+			count: 1
+			path: src/Auth/Routes/LogoutRoute.php
+
+		-
+			message: '#^Method StoneScriptPHP\\Auth\\JwtHandlerInterface\:\:generateToken\(\) invoked with 3 parameters, 1\-2 required\.$#'
+			identifier: arguments.count
+			count: 2
+			path: src/Auth/Routes/RefreshRoute.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$JWT_ACCESS_TOKEN_EXPIRY \(int\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Auth/Routes/RefreshRoute.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$JWT_REFRESH_TOKEN_EXPIRY \(int\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Auth/Routes/RefreshRoute.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$JWT_ACCESS_TOKEN_EXPIRY \(int\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Auth/RsaJwtHandler.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$JWT_ISSUER \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 2
+			path: src/Auth/RsaJwtHandler.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$JWT_REFRESH_TOKEN_EXPIRY \(int\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Auth/RsaJwtHandler.php
+
+		-
+			message: '#^Call to an undefined method ReflectionType\:\:getName\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Database.php
+
+		-
+			message: '#^Call to an undefined method StoneScriptDB\\GatewayException\:\:getGatewayError\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Database.php
+
+		-
+			message: '#^Call to an undefined method StoneScriptPHP\\Database\:\:getConnectionInstance\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Database.php
+
+		-
+			message: '#^Call to an undefined method StoneScriptPHP\\Database\:\:getDirectConnection\(\)\.$#'
+			identifier: method.notFound
+			count: 2
+			path: src/Database.php
+
+		-
+			message: '#^Invalid type string to throw\.$#'
+			identifier: throw.notThrowable
+			count: 1
+			path: src/Database.php
+
+		-
+			message: '#^Method StoneScriptPHP\\Database\:\:getConnection\(\) has invalid return type StoneScriptPHP\\ConnectionInterface\.$#'
+			identifier: class.notFound
+			count: 2
+			path: src/Database.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_APPNAME\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Database/DirectConnection.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_DBNAME\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Database/DirectConnection.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_HOST\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Database/DirectConnection.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_PASSWORD\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Database/DirectConnection.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_PORT\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Database/DirectConnection.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_USER\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Database/DirectConnection.php
+
+		-
+			message: '#^Variable \$result might not be defined\.$#'
+			identifier: variable.undefined
+			count: 1
+			path: src/Database/DirectConnection.php
+
+		-
+			message: '#^Method StoneScriptPHP\\Env\:\:get_instance\(\) should return static\(StoneScriptPHP\\Env\) but returns StoneScriptPHP\\Env\.$#'
+			identifier: return.type
+			count: 1
+			path: src/Env.php
+
+		-
+			message: '#^Unsafe usage of new static\(\)\.$#'
+			identifier: new.static
+			count: 1
+			path: src/Env.php
+
+		-
+			message: '#^Method StoneScriptPHP\\ExceptionHandler\:\:reportException\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/ExceptionHandler.php
+
+		-
+			message: '#^Method StoneScriptPHP\\Lib\\Email\\MyZeptoMail\:\:loadTemplate\(\) never returns null so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: src/Lib/Email/MyZeptoMail.php
+
+		-
+			message: '#^Static access to instance property StoneScriptPHP\\Env\:\:\$ZEPTOMAIL_BOUNCE_ADDRESS\.$#'
+			identifier: property.staticAccess
+			count: 3
+			path: src/Lib/Email/MyZeptoMail.php
+
+		-
+			message: '#^Static access to instance property StoneScriptPHP\\Env\:\:\$ZEPTOMAIL_SENDER_EMAIL\.$#'
+			identifier: property.staticAccess
+			count: 3
+			path: src/Lib/Email/MyZeptoMail.php
+
+		-
+			message: '#^Static access to instance property StoneScriptPHP\\Env\:\:\$ZEPTOMAIL_SENDER_NAME\.$#'
+			identifier: property.staticAccess
+			count: 3
+			path: src/Lib/Email/MyZeptoMail.php
+
+		-
+			message: '#^Static access to instance property StoneScriptPHP\\Env\:\:\$ZEPTOMAIL_SEND_MAIL_TOKEN\.$#'
+			identifier: property.staticAccess
+			count: 2
+			path: src/Lib/Email/MyZeptoMail.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_APPNAME\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Migrations.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_DBNAME\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Migrations.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_HOST\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Migrations.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_PASSWORD\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Migrations.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_PORT\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Migrations.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_TIMEOUT\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Migrations.php
+
+		-
+			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_USER\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Migrations.php
+
+		-
+			message: '#^Call to function is_int\(\) with int will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/RouteCompiler.php
+
+		-
+			message: '#^Offset ''prefix'' on \*NEVER\* on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/RouteCompiler.php
+
+		-
+			message: '#^Access to constant get on an unknown class StoneScriptPHP\\RequestMethod\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Router.php
+
+		-
+			message: '#^Access to constant options on an unknown class StoneScriptPHP\\RequestMethod\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Router.php
+
+		-
+			message: '#^Access to constant other on an unknown class StoneScriptPHP\\RequestMethod\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Router.php
+
+		-
+			message: '#^Access to constant post on an unknown class StoneScriptPHP\\RequestMethod\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Router.php
+
+		-
+			message: '#^Call to function is_null\(\) with StoneScriptPHP\\ApiResponse will always evaluate to false\.$#'
+			identifier: function.impossibleType
+			count: 1
+			path: src/Router.php
+
+		-
+			message: '#^Call to static method tryFrom\(\) on an unknown class StoneScriptPHP\\RequestMethod\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Router.php
+
+		-
+			message: '#^Variable \$_GET on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: src/Router.php
+
+		-
+			message: '#^Call to method hasAllPermissions\(\) on an unknown class App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/AttributeAuthMiddleware.php
+
+		-
+			message: '#^Call to method hasAllRoles\(\) on an unknown class App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/AttributeAuthMiddleware.php
+
+		-
+			message: '#^Call to method hasAnyPermission\(\) on an unknown class App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/AttributeAuthMiddleware.php
+
+		-
+			message: '#^Call to method hasAnyRole\(\) on an unknown class App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/AttributeAuthMiddleware.php
+
+		-
+			message: '#^Class App\\Models\\User not found\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/AttributeAuthMiddleware.php
+
+		-
+			message: '#^Parameter \$user of method StoneScriptPHP\\Routing\\Middleware\\AttributeAuthMiddleware\:\:checkAttributes\(\) has invalid type App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/AttributeAuthMiddleware.php
+
+		-
+			message: '#^Parameter \$user of method StoneScriptPHP\\Routing\\Middleware\\AttributeAuthMiddleware\:\:checkPermissionAttribute\(\) has invalid type App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/AttributeAuthMiddleware.php
+
+		-
+			message: '#^Parameter \$user of method StoneScriptPHP\\Routing\\Middleware\\AttributeAuthMiddleware\:\:checkRoleAttribute\(\) has invalid type App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/AttributeAuthMiddleware.php
+
+		-
+			message: '#^Variable \$remoteIp on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: src/Routing/Middleware/HCaptchaMiddleware.php
+
+		-
+			message: '#^Negated boolean expression is always true\.$#'
+			identifier: booleanNot.alwaysTrue
+			count: 1
+			path: src/Routing/Middleware/JwtAuthMiddleware.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Routing\\Middleware\\JwtAuthMiddleware\:\:\$excludedPaths is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/Routing/Middleware/JwtAuthMiddleware.php
+
+		-
+			message: '#^Call to method hasAllPermissions\(\) on an unknown class App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/PermissionMiddleware.php
+
+		-
+			message: '#^Call to method hasAnyPermission\(\) on an unknown class App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/PermissionMiddleware.php
+
+		-
+			message: '#^Class App\\Models\\User not found\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/PermissionMiddleware.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Routing\\Middleware\\ProofOfWorkMiddleware\:\:\$difficulty is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/Routing/Middleware/ProofOfWorkMiddleware.php
+
+		-
+			message: '#^Call to method hasAllRoles\(\) on an unknown class App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/RoleMiddleware.php
+
+		-
+			message: '#^Call to method hasAnyRole\(\) on an unknown class App\\Models\\User\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/RoleMiddleware.php
+
+		-
+			message: '#^Class App\\Models\\User not found\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Routing/Middleware/RoleMiddleware.php
+
+		-
+			message: '#^Offset ''status'' on array\{tenant_id\: string, role\: string, status\: string, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Routing/Middleware/StoreAccessMiddleware.php
+
+		-
+			message: '#^Offset ''tenant_id'' on array\{tenant_id\: string, role\: string, status\: string, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Routing/Middleware/StoreAccessMiddleware.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>user_id" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Routing/Middleware/StoreAccessMiddleware.php
+
+		-
+			message: '#^Instanceof between StoneScriptPHP\\ApiResponse and StoneScriptPHP\\ApiResponse will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Routing/Router.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Security\\HCaptchaVerifier\:\:\$secretKey \(string\|null\) is never assigned null so it can be removed from the property type\.$#'
+			identifier: property.unusedType
+			count: 1
+			path: src/Security/HCaptchaVerifier.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Security\\HCaptchaVerifier\:\:\$siteKey \(string\|null\) is never assigned null so it can be removed from the property type\.$#'
+			identifier: property.unusedType
+			count: 1
+			path: src/Security/HCaptchaVerifier.php
+
+		-
+			message: '#^Offset ''per_day'' on array\{per_minute\: 1, per_hour\: 3, per_day\: 10\}\|array\{per_minute\: 2, per_hour\: 10, per_day\: 50\}\|array\{per_minute\: 5, per_hour\: 20, per_day\: 100\}\|array\{per_minute\: 60, per_hour\: 1000, per_day\: 10000\} in isset\(\) always exists and is not nullable\.$#'
+			identifier: isset.offset
+			count: 1
+			path: src/Security/RateLimiter.php
+
+		-
+			message: '#^Offset ''per_hour'' on array\{per_minute\: 1, per_hour\: 3, per_day\: 10\}\|array\{per_minute\: 2, per_hour\: 10, per_day\: 50\}\|array\{per_minute\: 5, per_hour\: 20, per_day\: 100\}\|array\{per_minute\: 60, per_hour\: 1000, per_day\: 10000\} in isset\(\) always exists and is not nullable\.$#'
+			identifier: isset.offset
+			count: 1
+			path: src/Security/RateLimiter.php
+
+		-
+			message: '#^Offset ''per_minute'' on array\{per_minute\: 1, per_hour\: 3, per_day\: 10\}\|array\{per_minute\: 2, per_hour\: 10, per_day\: 50\}\|array\{per_minute\: 5, per_hour\: 20, per_day\: 100\}\|array\{per_minute\: 60, per_hour\: 1000, per_day\: 10000\} in isset\(\) always exists and is not nullable\.$#'
+			identifier: isset.offset
+			count: 1
+			path: src/Security/RateLimiter.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Subscriptions\\Routes\\GetSubscriptionStatusRoute\:\:\$config is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/Subscriptions/Routes/GetSubscriptionStatusRoute.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Env\:\:\$PLATFORM_CODE \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Subscriptions/SubscriptionConfig.php
+
+		-
+			message: '#^Parameter \#1 \$array \(array\{0\: ''Content\-Type\:…'', 1\?\: non\-falsy\-string\}\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: src/Tenancy/TenantProvisioner.php
+
+		-
+			message: '#^Property StoneScriptPHP\\Auth\\AuthenticatedUser\:\:\$customClaims \(array\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Tenancy/TenantResolver.php
+
+		-
+			message: '#^Instantiated class StoneScriptDB\\GatewayClient\\Auth\\TokenValidator not found\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/bootstrap.php

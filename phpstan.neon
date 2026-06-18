@@ -1,0 +1,36 @@
+# StoneScriptPHP framework — own static analysis config.
+#
+# Level 5 matches the fleet standard. This includes the framework's own
+# advisory secret/config rule (rules.neon) so we dog-food it.
+#
+# The advisory RawEnvAccessRule (identifier: stonescriptphp.rawEnvAccess) is
+# expected to fire on a few framework-internal call sites that have not yet
+# been migrated onto Env (Logger, HCaptchaVerifier, CsrfTokenHandler,
+# AuthServiceClient). Those are tracked separately; we ignore them here by
+# identifier so this advisory does not fail the framework's own build, while
+# still proving the rule is active (see tests/Fixtures/RawEnvSample.php and
+# RawEnvAccessRuleTest).
+
+includes:
+    - rules.neon
+    - phpstan-baseline.neon
+
+parameters:
+    level: 5
+    paths:
+        - src
+    excludePaths:
+        # Sample fixture exists purely to demonstrate the rule firing in tests.
+        - tests/Fixtures/RawEnvSample.php
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        # StoneScriptPHP helper functions are defined in helpers.php (autoload.files).
+        - '#Function (res_ok|res_error|auth_check|auth_id|auth_user|log_info|log_error|log_debug|log_warn) not found#'
+        # Advisory rule is ADVISORY by design. The framework still has legacy
+        # raw $_SERVER request-handling and a few not-yet-migrated config sites
+        # (Logger, HCaptchaVerifier, CsrfTokenHandler, AuthServiceClient).
+        # These are tracked as follow-up and must not fail the framework build.
+        # The rule's live behaviour is asserted in RawEnvAccessRuleTest against
+        # tests/Fixtures/RawEnvSample.php.
+        -
+            identifier: stonescriptphp.rawEnvAccess

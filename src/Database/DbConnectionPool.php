@@ -49,14 +49,17 @@ class DbConnectionPool
     public function getConfig(): array
     {
         if (empty($this->config)) {
-            // Try to load from environment variables
+            // Try to load from environment variables.
+            // Route through Env::secret() so values (notably the DB_PASSWORD
+            // secret) flow through the central resolution chain
+            // (env -> *_FILE -> /run/secrets) and stay immune to FPM clear_env.
             $this->config = [
-                'driver' => getenv('DB_DRIVER') ?: ($_ENV['DB_DRIVER'] ?? 'pgsql'),
-                'host' => getenv('DB_HOST') ?: ($_ENV['DB_HOST'] ?? 'localhost'),
-                'port' => (int) (getenv('DB_PORT') ?: ($_ENV['DB_PORT'] ?? 5432)),
-                'user' => getenv('DB_USER') ?: ($_ENV['DB_USER'] ?? 'postgres'),
-                'password' => getenv('DB_PASSWORD') ?: ($_ENV['DB_PASSWORD'] ?? ''),
-                'charset' => getenv('DB_CHARSET') ?: ($_ENV['DB_CHARSET'] ?? 'utf8'),
+                'driver' => \StoneScriptPHP\Env::secret('DB_DRIVER', 'pgsql'),
+                'host' => \StoneScriptPHP\Env::secret('DB_HOST', 'localhost'),
+                'port' => (int) \StoneScriptPHP\Env::secret('DB_PORT', '5432'),
+                'user' => \StoneScriptPHP\Env::secret('DB_USER', 'postgres'),
+                'password' => \StoneScriptPHP\Env::secret('DB_PASSWORD', ''),
+                'charset' => \StoneScriptPHP\Env::secret('DB_CHARSET', 'utf8'),
             ];
         }
         return $this->config;

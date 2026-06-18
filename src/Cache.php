@@ -283,14 +283,19 @@ class Cache
 
     public static function fromEnv(): self
     {
+        // Route through Env so REDIS_* (incl. the REDIS_PASSWORD secret) flow
+        // through the central resolution chain (env -> *_FILE -> /run/secrets)
+        // instead of being read directly from $_ENV here.
+        $env = \StoneScriptPHP\Env::get_instance();
+
         return new self(
-            host: $_ENV['REDIS_HOST'] ?? '127.0.0.1',
-            port: (int)($_ENV['REDIS_PORT'] ?? 6379),
-            password: $_ENV['REDIS_PASSWORD'] ?? '',
-            database: (int)($_ENV['REDIS_DATABASE'] ?? 0),
-            prefix: $_ENV['REDIS_PREFIX'] ?? 'stonescript:',
-            defaultTtl: (int)($_ENV['CACHE_DEFAULT_TTL'] ?? 3600),
-            enabled: filter_var($_ENV['CACHE_ENABLED'] ?? 'true', FILTER_VALIDATE_BOOLEAN)
+            host: $env->REDIS_HOST,
+            port: $env->REDIS_PORT,
+            password: $env->REDIS_PASSWORD ?? '',
+            database: $env->REDIS_DATABASE,
+            prefix: $env->REDIS_PREFIX,
+            defaultTtl: $env->CACHE_DEFAULT_TTL,
+            enabled: $env->CACHE_ENABLED
         );
     }
 }

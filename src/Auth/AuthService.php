@@ -123,10 +123,13 @@ class StandaloneAuth
     {
         $this->db = $dbConnection;
 
-        // JWT can use either secret (HS256) or RSA keys (RS256)
-        $this->jwtSecret = $config['jwt_secret'] ?? getenv('JWT_SECRET');
-        $this->jwtPrivateKey = $config['jwt_private_key'] ?? getenv('JWT_PRIVATE_KEY');
-        $this->jwtPublicKey = $config['jwt_public_key'] ?? getenv('JWT_PUBLIC_KEY');
+        // JWT can use either secret (HS256) or RSA keys (RS256).
+        // Route through Env::secret() so these flow through the central
+        // resolution chain (env -> *_FILE -> /run/secrets) instead of a
+        // parallel raw getenv() path that bypasses native secret reading.
+        $this->jwtSecret = $config['jwt_secret'] ?? \StoneScriptPHP\Env::secret('JWT_SECRET');
+        $this->jwtPrivateKey = $config['jwt_private_key'] ?? \StoneScriptPHP\Env::secret('JWT_PRIVATE_KEY');
+        $this->jwtPublicKey = $config['jwt_public_key'] ?? \StoneScriptPHP\Env::secret('JWT_PUBLIC_KEY');
 
         // Auto-generate secret if not provided (for quick start)
         if (!$this->jwtSecret && !$this->jwtPrivateKey) {
