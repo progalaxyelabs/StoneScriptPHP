@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/generate-common.php';   // provides detect_root_path()
 require_once __DIR__ . '/helpers/color.php';
+require_once __DIR__ . '/sql-integrity-columns.php'; // Phase 2: column checker (pulls in tokenizer + tree)
 
 if (!defined('ROOT_PATH')) {
     define('ROOT_PATH', detect_root_path());
@@ -30,19 +31,39 @@ if (!defined('ROOT_PATH')) {
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 
-$argv   = $_SERVER['argv'] ?? [];
-$strict = in_array('--strict', $argv, true);
-$json   = in_array('--json', $argv, true);
+$argv          = $_SERVER['argv'] ?? [];
+$strict        = in_array('--strict', $argv, true);
+$json          = in_array('--json', $argv, true);
+$noColumnCheck = in_array('--no-column-check', $argv, true);
+
+$maxDepth = 5;
+foreach ($argv as $arg) {
+    if (preg_match('/^--max-depth=(\d+)$/', $arg, $m)) {
+        $maxDepth = max(1, (int) $m[1]);
+        break;
+    }
+}
 
 if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
-    echo "Usage: php stone validate sqlintegrity [--strict] [--json]\n\n";
-    echo "  --strict   Treat warnings (unknown function calls) as errors\n";
-    echo "  --json     Output machine-readable JSON\n\n";
-    echo "Scans src/postgresql/ for table + function definitions, then checks\n";
-    echo "every function body for references to tables or functions that have\n";
-    echo "no matching definition file. The most critical check:\n\n";
-    echo "  INSERT INTO <table>  when <table> has no tables/*.pgsql file\n";
-    echo "  → gateway schema-sync will DROP the table → 500 at runtime\n\n";
+    echo "Usage: php stone validate sqlintegrity [options]\n\n";
+    echo "Options:\n";
+    echo "  --strict             Treat warnings (unknown function calls) as errors\n";
+    echo "  --json               Machine-readable JSON output\n";
+    echo "  --no-column-check    Skip Phase 2 column-name integrity check\n";
+    echo "  --max-depth=N        Max paren nesting depth for column parser (default: 5)\n\n";
+    echo "Phase 1 — Table existence:\n";
+    echo "  Scans src/postgresql/ for table + function definitions, then checks\n";
+    echo "  every function body for references to tables or functions with no\n";
+    echo "  matching definition file. Critical check:\n\n";
+    echo "    INSERT INTO <table>  when <table> has no tables/*.pgsql file\n";
+    echo "    → gateway schema-sync will DROP the table → 500 at runtime\n\n";
+    echo "Phase 2 — Column name integrity:\n";
+    echo "  Parses table definitions for column names, then checks qualified refs\n";
+    echo "  (alias.column / table.column) inside function bodies to detect typos\n";
+    echo "  like  users.is_email_verified  when the column is  email_verified.\n\n";
+    echo "  Uses a tokenizer + keyword-segmented tree with depth tracking.\n";
+    echo "  Functions that exceed --max-depth have column checking skipped\n";
+    echo "  (emitted as NOTICE, not an error).\n\n";
     exit(0);
 }
 
@@ -498,9 +519,17 @@ if (!$json) {
 $knownTables    = discoverTables($srcPath);
 $knownFunctions = discoverFunctions($srcPath);
 
+// Phase 2: column schema (parsed columns from tables/*.pgsql)
+$tableSchema = $noColumnCheck ? [] : discoverTableColumns($srcPath);
+
 if (!$json) {
     echo "  Tables defined:    " . count($knownTables) . "\n";
-    echo "  Functions defined: " . count($knownFunctions) . "\n\n";
+    echo "  Functions defined: " . count($knownFunctions) . "\n";
+    if (!$noColumnCheck) {
+        $colCount = array_sum(array_map(fn($t) => count($t['columns']), $tableSchema));
+        echo "  Columns indexed:   $colCount across " . count($tableSchema) . " tables\n";
+    }
+    echo "\n";
 }
 
 // Find all function files to analyse
@@ -509,8 +538,13 @@ $allFunctionFiles = findFiles($srcPath, 'functions');
 $errors   = [];  // table not in definitions → gateway will drop it
 $warnings = [];  // called function not in inventory
 
+// Phase 2 input: collect all parsed function bodies keyed by file
+// (built during the Phase 1 loop so we only parse files once)
+$fnBodiesByFile = [];
+
 foreach ($allFunctionFiles as $file) {
     $fnBodies = parseFunctionBodies($file);
+    $fnBodiesByFile[$file] = $fnBodies;
 
     foreach ($fnBodies as $fn) {
         $refs = extractReferences($fn['body'], $fn['body_start_line']);
@@ -548,6 +582,17 @@ foreach ($allFunctionFiles as $file) {
     }
 }
 
+// ── Phase 2: Column name integrity ───────────────────────────────────────────
+
+$columnErrors  = [];
+$columnNotices = [];
+
+if (!$noColumnCheck && !empty($tableSchema)) {
+    $colResult    = checkColumnIntegrity($tableSchema, $fnBodiesByFile, $maxDepth);
+    $columnErrors = $colResult['errors'];
+    $columnNotices = $colResult['notices'];
+}
+
 // ── Output ────────────────────────────────────────────────────────────────────
 
 if ($json) {
@@ -568,13 +613,31 @@ if ($json) {
             'ref'     => $w['ref'],
             'line'    => $w['line'],
         ], $warnings),
+        'column_errors'     => array_map(fn($c) => [
+            'type'    => 'bad_column',
+            'file'    => relativePath($c['file']),
+            'fn'      => $c['fn'],
+            'table'   => $c['table'],
+            'column'  => $c['column'],
+            'line'    => $c['line'],
+            'clause'  => $c['clause'],
+        ], $columnErrors),
+        'notices'           => array_map(fn($n) => [
+            'file'    => relativePath($n['file']),
+            'fn'      => $n['fn'],
+            'line'    => $n['line'],
+            'msg'     => $n['msg'],
+        ], $columnNotices),
     ], JSON_PRETTY_PRINT) . "\n";
-    exit((!empty($errors) || ($strict && !empty($warnings))) ? 1 : 0);
+    $hasFailure = !empty($errors) || !empty($columnErrors) || ($strict && !empty($warnings));
+    exit($hasFailure ? 1 : 0);
 }
 
 // Human-readable output
+
+// Phase 1: Table existence errors
 if (!empty($errors)) {
-    echo Color::red("ERRORS — these will cause runtime 500s:") . "\n\n";
+    echo Color::red("ERRORS [Phase 1] — missing table definitions (will cause runtime 500s):") . "\n\n";
     foreach ($errors as $e) {
         echo Color::red("  ERROR") . " in " . Color::yellow($e['fn'] . "()") . "\n";
         echo "        " . $e['message'] . "\n";
@@ -582,8 +645,9 @@ if (!empty($errors)) {
     }
 }
 
+// Phase 1: Missing function warnings
 if (!empty($warnings)) {
-    $label = $strict ? Color::red("ERRORS (--strict)") : Color::yellow("WARNINGS");
+    $label = $strict ? Color::red("ERRORS [Phase 1, --strict]") : Color::yellow("WARNINGS [Phase 1]");
     echo $label . " — called functions not found in definitions:\n\n";
     foreach ($warnings as $w) {
         $tag = $strict ? Color::red("  ERROR") : Color::yellow("  WARN ");
@@ -593,28 +657,60 @@ if (!empty($warnings)) {
     }
 }
 
-// Summary
-$errCount  = count($errors);
-$warnCount = count($warnings);
+// Phase 2: Column name errors
+if (!empty($columnErrors)) {
+    echo Color::red("ERRORS [Phase 2] — column name mismatches:") . "\n\n";
+    foreach ($columnErrors as $c) {
+        echo Color::red("  ERROR") . " in " . Color::yellow($c['fn'] . "()") . "\n";
+        echo "        " . $c['message'] . "\n";
+        echo "        → " . relativePath($c['file']) . ":" . $c['line'] . "\n\n";
+    }
+}
 
-if ($errCount === 0 && $warnCount === 0) {
+// Notices: functions the parser skipped (depth limit hit)
+if (!empty($columnNotices)) {
+    echo Color::yellow("NOTICES [Phase 2] — parser skipped (depth limit):") . "\n\n";
+    foreach ($columnNotices as $n) {
+        echo Color::yellow("  NOTICE") . " " . $n['fn'] . "()\n";
+        echo "         " . $n['msg'] . "\n";
+        echo "         → " . relativePath($n['file']) . ":" . $n['line'] . "\n\n";
+    }
+    echo Color::yellow("Tip:") . " Use --max-depth=N (current: $maxDepth) to analyse deeper functions,\n";
+    echo "     or --no-column-check to skip Phase 2 entirely.\n\n";
+}
+
+// Summary
+$errCount    = count($errors);
+$warnCount   = count($warnings);
+$colErrCount = count($columnErrors);
+$noticeCount = count($columnNotices);
+
+$totalErrors = $errCount + $colErrCount + ($strict ? $warnCount : 0);
+
+if ($totalErrors === 0 && $warnCount === 0) {
     echo Color::green("✓ All clear.") . " "
         . count($knownTables) . " tables, "
         . count($knownFunctions) . " functions, "
-        . count($allFunctionFiles) . " function files checked — no issues found.\n";
+        . count($allFunctionFiles) . " function files checked — no issues found.";
+    if ($noticeCount > 0) {
+        echo " ($noticeCount function(s) skipped by depth guard)";
+    }
+    echo "\n";
     exit(0);
 }
 
 $summary = [];
-if ($errCount > 0)  $summary[] = Color::red("$errCount error(s)");
-if ($warnCount > 0) $summary[] = ($strict ? Color::red("$warnCount warning(s) [--strict]") : Color::yellow("$warnCount warning(s)"));
+if ($errCount > 0)    $summary[] = Color::red("$errCount table-existence error(s)");
+if ($colErrCount > 0) $summary[] = Color::red("$colErrCount column-name error(s)");
+if ($warnCount > 0)   $summary[] = ($strict ? Color::red("$warnCount warning(s) [--strict]") : Color::yellow("$warnCount warning(s)"));
+if ($noticeCount > 0) $summary[] = Color::yellow("$noticeCount notice(s) (parser skipped)");
 
 echo implode(', ', $summary) . " found across "
-    . count($allFunctionFiles) . " function files.\n";
+    . count($allFunctionFiles) . " function file(s).\n";
 
-if (!$strict && $errCount === 0 && $warnCount > 0) {
-    echo Color::yellow("Tip:") . " Use --strict to treat warnings as errors in CI.\n";
+if (!$strict && $errCount === 0 && $colErrCount === 0 && $warnCount > 0) {
+    echo Color::yellow("Tip:") . " Use --strict to treat function-call warnings as errors in CI.\n";
 }
 
-$hasFailure = $errCount > 0 || ($strict && $warnCount > 0);
+$hasFailure = $errCount > 0 || $colErrCount > 0 || ($strict && $warnCount > 0);
 exit($hasFailure ? 1 : 2);
