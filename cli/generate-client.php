@@ -682,6 +682,7 @@ TS;
         $getArg        = 'this.escapePath(path)';
         $postArg       = 'this.escapePath(path)';
         $postDocSuffix = ' Tenant-aware for /portal/* paths.';
+        $bodyEscapeArg = 'this.escapePath(path)';
         $escapePathMethod = "\n"
             . "  /**\n"
             . "   * Tenant-aware escape-hatch path resolver (CLIENT-SDK-SPEC §12). Logical\n"
@@ -708,6 +709,7 @@ TS;
         $getArg        = 'path';
         $postArg       = 'path';
         $postDocSuffix = '';
+        $bodyEscapeArg = 'path';
         $escapePathMethod = '';
         $hatchDoc = "  /**\n"
             . "   * Escape hatch for endpoints with no typed business method (CLIENT-SDK-SPEC §12/§433).\n"
@@ -757,6 +759,21 @@ export class ApiClient {{$tenantIdField}
   /** Escape hatch — see {@link ApiClient.get}.{$postDocSuffix} */
   post<R = unknown>(path: string, body?: unknown): Promise<R> {
     return this.http.post<R>({$postArg}, body);
+  }
+
+  /** Escape hatch — see {@link ApiClient.get}.{$postDocSuffix} */
+  put<R = unknown>(path: string, body?: unknown): Promise<R> {
+    return this.http.put<R>({$bodyEscapeArg}, body);
+  }
+
+  /** Escape hatch — see {@link ApiClient.get}.{$postDocSuffix} */
+  patch<R = unknown>(path: string, body?: unknown): Promise<R> {
+    return this.http.patch<R>({$bodyEscapeArg}, body);
+  }
+
+  /** Escape hatch — see {@link ApiClient.get}.{$postDocSuffix} */
+  delete<R = unknown>(path: string, body?: unknown): Promise<R> {
+    return this.http.delete<R>({$bodyEscapeArg}, body);
   }
 {$escapePathMethod}
 

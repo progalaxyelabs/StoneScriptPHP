@@ -589,6 +589,83 @@ class ClientGeneratorV4Test extends TestCase
         }
     }
 
+    /**
+     * v4.3.1 — escape-hatch must expose all five HTTP verbs (get/post/put/patch/delete).
+     *
+     * MinimalHttp has carried put/patch/delete since v4.2.0. The generator previously
+     * wired only get/post to the escape-hatch surface. Services calling PUT/DELETE/PATCH
+     * routes via the escape hatch (rather than typed api.<group>.<action>() methods) hit
+     * a TypeScript compile error — those methods simply did not exist on ApiClient.
+     * CLIENT-SDK-SPEC §12 / fix in v4.3.1.
+     */
+    public function test_generator_emits_put_patch_delete_escape_hatch_methods_t3_portal(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+
+            // All five escape-hatch methods must be present (CLIENT-SDK-SPEC §12 / v4.3.1).
+            $this->assertStringContainsString('put<R = unknown>(path: string, body?: unknown): Promise<R>',    $clientTs, 'T3 portal client must expose put() escape hatch (v4.3.1)');
+            $this->assertStringContainsString('patch<R = unknown>(path: string, body?: unknown): Promise<R>',  $clientTs, 'T3 portal client must expose patch() escape hatch (v4.3.1)');
+            $this->assertStringContainsString('delete<R = unknown>(path: string, body?: unknown): Promise<R>', $clientTs, 'T3 portal client must expose delete() escape hatch (v4.3.1)');
+
+            // T3 portal client is tenant-scoped: put/patch/delete MUST route through escapePath()
+            // (same as post) so /portal/* paths receive the active tenant prefix.
+            $this->assertStringContainsString('return this.http.put<R>(this.escapePath(path), body);',    $clientTs, 'T3 portal put() must be tenant-aware via escapePath()');
+            $this->assertStringContainsString('return this.http.patch<R>(this.escapePath(path), body);',  $clientTs, 'T3 portal patch() must be tenant-aware via escapePath()');
+            $this->assertStringContainsString('return this.http.delete<R>(this.escapePath(path), body);', $clientTs, 'T3 portal delete() must be tenant-aware via escapePath()');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    public function test_generator_emits_put_patch_delete_escape_hatch_methods_admin(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $adminClientTs = file_get_contents($outputDir . '/admin/src/client.ts');
+
+            // Admin client (not tenant-scoped): put/patch/delete must be plain passthroughs
+            // (no escapePath — same as the get/post admin escape hatch asserted in
+            // test_generator_admin_client_has_no_set_tenant).
+            $this->assertStringContainsString('put<R = unknown>(path: string, body?: unknown): Promise<R>',    $adminClientTs, 'admin client must expose put() escape hatch (v4.3.1)');
+            $this->assertStringContainsString('patch<R = unknown>(path: string, body?: unknown): Promise<R>',  $adminClientTs, 'admin client must expose patch() escape hatch (v4.3.1)');
+            $this->assertStringContainsString('delete<R = unknown>(path: string, body?: unknown): Promise<R>', $adminClientTs, 'admin client must expose delete() escape hatch (v4.3.1)');
+
+            // Admin is NOT tenant-scoped — must NOT use escapePath() on any escape-hatch method.
+            $this->assertStringContainsString('return this.http.put<R>(path, body);',    $adminClientTs, 'admin put() must be a plain passthrough (no escapePath)');
+            $this->assertStringContainsString('return this.http.patch<R>(path, body);',  $adminClientTs, 'admin patch() must be a plain passthrough (no escapePath)');
+            $this->assertStringContainsString('return this.http.delete<R>(path, body);', $adminClientTs, 'admin delete() must be a plain passthrough (no escapePath)');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    public function test_generator_emits_put_patch_delete_escape_hatch_methods_t2(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T2'], $this->fixtureRoutesFile());
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+
+            // T2 client is not URL-tenant-scoped: put/patch/delete must be plain passthroughs.
+            $this->assertStringContainsString('put<R = unknown>(path: string, body?: unknown): Promise<R>',    $clientTs, 'T2 client must expose put() escape hatch (v4.3.1)');
+            $this->assertStringContainsString('patch<R = unknown>(path: string, body?: unknown): Promise<R>',  $clientTs, 'T2 client must expose patch() escape hatch (v4.3.1)');
+            $this->assertStringContainsString('delete<R = unknown>(path: string, body?: unknown): Promise<R>', $clientTs, 'T2 client must expose delete() escape hatch (v4.3.1)');
+
+            $this->assertStringContainsString('return this.http.put<R>(path, body);',    $clientTs, 'T2 put() must be a plain passthrough');
+            $this->assertStringContainsString('return this.http.patch<R>(path, body);',  $clientTs, 'T2 patch() must be a plain passthrough');
+            $this->assertStringContainsString('return this.http.delete<R>(path, body);', $clientTs, 'T2 delete() must be a plain passthrough');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
     // =========================================================================
     // §10 — typed returns: generator emits typed methods + reflected interface
     // =========================================================================

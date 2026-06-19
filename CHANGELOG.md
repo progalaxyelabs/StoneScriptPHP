@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-06-19
+
+### Fixed
+- **Escape-hatch passthroughs now cover all five verbs (CLIENT-SDK-SPEC §12).** The generated `ApiClient` previously exposed only `get` and `post` escape-hatch methods; `put`, `patch`, and `delete` were absent. Services calling PUT/DELETE/PATCH routes via the escape hatch (rather than via typed `api.<group>.<action>()` methods) received a TypeScript compile error. The generator now emits matching `put`/`patch`/`delete` passthroughs that mirror the `post` shape exactly: same `body?: unknown` signature, same `escapePath()` tenant-awareness for T3 portal clients, same verbatim path pass-through for admin/T2 clients. `MinimalHttp` already carried these verbs since v4.2.0 — this fix wires them to the escape-hatch surface.
+
 ## [4.3.0] - 2026-06-19
 
 ### Added
