@@ -66,6 +66,23 @@ class RouteEntry
          * Purely informational for the PHP route handler developer.
          */
         public readonly ?string $param = null,
+
+        /**
+         * Response DTO class name for typed-return generation (CLIENT-SDK-SPEC §10).
+         * When set to a DTO FQCN (e.g. `App\Models\Warehouse::class`), the generator
+         * reflects the DTO's public typed properties into a TypeScript interface and
+         * types the generated method `Promise<Dto>` (or `Promise<Dto[]>` with
+         * `collection: true`). When null, the method falls back to `Promise<ApiResponse>`
+         * (= `unknown`) — the incremental-safe default.
+         */
+        public readonly ?string $response = null,
+
+        /**
+         * When true (and `response` is set), the endpoint returns a bare JSON array of
+         * the response DTO — the generated method is typed `Promise<Dto[]>`. When false,
+         * it returns a single DTO object — `Promise<Dto>`. Ignored when `response` is null.
+         */
+        public readonly bool $collection = false,
     ) {
     }
 

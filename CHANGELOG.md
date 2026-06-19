@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-06-19
+
+### Added
+- **Typed return types in the generated client (CLIENT-SDK-SPEC §10).** A route may now declare a response DTO via a `'response' => SomeDto::class` slot (plus optional `'collection' => true`). `php stone generate client` reflects the DTO's public typed properties into a TypeScript `interface` emitted in `src/types.ts`, and types the generated method `Promise<Dto>` (single) or `Promise<Dto[]>` (collection) with a matching `this.http.<verb><Dto[]>(...)` generic. Consumers call typed endpoints with **zero casts**. Routes with **no** `'response'` slot are unchanged — they keep the `ApiResponse` (= `unknown`) fallback, so the feature is fully incremental and graceful.
+  - PHP→TS type mapping: `int`/`float`→`number`, `string`→`string`, `bool`→`boolean`, `?T`→`T | null` + optional `?`, `DateTimeInterface`→`string`, untyped/bare `array`→`unknown[]`, a `/** @var Foo[] */` (or `array<Foo>`) docblock array→`Foo[]`, a nested DTO class→its own interface (emitted recursively, deduped, cycle-safe), a string-backed enum→a string-literal union (other enums→`string`), union/intersection/`mixed`→`unknown`.
+  - The route metadata pipeline (`RouteEntry`, `Router::normalizeRouteConfig`, `Router::addRoute`/`get`/`post`, `Router::getRouteMeta`) now threads the `response` and `collection` keys through to the generator. Backward-compatible additive change → MINOR bump 4.2.0 → 4.3.0.
+
 ## [4.2.0] - 2026-06-19
 
 ### Added

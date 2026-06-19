@@ -1,10 +1,17 @@
 <?php
 
 /**
- * API Client Generator — v4.0
+ * API Client Generator — v4.3
  *
  * Generates per-service TypeScript client packages from PHP routes.
  * Implements CLIENT-SDK-SPEC §0 Amendments A1–A6 (approved 2026-06-14).
+ *
+ * v4.3 (typed returns, CLIENT-SDK-SPEC §10): a route may declare a response DTO via
+ *   `'response' => SomeDto::class` (+ optional `'collection' => true`). The generator
+ *   reflects the DTO's public typed properties into a TS interface in types.ts and
+ *   types the method `Promise<Dto>` / `Promise<Dto[]>`. Routes with no `response`
+ *   keep the `ApiResponse` (= unknown) fallback — fully incremental.
+ * v4.2: PUT/PATCH/DELETE transport + ApiResponse = unknown.
  *
  * Key behaviours (v4.0):
  *   - Reads `service` (group-level) and `group`/`action`/`streaming`/`param` (route-level)
@@ -816,8 +823,11 @@ function buildGroupMethods(
         // Determine if there's a tail id param (A5: always typed as string | number)
         $tailId = hasTailId($path);
 
+        // Resolve typed return (CLIENT-SDK-SPEC §10). null → ApiResponse fallback.
+        $responseTs = routeResponseTsType($route);
+
         // Build method signature and call
-        $methodTs = buildMethodTs($action, $method, $urlTemplate, $tailId);
+        $methodTs = buildMethodTs($action, $method, $urlTemplate, $tailId, $responseTs);
         $lines[] = $methodTs;
     }
 
@@ -885,14 +895,25 @@ function buildUrlTemplate(string $path, bool $isTenantScoped, string $serviceNam
  * data parameter; with :id take (id, data?). DELETE's body is optional.
  * GET methods without :id take optional HttpParams; with :id take (id, params?).
  *
+ * Typed returns (CLIENT-SDK-SPEC §10, v4.3.0): when $responseTs is non-null
+ * (the route declared `response:`), the http generic + Promise are typed to that
+ * DTO type (e.g. `Promise<T.Warehouse[]>` / `this.http.get<T.Warehouse[]>(...)`).
+ * When null, the method keeps the `T.ApiResponse` (= unknown) fallback.
+ *
+ * @param string|null $responseTs Resolved TS return-payload type ('T.Warehouse[]'),
+ *                                 or null for the ApiResponse fallback.
  * @return string TypeScript source for one method entry (including trailing comma)
  */
 function buildMethodTs(
-    string $action,
-    string $httpMethod,
-    string $urlTemplate,
-    bool   $tailId,
+    string  $action,
+    string  $httpMethod,
+    string  $urlTemplate,
+    bool    $tailId,
+    ?string $responseTs = null,
 ): string {
+    // Return-payload generic: typed DTO when declared, else ApiResponse (unknown).
+    $ret = $responseTs ?? 'T.ApiResponse';
+
     $isGet  = $httpMethod === 'GET';
     // POST/PUT/PATCH all carry a body and share the same signature shape.
     // DELETE carries an OPTIONAL body (same shape — body defaults to undefined).
@@ -909,13 +930,13 @@ function buildMethodTs(
             // GET with :id — e.g. inventory.get(id)
             return <<<TS
     {$action}: (id: string | number) =>
-      this.http.get<T.ApiResponse>({$urlTemplate}),
+      this.http.get<{$ret}>({$urlTemplate}),
 TS;
         } else {
             // GET list / search / action — e.g. inventory.list(params?)
             return <<<TS
     {$action}: (params?: HttpParams) =>
-      this.http.get<T.ApiResponse>({$urlTemplate}, params),
+      this.http.get<{$ret}>({$urlTemplate}, params),
 TS;
         }
     }
@@ -925,13 +946,13 @@ TS;
             // Body verb with :id — e.g. inventory.update(id, data?) / workspace.delete(id)
             return <<<TS
     {$action}: (id: string | number, data?: T.ApiRequestBody) =>
-      this.http.{$bodyVerb}<T.ApiResponse>({$urlTemplate}, data),
+      this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data),
 TS;
         } else {
             // Body verb without :id — e.g. inventory.create(data?)
             return <<<TS
     {$action}: (data?: T.ApiRequestBody) =>
-      this.http.{$bodyVerb}<T.ApiResponse>({$urlTemplate}, data),
+      this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data),
 TS;
         }
     }
@@ -942,21 +963,269 @@ TS;
 TS;
 }
 
+// ============================================================================
+// Typed-return DTO reflection (CLIENT-SDK-SPEC §10) — v4.3.0
+//
+// For any route declaring `response: SomeDto::class`, the generator reflects the
+// DTO's PUBLIC TYPED properties into a TypeScript interface and types the method
+// `Promise<Dto>` (single) or `Promise<Dto[]>` (collection: true). Routes with no
+// `response` keep the `ApiResponse` (= unknown) fallback — incremental + graceful.
+//
+// The reflection is recursive (nested DTO classes → their own interfaces),
+// deduped (each interface emitted once), and cycle-safe (a class already being
+// reflected is referenced by name, not re-expanded).
+// ============================================================================
+
+/**
+ * Registry of DTO interfaces discovered during generation, keyed by short TS
+ * interface name. Value = the emitted TS interface body (full `export interface …`).
+ * Order-preserving so emission is deterministic.
+ *
+ * @var array<string,string>
+ */
+$GLOBALS['__dtoInterfaces'] = [];
+
+/** Classes currently mid-reflection (cycle guard). @var array<string,true> */
+$GLOBALS['__dtoInProgress'] = [];
+
+/**
+ * Map a short, unqualified TypeScript interface name from a PHP FQCN.
+ * 'App\Models\Warehouse' → 'Warehouse'. Collisions across namespaces are
+ * resolved by the registry (last-write-wins is acceptable: response DTOs are
+ * expected to have unique class basenames within a service).
+ */
+function dtoTsName(string $fqcn): string
+{
+    $parts = explode('\\', $fqcn);
+    return end($parts);
+}
+
+/**
+ * Map a single PHP type to a TypeScript type expression.
+ *
+ * @param \ReflectionType|null $type      The reflected property type (may be null = untyped).
+ * @param string|null          $docArray  Element type harvested from a `@var Foo[]` docblock, if any.
+ * @return string TS type expression (e.g. 'number', 'string | null', 'Warehouse[]', 'unknown').
+ */
+function phpTypeToTs(?\ReflectionType $type, ?string $docArray = null): string
+{
+    // Untyped property — fall back to docblock array hint, else unknown.
+    if ($type === null) {
+        if ($docArray !== null) {
+            $inner = reflectDtoElementType($docArray);
+            return $inner . '[]';
+        }
+        return 'unknown';
+    }
+
+    if ($type instanceof \ReflectionNamedType) {
+        $name     = $type->getName();
+        $nullable = $type->allowsNull();
+        $ts       = scalarPhpTypeToTs($name, $docArray);
+        return $nullable && $name !== 'null' ? $ts . ' | null' : $ts;
+    }
+
+    // Union / intersection types → punt to unknown (documented limitation).
+    if ($type instanceof \ReflectionUnionType || $type instanceof \ReflectionIntersectionType) {
+        return 'unknown';
+    }
+
+    return 'unknown';
+}
+
+/**
+ * Map a named PHP type (scalar / class / array) to a TS type, recursing into
+ * nested DTO classes. `array` with a `@var Foo[]` docblock → `Foo[]`; bare
+ * `array` → `unknown[]`.
+ */
+function scalarPhpTypeToTs(string $name, ?string $docArray = null): string
+{
+    switch (strtolower($name)) {
+        case 'int':
+        case 'float':
+            return 'number';
+        case 'string':
+            return 'string';
+        case 'bool':
+            return 'boolean';
+        case 'array':
+            if ($docArray !== null) {
+                return reflectDtoElementType($docArray) . '[]';
+            }
+            return 'unknown[]';
+        case 'mixed':
+        case 'object':
+            return 'unknown';
+        case 'datetime':
+        case 'datetimeimmutable':
+        case 'datetimeinterface':
+            return 'string'; // ISO-8601 string on the wire
+    }
+
+    // Fully-qualified or relative class name → nested DTO interface, or enum.
+    $fqcn = ltrim($name, '\\');
+    if (class_exists($fqcn) || interface_exists($fqcn)) {
+        if (enum_exists($fqcn)) {
+            return enumToTsUnion($fqcn);
+        }
+        reflectDto($fqcn); // emit the nested interface (recursive, deduped, cycle-safe)
+        return dtoTsName($fqcn);
+    }
+
+    return 'unknown';
+}
+
+/**
+ * Resolve a docblock element type token (e.g. 'Warehouse', 'App\Models\Warehouse',
+ * 'int', 'string') to a TS type, recursing into DTO classes when it names one.
+ */
+function reflectDtoElementType(string $token): string
+{
+    $token = trim($token);
+    $lower = strtolower($token);
+    $scalarMap = ['int' => 'number', 'float' => 'number', 'string' => 'string', 'bool' => 'boolean'];
+    if (isset($scalarMap[$lower])) {
+        return $scalarMap[$lower];
+    }
+    // Try to resolve as a class (may be short name under App\Models or App\Dto).
+    foreach ([$token, 'App\\Dto\\' . $token, 'App\\Models\\' . $token] as $candidate) {
+        $candidate = ltrim($candidate, '\\');
+        if (class_exists($candidate)) {
+            reflectDto($candidate);
+            return dtoTsName($candidate);
+        }
+    }
+    return 'unknown';
+}
+
+/**
+ * Convert a PHP backed/pure enum to a TS string-literal union (backed-string),
+ * or `string` when not a pure string enum.
+ */
+function enumToTsUnion(string $fqcn): string
+{
+    try {
+        $ref = new \ReflectionEnum($fqcn);
+        if ($ref->isBacked() && (string) $ref->getBackingType() === 'string') {
+            $cases = array_map(
+                fn($c) => "'" . $c->getValue()->value . "'",
+                $ref->getCases()
+            );
+            return empty($cases) ? 'string' : implode(' | ', $cases);
+        }
+    } catch (\Throwable) {
+        // fall through
+    }
+    return 'string';
+}
+
+/**
+ * Extract a `@var Foo[]` element token from a property's docblock, if present.
+ * Returns the element token ('Foo') or null. Supports `Foo[]` and `array<Foo>`.
+ */
+function docblockArrayType(\ReflectionProperty $prop): ?string
+{
+    $doc = $prop->getDocComment();
+    if ($doc === false) {
+        return null;
+    }
+    if (preg_match('/@var\s+([A-Za-z0-9_\\\\]+)\s*\[\]/', $doc, $m)) {
+        return $m[1];
+    }
+    if (preg_match('/@var\s+array<\s*([A-Za-z0-9_\\\\]+)\s*>/', $doc, $m)) {
+        return $m[1];
+    }
+    return null;
+}
+
+/**
+ * Reflect a DTO class into a TS interface, registering it in $__dtoInterfaces.
+ * Recursive (nested DTOs), deduped (skip if already registered), cycle-safe
+ * (a class mid-reflection is referenced by name, not re-expanded).
+ *
+ * Reflects ONLY public properties (constructor-promoted or plain). Static and
+ * non-public properties are ignored. Returns the short TS interface name.
+ */
+function reflectDto(string $fqcn): string
+{
+    $fqcn   = ltrim($fqcn, '\\');
+    $tsName = dtoTsName($fqcn);
+
+    // Already emitted or currently mid-reflection (cycle) → reference by name.
+    if (isset($GLOBALS['__dtoInterfaces'][$tsName]) || isset($GLOBALS['__dtoInProgress'][$tsName])) {
+        return $tsName;
+    }
+
+    if (!class_exists($fqcn)) {
+        fwrite(STDERR, "[stone generate client] WARNING: response DTO class '$fqcn' not found; method falls back to ApiResponse (unknown).\n");
+        return 'unknown';
+    }
+
+    $GLOBALS['__dtoInProgress'][$tsName] = true;
+
+    $ref   = new \ReflectionClass($fqcn);
+    $lines = [];
+    foreach ($ref->getProperties(\ReflectionProperty::IS_PUBLIC) as $prop) {
+        if ($prop->isStatic()) {
+            continue;
+        }
+        $propName = $prop->getName();
+        $type     = $prop->getType();
+        $docArray = docblockArrayType($prop);
+        $tsType   = phpTypeToTs($type, $docArray);
+
+        // Nullable property → optional `?` marker in addition to `| null`.
+        $optional = ($type !== null && $type->allowsNull()) ? '?' : '';
+
+        $lines[] = "  {$propName}{$optional}: {$tsType};";
+    }
+
+    $body = "export interface {$tsName} {\n" . implode("\n", $lines) . "\n}";
+    $GLOBALS['__dtoInterfaces'][$tsName] = $body;
+    unset($GLOBALS['__dtoInProgress'][$tsName]);
+
+    return $tsName;
+}
+
+/**
+ * Resolve a route's `response` declaration into the TS return-payload type used
+ * inside Promise<…> AND the http generic. Returns null when the route declares no
+ * response (caller keeps the ApiResponse/unknown fallback).
+ *
+ * @return string|null e.g. 'Warehouse[]' (collection) or 'Warehouse' (single).
+ */
+function routeResponseTsType(array $route): ?string
+{
+    $dto = $route['response'] ?? null;
+    if ($dto === null || $dto === '') {
+        return null;
+    }
+    $tsName = reflectDto($dto);
+    if ($tsName === 'unknown') {
+        return null; // class missing — graceful fallback
+    }
+    $tsName = 'T.' . $tsName;
+    return !empty($route['collection']) ? $tsName . '[]' : $tsName;
+}
+
 /**
  * Generate the types.ts file.
  *
- * In v4.0 the generator emits a minimal set of generic types. Full DTO generation
- * from PHP DTO classes remains available and platforms may extend this file.
- * The generator ensures the baseline types used in client.ts are always present.
+ * In v4.0 the generator emits a minimal set of generic types. v4.3.0 additionally
+ * emits one TS interface per DTO declared via a route `response:` slot (collected
+ * in $__dtoInterfaces during method generation). The generator ensures the
+ * baseline types used in client.ts are always present.
  */
 function generateTypesTs(): string
 {
-    return <<<'TS'
+    $baseline = <<<'TS'
 /**
  * Auto-generated type definitions
  * DO NOT EDIT MANUALLY — Regenerate with: php stone generate client
  *
- * Platform-specific DTOs are generated from PHP DTO classes.
+ * Platform-specific DTOs are generated from PHP DTO classes declared via a route
+ * `response:` slot (CLIENT-SDK-SPEC §10). Routes without a `response:` keep the
+ * generic `ApiResponse` (= unknown) fallback.
  * The types below are the minimum baseline required by the generated ApiClient.
  */
 
@@ -970,10 +1239,23 @@ export type ApiResponse = unknown;
 
 /** Generic request body type (replace with specific types per endpoint) */
 export type ApiRequestBody = Record<string, unknown> | unknown[] | null;
-
-// Add platform-specific interfaces below (or regenerate from PHP DTOs):
-// export interface InventoryItem { ... }
 TS;
+
+    // Append DTO interfaces collected during method generation for THIS service
+    // package (the registry is reset per service before its routes are processed).
+    $interfaces = $GLOBALS['__dtoInterfaces'] ?? [];
+    if (empty($interfaces)) {
+        return $baseline . "\n\n// No route declares a `response:` DTO in this service —\n"
+            . "// all methods return ApiResponse (unknown). Declare `response:` on a route\n"
+            . "// to generate a typed interface here.\n";
+    }
+
+    $block = "\n\n// ─────────────────────────────────────────────────────────────\n"
+        . "// Response DTOs — reflected from PHP `response:` route declarations\n"
+        . "// ─────────────────────────────────────────────────────────────\n\n"
+        . implode("\n\n", array_values($interfaces)) . "\n";
+
+    return $baseline . $block;
 }
 
 /**
@@ -1104,6 +1386,11 @@ if (empty($included)) {
 foreach ($included as $serviceName => $serviceRoutes) {
     $isAdmin       = $serviceName === 'admin';
     $streamingRoutes = $streamingByService[$serviceName] ?? [];
+
+    // Reset the per-service DTO interface registry so response DTOs declared in
+    // one service's routes do not leak into another service's types.ts (§10).
+    $GLOBALS['__dtoInterfaces'] = [];
+    $GLOBALS['__dtoInProgress'] = [];
 
     // Output directory for this package
     $packageDir = $outputBaseDir . DIRECTORY_SEPARATOR . $serviceName;

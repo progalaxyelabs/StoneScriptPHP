@@ -96,6 +96,56 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     // =========================================================================
+    // §10 — typed returns: response/collection threaded through route metadata
+    // =========================================================================
+
+    public function test_route_meta_carries_response_and_collection(): void
+    {
+        $router = new Router();
+        $router->loadRoutes(['GET' => [
+            '/portal/warehouses' => [
+                'handler'    => 'ListWarehousesRoute',
+                'service'    => 'portal',
+                'group'      => 'warehouses',
+                'action'     => 'list',
+                'response'   => 'App\\Models\\Warehouse',
+                'collection' => true,
+            ],
+            '/portal/trucks' => [
+                'handler' => 'ListTrucksRoute',
+                'service' => 'portal',
+                'group'   => 'trucks',
+                'action'  => 'list',
+            ],
+        ]]);
+
+        $meta = $router->getRouteMeta();
+        $byPath = [];
+        foreach ($meta as $r) { $byPath[$r['path']] = $r; }
+
+        $this->assertEquals('App\\Models\\Warehouse', $byPath['/portal/warehouses']['response']);
+        $this->assertTrue($byPath['/portal/warehouses']['collection']);
+
+        // Undeclared route → response null, collection false (fallback).
+        $this->assertNull($byPath['/portal/trucks']['response']);
+        $this->assertFalse($byPath['/portal/trucks']['collection']);
+    }
+
+    public function test_route_meta_response_defaults_when_absent(): void
+    {
+        $router = new Router();
+        $router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
+            $router->get('/items', 'ListItemsRoute', group: 'inventory');
+        });
+
+        $r = $router->getRouteMeta()[0];
+        $this->assertArrayHasKey('response', $r);
+        $this->assertArrayHasKey('collection', $r);
+        $this->assertNull($r['response']);
+        $this->assertFalse($r['collection']);
+    }
+
+    // =========================================================================
     // A3 — infra / webhook exclusions reflected in route metadata
     // =========================================================================
 
@@ -540,8 +590,115 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     // =========================================================================
+    // §10 — typed returns: generator emits typed methods + reflected interface
+    // =========================================================================
+
+    public function test_generator_emits_typed_collection_method_and_interface(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesWithResponseDto(),
+                $this->fixtureDtoFiles()
+            );
+
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+            $typesTs  = file_get_contents($outputDir . '/portal/src/types.ts');
+
+            // Declared route → typed collection return.
+            $this->assertStringContainsString('this.http.get<T.WarehouseDto[]>(', $clientTs,
+                'declared collection route must emit a typed Dto[] http generic');
+
+            // Undeclared route in the same group → ApiResponse fallback.
+            $this->assertStringContainsString('this.http.get<T.ApiResponse>(', $clientTs,
+                'undeclared route must keep the ApiResponse (unknown) fallback');
+
+            // Reflected interface present with correct PHP→TS mapping.
+            $this->assertStringContainsString('export interface WarehouseDto {', $typesTs);
+            $this->assertStringContainsString('id: number;', $typesTs);           // int → number
+            $this->assertStringContainsString('capacity: number;', $typesTs);     // float → number
+            $this->assertStringContainsString('name: string;', $typesTs);         // string → string
+            $this->assertStringContainsString('active: boolean;', $typesTs);      // bool → boolean
+            $this->assertStringContainsString('postal_code?: string | null;', $typesTs); // ?string → optional | null
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    public function test_generator_single_response_dto_is_not_array(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesWithResponseDto(),
+                $this->fixtureDtoFiles()
+            );
+
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+            // The single (non-collection) get-by-id route returns Promise<WarehouseDto> — not array.
+            $this->assertStringContainsString('this.http.get<T.WarehouseDto>(`${this.t}/warehouses/${id}`)', $clientTs,
+                'single response route must emit Dto (not Dto[])');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    // =========================================================================
     // Fixture helpers
     // =========================================================================
+
+    /**
+     * Routes fixture that declares response DTOs on two warehouse routes
+     * (collection list + single get-by-id) and leaves a sibling route undeclared.
+     */
+    private function fixtureRoutesWithResponseDto(): string
+    {
+        $file = sys_get_temp_dir() . '/ssp-fixture-resp-routes-' . uniqid() . '.php';
+        file_put_contents($file, <<<'PHP'
+<?php
+// Fixture: §10 typed-return routes
+
+$router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
+    $router->get('/warehouses',      'ListWarehousesRoute', group: 'warehouses', action: 'list',
+        response: 'App\\Dto\\WarehouseDto', collection: true);
+    $router->get('/warehouses/{id}', 'GetWarehouseRoute',   group: 'warehouses', action: 'get',
+        response: 'App\\Dto\\WarehouseDto');
+    // Undeclared sibling — must fall back to ApiResponse (unknown)
+    $router->get('/trucks',          'ListTrucksRoute',     group: 'trucks',     action: 'list');
+});
+PHP
+        );
+        return $file;
+    }
+
+    /**
+     * DTO class files dropped into the temp project's src/App/Dto/ so the
+     * generator's reflection can resolve App\Dto\WarehouseDto.
+     *
+     * @return array<string,string> relative-path => php-source
+     */
+    private function fixtureDtoFiles(): array
+    {
+        return [
+            'src/App/Dto/WarehouseDto.php' => <<<'PHP'
+<?php
+namespace App\Dto;
+
+class WarehouseDto
+{
+    public int $id;
+    public string $name;
+    public ?string $postal_code;
+    public float $capacity;
+    public bool $active;
+}
+PHP,
+        ];
+    }
 
     /**
      * Returns path to a temporary fixture routes.php that exercises A1–A6:
@@ -638,9 +795,12 @@ PHP
      *
      * @param  string[] $args       CLI arguments (e.g. ['--output=/tmp/x', '--tenancy=T3'])
      * @param  string   $routesFile Absolute path to the fixture routes.php
+     * @param  array<string,string> $extraFiles relative-path => php-source files to drop
+     *                              into the temp project root (e.g. response DTO classes
+     *                              the generator's reflection must resolve).
      * @return int Exit code
      */
-    private function runGenerator(array $args, string $routesFile): int
+    private function runGenerator(array $args, string $routesFile, array $extraFiles = []): int
     {
         $frameworkRoot  = realpath(__DIR__ . '/../..');
         $generatorPath  = $frameworkRoot . '/cli/generate-client.php';
@@ -651,6 +811,16 @@ PHP
         $configDir = $tmpRoot . '/src/config';
         mkdir($configDir, 0755, true);
         copy($routesFile, $configDir . '/routes.php');
+
+        // Drop any extra fixture files (e.g. response DTO classes) into the temp root.
+        foreach ($extraFiles as $relPath => $source) {
+            $dest = $tmpRoot . '/' . ltrim($relPath, '/');
+            $dir  = dirname($dest);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+            file_put_contents($dest, $source);
+        }
 
         // Serialize $argv as a PHP array literal
         $argsPhp = var_export(array_merge(['generator'], $args), true);

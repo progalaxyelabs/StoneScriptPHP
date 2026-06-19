@@ -185,8 +185,10 @@ class Router
         bool $streaming = false,
         ?string $param = null,
         ?string $service = null,
+        ?string $response = null,
+        bool $collection = false,
     ): self {
-        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service);
+        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection);
     }
 
     /**
@@ -204,8 +206,10 @@ class Router
         bool $streaming = false,
         ?string $param = null,
         ?string $service = null,
+        ?string $response = null,
+        bool $collection = false,
     ): self {
-        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service);
+        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection);
     }
 
     /**
@@ -234,6 +238,8 @@ class Router
         bool $streaming = false,
         ?string $param = null,
         ?string $service = null,
+        ?string $response = null,
+        bool $collection = false,
     ): self {
         $method = strtoupper($method);
 
@@ -267,10 +273,12 @@ class Router
         $this->routeMeta[$routeKey] = [
             'is_public' => $effectiveIsPublic,
             'service'   => $effectiveService,
-            'group'     => $group,
-            'action'    => $action,
-            'streaming' => $streaming,
-            'param'     => $param,
+            'group'      => $group,
+            'action'     => $action,
+            'streaming'  => $streaming,
+            'param'      => $param,
+            'response'   => $response,
+            'collection' => $collection,
         ];
 
         // Track known services/scopes
@@ -313,6 +321,8 @@ class Router
             action:    $config['action']    ?? null,
             streaming: $config['streaming'] ?? false,
             param:     $config['param']     ?? null,
+            response:  $config['response']   ?? null,
+            collection: $config['collection'] ?? false,
         );
     }
 
@@ -343,7 +353,7 @@ class Router
                 if (is_array($routes)) {
                     foreach ($routes as $path => $config) {
                         $entry = self::normalizeRouteConfig($config);
-                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], true, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null);
+                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], true, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
                     }
                 }
             }
@@ -351,7 +361,7 @@ class Router
                 if (is_array($routes)) {
                     foreach ($routes as $path => $config) {
                         $entry = self::normalizeRouteConfig($config);
-                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], false, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null);
+                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], false, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
                     }
                 }
             }
@@ -365,7 +375,7 @@ class Router
                 $method = strtoupper($method);
                 foreach ($routes as $path => $config) {
                     $entry = self::normalizeRouteConfig($config);
-                    $this->addRoute($method, $path, $entry->handler, [], false, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null);
+                    $this->addRoute($method, $path, $entry->handler, [], false, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
                 }
             }
         }
@@ -409,6 +419,8 @@ class Router
                     'action'    => $meta['action']    ?? null,
                     'streaming' => $meta['streaming'] ?? false,
                     'param'     => $meta['param']     ?? null,
+                    'response'   => $meta['response']   ?? null,
+                    'collection' => $meta['collection'] ?? false,
                     'is_public' => $meta['is_public'] ?? false,
                 ];
             }
