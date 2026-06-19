@@ -368,8 +368,21 @@ export class MinimalHttp {
     return this.request<T>('POST', path, body);
   }
 
+  async put<T = unknown>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>('PUT', path, body);
+  }
+
+  async patch<T = unknown>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>('PATCH', path, body);
+  }
+
+  // DELETE may carry an optional body (e.g. bulk-delete payloads). Mirrors post().
+  async delete<T = unknown>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>('DELETE', path, body);
+  }
+
   private async request<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
     path: string,
     body?: unknown,
     params?: HttpParams,
@@ -867,8 +880,9 @@ function buildUrlTemplate(string $path, bool $isTenantScoped, string $serviceNam
 /**
  * Build a single TypeScript method entry for a group object.
  *
- * Reads → GET, writes → POST. Tail id param always typed as string | number (A5).
- * POST methods without :id take a data parameter; with :id take (id, data).
+ * Reads → GET; writes → POST/PUT/PATCH/DELETE. Tail id param always typed as
+ * string | number (A5). Body verbs (POST/PUT/PATCH/DELETE) without :id take a
+ * data parameter; with :id take (id, data?). DELETE's body is optional.
  * GET methods without :id take optional HttpParams; with :id take (id, params?).
  *
  * @return string TypeScript source for one method entry (including trailing comma)
@@ -880,7 +894,15 @@ function buildMethodTs(
     bool   $tailId,
 ): string {
     $isGet  = $httpMethod === 'GET';
-    $isPost = $httpMethod === 'POST';
+    // POST/PUT/PATCH all carry a body and share the same signature shape.
+    // DELETE carries an OPTIONAL body (same shape — body defaults to undefined).
+    $bodyVerb = match ($httpMethod) {
+        'POST'   => 'post',
+        'PUT'    => 'put',
+        'PATCH'  => 'patch',
+        'DELETE' => 'delete',
+        default  => null,
+    };
 
     if ($isGet) {
         if ($tailId) {
@@ -898,23 +920,23 @@ TS;
         }
     }
 
-    if ($isPost) {
+    if ($bodyVerb !== null) {
         if ($tailId) {
-            // POST with :id — e.g. inventory.update(id, data?)
+            // Body verb with :id — e.g. inventory.update(id, data?) / workspace.delete(id)
             return <<<TS
     {$action}: (id: string | number, data?: T.ApiRequestBody) =>
-      this.http.post<T.ApiResponse>({$urlTemplate}, data),
+      this.http.{$bodyVerb}<T.ApiResponse>({$urlTemplate}, data),
 TS;
         } else {
-            // POST without :id — e.g. inventory.create(data?)
+            // Body verb without :id — e.g. inventory.create(data?)
             return <<<TS
     {$action}: (data?: T.ApiRequestBody) =>
-      this.http.post<T.ApiResponse>({$urlTemplate}, data),
+      this.http.{$bodyVerb}<T.ApiResponse>({$urlTemplate}, data),
 TS;
         }
     }
 
-    // Fallback (should not occur — spec mandates GET+POST only)
+    // Fallback for genuinely unknown verbs (should not occur — GET/POST/PUT/PATCH/DELETE covered above)
     return <<<TS
     {$action}: (..._args: unknown[]) => Promise.reject(new Error('Unsupported HTTP method: {$httpMethod}')),
 TS;
@@ -938,8 +960,13 @@ function generateTypesTs(): string
  * The types below are the minimum baseline required by the generated ApiClient.
  */
 
-/** Generic API response data payload (replace with specific types per endpoint) */
-export type ApiResponse = Record<string, unknown> | unknown[] | null;
+/**
+ * Generic API response data payload (replace with specific types per endpoint).
+ * Typed as `unknown` so consumers narrow with a single `as X` cast — the previous
+ * `Record<string, unknown> | unknown[] | null` union broke strict narrowing (the
+ * `unknown[]` member) and forced `as unknown as X` double-casts. (CLIENT-SDK-SPEC §6)
+ */
+export type ApiResponse = unknown;
 
 /** Generic request body type (replace with specific types per endpoint) */
 export type ApiRequestBody = Record<string, unknown> | unknown[] | null;
