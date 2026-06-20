@@ -1,10 +1,22 @@
 <?php
 
 /**
- * API Client Generator — v4.3
+ * API Client Generator — v4.4
  *
  * Generates per-service TypeScript client packages from PHP routes.
  * Implements CLIENT-SDK-SPEC §0 Amendments A1–A6 (approved 2026-06-14).
+ *
+ * v4.4 (package naming — generate-api-client-spec.md §"Package Naming"):
+ *   - <scope> is now a REQUIRED positional argument (the angular service directory:
+ *     portal, admin, business, www, …). CLI aborts with an error if omitted.
+ *   - Generated package `name` is derived deterministically as
+ *     `{composer-name}-{scope}-client`, where `{composer-name}` is the `name` field
+ *     from the API project's composer.json used AS-IS (no hardcoded npm org scope
+ *     prefix like `@stonescript/` is added or stripped). Replaces the prior
+ *     `@stonescript/api-client-{service}` convention.
+ *   - Example: composer name `medstoreapp-api` + scope `portal`
+ *     → package name `medstoreapp-api-portal-client`
+ *   - The `--service=` filter remains for single-package generation.
  *
  * v4.3 (typed returns, CLIENT-SDK-SPEC §10): a route may declare a response DTO via
  *   `'response' => SomeDto::class` (+ optional `'collection' => true`). The generator
@@ -28,11 +40,12 @@
  *   - Tail path parameter always typed as `id: string | number` regardless of param: name (A5)
  *
  * Usage:
- *   php stone generate client
- *   php stone generate client --tenancy=T3   (default for most platforms)
- *   php stone generate client --tenancy=T2   (T2/JWT-tenant — no URL tenant segment)
- *   php stone generate client --tenancy=T1   (no tenant at all)
- *   php stone generate client --output=client --service=portal  (single package)
+ *   php stone generate client <scope>
+ *   php stone generate client portal
+ *   php stone generate client portal --tenancy=T3   (default for most platforms)
+ *   php stone generate client portal --tenancy=T2   (T2/JWT-tenant — no URL tenant segment)
+ *   php stone generate client portal --tenancy=T1   (no tenant at all)
+ *   php stone generate client portal --output=client --service=portal  (single package)
  *
  * Migration note:
  *   Routes declared without a `group:` key trigger the hard-error guard (A2).
@@ -65,21 +78,25 @@ $outputBaseDir  = 'client';      // Emits one subdirectory per service
 $tenancyMode    = 'T3';          // T3 | T2 | T1
 $serviceFilter  = null;          // null = all services; string = one service only
 $language       = 'typescript';  // Only TypeScript supported in v4.0
+$scopeArg       = null;          // REQUIRED positional: angular service dir (portal/admin/www/…)
 
-foreach ($argv as $arg) {
-    if (str_starts_with($arg, '--output='))   $outputBaseDir  = substr($arg, 9);
-    if (str_starts_with($arg, '--tenancy='))  $tenancyMode    = strtoupper(substr($arg, 10));
-    if (str_starts_with($arg, '--service='))  $serviceFilter  = strtolower(substr($arg, 10));
-    if (str_starts_with($arg, '--language=')) $language        = strtolower(substr($arg, 11));
-
-    if (in_array($arg, ['--help', '-h', 'help'])) {
-        echo <<<HELP
-API Client Generator v4.0
+// Help check first — before positional parsing
+if (array_intersect(['--help', '-h', 'help'], $argv)) {
+    echo <<<HELP
+API Client Generator v4.4
 =========================
 
 Generates per-service TypeScript client packages (CLIENT-SDK-SPEC §0 A1-A6).
+Package name is derived as {composer-name}-{scope}-client (generate-api-client-spec.md).
 
-Usage: php stone generate client [options]
+Usage: php stone generate client <scope> [options]
+
+Arguments:
+  <scope>             REQUIRED. Angular service directory name (portal, admin, www,
+                      business, student, …). Used to derive the generated package name:
+                        package name = {composer.json name}-{scope}-client
+                      Example: composer name 'medstoreapp-api' + scope 'portal'
+                               → package name 'medstoreapp-api-portal-client'
 
 Options:
   --output=<dir>      Base output directory (default: client)
@@ -102,13 +119,92 @@ Excluded services (never emitted):
   streaming: true     — SSE/chunked routes (A1); listed in a notice comment
 
 HELP;
-        exit(0);
+    exit(0);
+}
+
+foreach ($argv as $i => $arg) {
+    if ($i === 0) continue; // skip script name
+    if (str_starts_with($arg, '--output='))   { $outputBaseDir = substr($arg, 9); continue; }
+    if (str_starts_with($arg, '--tenancy='))  { $tenancyMode   = strtoupper(substr($arg, 10)); continue; }
+    if (str_starts_with($arg, '--service='))  { $serviceFilter = strtolower(substr($arg, 10)); continue; }
+    if (str_starts_with($arg, '--language=')) { $language       = strtolower(substr($arg, 11)); continue; }
+    if (str_starts_with($arg, '--'))          { continue; } // unknown flag — skip
+
+    // First non-flag argument = <scope>
+    if ($scopeArg === null) {
+        $scopeArg = strtolower($arg);
     }
+}
+
+if ($scopeArg === null) {
+    fwrite(STDERR, <<<ERR
+
+[stone generate client] ERROR: <scope> argument is required.
+
+Usage: php stone generate client <scope>
+
+  <scope> is the angular service directory name (portal, admin, www, business, …).
+  It is used to derive the generated package name:
+    package name = {composer.json name}-{scope}-client
+
+Examples:
+  php stone generate client portal
+  php stone generate client portal --tenancy=T3
+  php stone generate client www --output=../www/src/api-client
+
+ERR
+    );
+    exit(1);
 }
 
 if (!in_array($tenancyMode, ['T1', 'T2', 'T3'])) {
     fwrite(STDERR, "Error: --tenancy must be T1, T2, or T3 (got '$tenancyMode').\n");
     exit(1);
+}
+
+// ============================================================================
+// Derive package name from composer.json (generate-api-client-spec.md §"Package Naming")
+// ============================================================================
+
+/**
+ * Read the composer.json `name` field from the API project root.
+ * Returns null if the file is missing or malformed.
+ */
+function readComposerName(): ?string
+{
+    $composerPath = ROOT_PATH . 'composer.json';
+    if (!file_exists($composerPath)) {
+        return null;
+    }
+    $decoded = json_decode(file_get_contents($composerPath), true);
+    return is_array($decoded) && isset($decoded['name']) ? (string) $decoded['name'] : null;
+}
+
+$composerName = readComposerName();
+if ($composerName === null) {
+    fwrite(STDERR, "[stone generate client] WARNING: composer.json not found or has no `name` field at " . ROOT_PATH . "composer.json\n");
+    fwrite(STDERR, "[stone generate client] Falling back to package name '{scope}-client'.\n");
+    $composerName = '';
+}
+
+/**
+ * Derive the generated npm package name per generate-api-client-spec.md §"Package Naming".
+ *
+ * Rule: {composer-name}-{scope}-client
+ *   - {composer-name} is the `name` field from composer.json used AS-IS.
+ *   - {scope} is the <scope> positional argument.
+ *   - No npm org scope prefix is added (no @stonescript/, no @progalaxyelabs/, etc.).
+ *
+ * @param string $composerName  Value of `name` from composer.json (e.g. 'medstoreapp-api')
+ * @param string $scope         The <scope> positional argument (e.g. 'portal')
+ * @return string               Derived npm package name (e.g. 'medstoreapp-api-portal-client')
+ */
+function derivePackageName(string $composerName, string $scope): string
+{
+    if ($composerName === '') {
+        return $scope . '-client';
+    }
+    return $composerName . '-' . $scope . '-client';
 }
 
 // Convert to absolute path if relative
@@ -1277,11 +1373,15 @@ TS;
 
 /**
  * Generate package.json for a service package.
+ *
+ * @param string $serviceName   e.g. 'portal', 'admin'
+ * @param string $packageName   Derived npm package name (generate-api-client-spec.md §"Package Naming"):
+ *                              {composer-name}-{scope}-client (e.g. 'medstoreapp-api-portal-client')
  */
-function generatePackageJson(string $serviceName): string
+function generatePackageJson(string $serviceName, string $packageName): string
 {
     return json_encode([
-        'name'        => "@stonescript/api-client-{$serviceName}",
+        'name'        => $packageName,
         'version'     => '0.0.0',
         'description' => "Auto-generated API client for {$serviceName} service — do not edit manually",
         'main'        => 'dist/index.js',
@@ -1409,6 +1509,11 @@ foreach ($included as $serviceName => $serviceRoutes) {
     $GLOBALS['__dtoInterfaces'] = [];
     $GLOBALS['__dtoInProgress'] = [];
 
+    // Derive npm package name per generate-api-client-spec.md §"Package Naming".
+    // Rule: {composer-name}-{scope}-client (using global $scopeArg + $composerName).
+    // The scope arg identifies the angular service dir this generated client targets.
+    $packageName = derivePackageName($composerName, $scopeArg);
+
     // Output directory for this package
     $packageDir = $outputBaseDir . DIRECTORY_SEPARATOR . $serviceName;
     $srcDir     = $packageDir . DIRECTORY_SEPARATOR . 'src';
@@ -1427,7 +1532,7 @@ foreach ($included as $serviceName => $serviceRoutes) {
     );
 
     // Write package files
-    file_put_contents($packageDir . '/package.json',    generatePackageJson($serviceName));
+    file_put_contents($packageDir . '/package.json',    generatePackageJson($serviceName, $packageName));
     file_put_contents($packageDir . '/tsconfig.json',   generateTsConfig());
     file_put_contents($packageDir . '/.gitignore',      generateGitignore());
     file_put_contents($srcDir . '/http.ts',             verbatimHttpTs());
@@ -1441,6 +1546,7 @@ foreach ($included as $serviceName => $serviceRoutes) {
     $streamingCount = count($streamingRoutes);
 
     echo "✓ Generated package: $packageDir\n";
+    echo "  npm name: $packageName\n";
     echo "  Routes: $routeCount  |  Streaming (skipped): $streamingCount\n";
     $groups = array_unique(array_column($serviceRoutes, 'group'));
     sort($groups);

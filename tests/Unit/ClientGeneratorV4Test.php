@@ -364,6 +364,7 @@ class ClientGeneratorV4Test extends TestCase
 
         try {
             $exitCode = $this->runGenerator([
+                'portal',
                 '--output=' . $outputDir,
                 '--tenancy=T3',
             ], $this->fixtureRoutesFile());
@@ -392,7 +393,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
 
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
             $this->assertStringContainsString('setTenant', $clientTs, 'T3 portal client must have setTenant()');
@@ -408,7 +409,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
 
             $adminDir = $outputDir . '/admin';
             $this->assertDirectoryExists($adminDir, 'Admin package should be generated (A6)');
@@ -431,7 +432,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T2'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T2'], $this->fixtureRoutesFile());
 
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
             $this->assertStringNotContainsString('setTenant', $clientTs, 'T2 client must not have setTenant()');
@@ -451,7 +452,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
 
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
 
@@ -471,7 +472,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
 
             $this->assertDirectoryDoesNotExist($outputDir . '/infra',   'infra service must not produce a package (A3)');
             $this->assertDirectoryDoesNotExist($outputDir . '/webhook', 'webhook service must not produce a package (A3)');
@@ -485,7 +486,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
 
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
             $this->assertStringContainsString('readonly inventory', $clientTs, 'inventory group property must exist');
@@ -500,7 +501,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
 
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
             // Must NOT have the v3.30 regression pattern
@@ -519,7 +520,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir  = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $exitCode = $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $routesFile);
+            $exitCode = $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $routesFile);
             $this->assertNotEquals(0, $exitCode, 'Generator must exit non-zero when group is missing (A2)');
         } finally {
             $this->rmdir($outputDir);
@@ -531,7 +532,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
 
             $gitignore = file_get_contents($outputDir . '/portal/.gitignore');
             $this->assertStringNotContainsString('dist/', $gitignore, 'dist/ must NOT be gitignored (B3 — CI build-gate)');
@@ -545,12 +546,124 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
 
             $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
             $this->assertEmpty((array)($pkg['dependencies'] ?? []),     'Generated client must have zero runtime dependencies');
             $this->assertEmpty((array)($pkg['peerDependencies'] ?? []), 'Generated client must have zero peer dependencies');
             $this->assertStringNotContainsString('ngx-stonescriptphp-client', file_get_contents($outputDir . '/portal/package.json'));
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    // =========================================================================
+    // v4.4 — Package naming rule (generate-api-client-spec.md §"Package Naming")
+    // =========================================================================
+
+    /**
+     * Generated package.json `name` MUST be `{composer-name}-{scope}-client`.
+     *
+     *   - {composer-name} = `name` field from composer.json AS-IS (no npm org scope added/stripped).
+     *   - {scope}         = the <scope> positional arg passed to the generator.
+     *   - No `@org/` prefix of any kind is emitted.
+     *
+     * Example: composer name `hello-world` + scope `portal` → `hello-world-portal-client`
+     *          composer name `medstoreapp-api` + scope `portal` → `medstoreapp-api-portal-client`
+     *          composer name `hello-world` + scope `www` → `hello-world-www-client`
+     */
+    public function test_generator_package_name_is_derived_from_composer_name_and_scope(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            // Inject a composer.json with a known name into the temp project root.
+            // The fixture routes file uses the portal service so we get a portal/ package.
+            $this->runGenerator(
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile(),
+                ['composer.json' => json_encode(['name' => 'hello-world', 'require' => new \stdClass()]) . "\n"]
+            );
+
+            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+
+            // Rule: {composer-name}-{scope}-client — no @org/ prefix of any kind.
+            $this->assertEquals(
+                'hello-world-portal-client',
+                $pkg['name'],
+                'Package name must be {composer-name}-{scope}-client (generate-api-client-spec.md §"Package Naming")'
+            );
+
+            // Must NOT carry a hardcoded npm org scope — the old @stonescript/... convention is gone.
+            $this->assertStringNotContainsString('@stonescript/', $pkg['name'], 'Package name must not carry @stonescript/ prefix');
+            $this->assertStringNotContainsString('@progalaxyelabs/', $pkg['name'], 'Package name must not carry @progalaxyelabs/ prefix');
+
+            // Verify admin package also uses the same derived name (scope stays constant per CLI run).
+            $adminPkg = json_decode(file_get_contents($outputDir . '/admin/package.json'), true);
+            $this->assertEquals(
+                'hello-world-portal-client',
+                $adminPkg['name'],
+                'All service packages in a single CLI run share the same scope-derived name'
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Test the two canonical examples from the spec:
+     *   medstoreapp-api + portal → medstoreapp-api-portal-client
+     *   hello-world     + www    → hello-world-www-client
+     */
+    public function test_generator_package_naming_canonical_examples(): void
+    {
+        // medstoreapp-api + portal
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+        try {
+            $this->runGenerator(
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile(),
+                ['composer.json' => json_encode(['name' => 'medstoreapp-api', 'require' => new \stdClass()]) . "\n"]
+            );
+            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $this->assertEquals('medstoreapp-api-portal-client', $pkg['name'],
+                'medstoreapp-api + scope portal → medstoreapp-api-portal-client');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+
+        // hello-world + www (using the same fixture but scope=www)
+        $outputDir2 = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+        try {
+            $this->runGenerator(
+                ['www', '--output=' . $outputDir2, '--tenancy=T3'],
+                $this->fixtureRoutesFile(),
+                ['composer.json' => json_encode(['name' => 'hello-world', 'require' => new \stdClass()]) . "\n"]
+            );
+            // The fixture registers portal + admin services; with scope=www the derived name is hello-world-www-client
+            $pkg = json_decode(file_get_contents($outputDir2 . '/portal/package.json'), true);
+            $this->assertEquals('hello-world-www-client', $pkg['name'],
+                'hello-world + scope www → hello-world-www-client');
+        } finally {
+            $this->rmdir($outputDir2);
+        }
+    }
+
+    /**
+     * Generator must exit non-zero when <scope> positional arg is missing (v4.4).
+     * The scope is required; omitting it is a hard error.
+     */
+    public function test_generator_hard_errors_when_scope_arg_missing(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+        try {
+            // Pass no scope arg — only flags
+            $exitCode = $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile()
+            );
+            $this->assertNotEquals(0, $exitCode,
+                'Generator must exit non-zero when <scope> argument is missing');
         } finally {
             $this->rmdir($outputDir);
         }
@@ -567,7 +680,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
 
             // Infra-probe passthroughs present (structural IApiClient conformance).
@@ -603,7 +716,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
 
             // All five escape-hatch methods must be present (CLIENT-SDK-SPEC §12 / v4.3.1).
@@ -626,7 +739,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
             $adminClientTs = file_get_contents($outputDir . '/admin/src/client.ts');
 
             // Admin client (not tenant-scoped): put/patch/delete must be plain passthroughs
@@ -650,7 +763,7 @@ class ClientGeneratorV4Test extends TestCase
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            $this->runGenerator(['--output=' . $outputDir, '--tenancy=T2'], $this->fixtureRoutesFile());
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T2'], $this->fixtureRoutesFile());
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
 
             // T2 client is not URL-tenant-scoped: put/patch/delete must be plain passthroughs.
@@ -676,7 +789,7 @@ class ClientGeneratorV4Test extends TestCase
 
         try {
             $this->runGenerator(
-                ['--output=' . $outputDir, '--tenancy=T3'],
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
                 $this->fixtureRoutesWithResponseDto(),
                 $this->fixtureDtoFiles()
             );
@@ -710,7 +823,7 @@ class ClientGeneratorV4Test extends TestCase
 
         try {
             $this->runGenerator(
-                ['--output=' . $outputDir, '--tenancy=T3'],
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
                 $this->fixtureRoutesWithResponseDto(),
                 $this->fixtureDtoFiles()
             );
