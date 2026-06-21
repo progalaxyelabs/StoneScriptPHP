@@ -1134,6 +1134,353 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     // =========================================================================
+    // v4.6.0 — mid-path {id} parameter bug (TS2304 regression guard)
+    // =========================================================================
+
+    /**
+     * Regression test for the v4.6.0 fix: routes where {id} appears in a non-tail
+     * position (followed by an action segment like /start, /suspend, /assign-driver)
+     * MUST declare `id: string | number` in their TypeScript method signature.
+     *
+     * Pre-fix: hasTailId() only checked the LAST path segment, so
+     *   POST /routes/{id}/start → url template `${this.t}/routes/${id}/start`
+     * but method signature `(data?) =>`  ← NO `id` declared → TS2304 under strict tsc.
+     *
+     * Fix: templateNeedsIdParam() scans ALL non-tenant path segments. Any route with
+     * a {param} anywhere in its non-tenant path produces a method with id in its sig.
+     *
+     * Failing platforms: webmeteor, btechrecruiter, instituteapp (2026-06-21).
+     * Pattern: resource group with GET /things/{id} + POST /things/{id}/action siblings.
+     */
+    public function test_mid_path_id_param_declared_in_sibling_post_methods_t3(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesMidPathIdFile()
+            );
+
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+
+            // The list route (no {id}) must NOT have id in signature.
+            $this->assertStringContainsString(
+                'list: (params?: HttpParams) =>',
+                $clientTs,
+                'list route must take HttpParams, not id'
+            );
+
+            // The get route (tail {id}) must have id in signature.
+            $this->assertStringContainsString(
+                'get: (id: string | number) =>',
+                $clientTs,
+                'get route (tail {id}) must declare id in signature'
+            );
+
+            // start has {id} in mid-path — MUST declare id.
+            // Pre-fix: this would be `start: (data?) =>` (missing id) → TS2304.
+            $this->assertStringContainsString(
+                'start: (id: string | number, data?: T.ApiRequestBody) =>',
+                $clientTs,
+                'start route with mid-path {id} must declare id in signature (v4.6.0 fix)'
+            );
+
+            // assignDriver: same pattern.
+            $this->assertStringContainsString(
+                'assignDriver: (id: string | number, data?: T.ApiRequestBody) =>',
+                $clientTs,
+                'assignDriver route with mid-path {id} must declare id in signature (v4.6.0 fix)'
+            );
+
+            // URL templates must still contain ${id} in the correct position.
+            $this->assertStringContainsString(
+                '`${this.t}/routes/${id}/start`',
+                $clientTs,
+                'start URL template must interpolate ${id}'
+            );
+            $this->assertStringContainsString(
+                '`${this.t}/routes/${id}/assign-driver`',
+                $clientTs,
+                'assignDriver URL template must interpolate ${id}'
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Same bug in admin (non-tenant-scoped) service: POST /tenants/{id}/suspend
+     * must declare id in its method signature.
+     */
+    public function test_mid_path_id_param_declared_in_admin_sibling_post_methods(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesMidPathIdFile()
+            );
+
+            $clientTs = file_get_contents($outputDir . '/admin/src/client.ts');
+
+            // suspend: POST /tenants/{id}/suspend — {id} is mid-path, not tail.
+            $this->assertStringContainsString(
+                'suspend: (id: string | number, data?: T.ApiRequestBody) =>',
+                $clientTs,
+                'admin suspend route with mid-path {id} must declare id in signature (v4.6.0 fix)'
+            );
+            $this->assertStringContainsString(
+                '`/admin/tenants/${id}/suspend`',
+                $clientTs,
+                'suspend URL template must interpolate ${id}'
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Same bug for portal routes with POST /items/{id}/update and /items/{id}/delete —
+     * {id} is mid-path (followed by 'update'/'delete' action segments).
+     */
+    public function test_mid_path_id_param_declared_in_update_delete_action_methods(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesMidPathIdFile()
+            );
+
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+
+            // update: POST /items/{id}/update — {id} mid-path.
+            $this->assertStringContainsString(
+                'update: (id: string | number, data?: T.ApiRequestBody) =>',
+                $clientTs,
+                'update route with mid-path {id} must declare id in signature (v4.6.0 fix)'
+            );
+            // delete: POST /items/{id}/delete — {id} mid-path.
+            $this->assertStringContainsString(
+                'delete: (id: string | number, data?: T.ApiRequestBody) =>',
+                $clientTs,
+                'delete route with mid-path {id} must declare id in signature (v4.6.0 fix)'
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    // =========================================================================
+    // v4.6.0 — strict tsc compile gate (the systemic gap that let this ship)
+    // =========================================================================
+
+    /**
+     * The generator test suite must verify that emitted TypeScript COMPILES under
+     * strict tsc — the same strictness that platform prod Docker builds use.
+     *
+     * This test closes the systemic gap: prior to v4.6.0, all generator tests
+     * checked string patterns in client.ts but never compiled it. Broken TypeScript
+     * (TS2304, TS2551, etc.) shipped green because "dev builds" mount pre-built
+     * dist and never run tsc on the generated client. The first place tsc ran was
+     * prod Docker build — too late.
+     *
+     * This test:
+     *   1. Generates a full portal + admin package from the multi-shape fixture
+     *      (which exercises mid-path params, RPC verbs, streaming, infra exclusion).
+     *   2. Runs tsc --project tsconfig.json --noEmit on each package (strict mode
+     *      is ON in the generated tsconfig.json — matches prod build config exactly).
+     *   3. Fails if tsc exits non-zero, surfacing the exact compiler errors.
+     *
+     * The tsc binary is resolved from the stonescriptphp-client-core package which
+     * always has typescript installed and is colocated in the same repo tree.
+     *
+     * If this test breaks: a generator change emits TypeScript that doesn't compile
+     * under strict mode. Fix the emission, not this test.
+     */
+    public function test_generated_portal_client_compiles_under_strict_tsc(): void
+    {
+        $tscPath = $this->findTscBinary();
+        if ($tscPath === null) {
+            $this->markTestSkipped(
+                'tsc binary not found in the stonescriptphp repo tree. ' .
+                'Run `npm install` in stonescriptphp-client-core or stonescriptphp-auth-client to install typescript.'
+            );
+        }
+
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $exitCode = $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesMidPathIdFile()
+            );
+            $this->assertEquals(0, $exitCode, 'Generator must exit 0 before tsc check');
+
+            // Compile portal package — strict mode is on in the generated tsconfig.json
+            $tscOutput = [];
+            $tscExit   = 0;
+            exec(
+                escapeshellarg($tscPath)
+                . ' --project ' . escapeshellarg($outputDir . '/portal/tsconfig.json')
+                . ' --noEmit 2>&1',
+                $tscOutput,
+                $tscExit
+            );
+
+            $this->assertEquals(
+                0,
+                $tscExit,
+                "Generated portal/src/client.ts does not compile under strict tsc.\n" .
+                "tsc output:\n" . implode("\n", $tscOutput) . "\n\n" .
+                "This means the generator emits TypeScript that would fail prod Docker builds. " .
+                "Fix the emission in generate-client.php."
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Same strict tsc compile check for the admin (non-tenant-scoped) package.
+     * Admin clients have a different code path (no setTenant, no escapePath) so
+     * they need their own compile assertion.
+     */
+    public function test_generated_admin_client_compiles_under_strict_tsc(): void
+    {
+        $tscPath = $this->findTscBinary();
+        if ($tscPath === null) {
+            $this->markTestSkipped(
+                'tsc binary not found in the stonescriptphp repo tree.'
+            );
+        }
+
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $exitCode = $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesMidPathIdFile()
+            );
+            $this->assertEquals(0, $exitCode, 'Generator must exit 0 before tsc check');
+
+            $tscOutput = [];
+            $tscExit   = 0;
+            exec(
+                escapeshellarg($tscPath)
+                . ' --project ' . escapeshellarg($outputDir . '/admin/tsconfig.json')
+                . ' --noEmit 2>&1',
+                $tscOutput,
+                $tscExit
+            );
+
+            $this->assertEquals(
+                0,
+                $tscExit,
+                "Generated admin/src/client.ts does not compile under strict tsc.\n" .
+                "tsc output:\n" . implode("\n", $tscOutput) . "\n\n" .
+                "This means the generator emits TypeScript that would fail prod Docker builds. " .
+                "Fix the emission in generate-client.php."
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Compile gate for T2 (non-URL-tenant-scoped) generated client.
+     * T2 clients strip the /tenant/{param} from URLs; the resulting code path
+     * differs from T3 — needs its own compile assertion.
+     */
+    public function test_generated_t2_client_compiles_under_strict_tsc(): void
+    {
+        $tscPath = $this->findTscBinary();
+        if ($tscPath === null) {
+            $this->markTestSkipped(
+                'tsc binary not found in the stonescriptphp repo tree.'
+            );
+        }
+
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $exitCode = $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T2'],
+                $this->fixtureRoutesMidPathIdFile()
+            );
+            $this->assertEquals(0, $exitCode, 'Generator must exit 0 before tsc check');
+
+            $tscOutput = [];
+            $tscExit   = 0;
+            exec(
+                escapeshellarg($tscPath)
+                . ' --project ' . escapeshellarg($outputDir . '/portal/tsconfig.json')
+                . ' --noEmit 2>&1',
+                $tscOutput,
+                $tscExit
+            );
+
+            $this->assertEquals(
+                0,
+                $tscExit,
+                "Generated T2 portal/src/client.ts does not compile under strict tsc.\n" .
+                "tsc output:\n" . implode("\n", $tscOutput)
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Compile gate using the original fixture (A1–A6 shapes including streaming,
+     * infra exclusion, explicit action overrides, RPC verbs). This is the full-fidelity
+     * test that would have caught every generator emission bug in a single run.
+     */
+    public function test_full_fixture_compiles_under_strict_tsc(): void
+    {
+        $tscPath = $this->findTscBinary();
+        if ($tscPath === null) {
+            $this->markTestSkipped(
+                'tsc binary not found in the stonescriptphp repo tree.'
+            );
+        }
+
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $exitCode = $this->runGenerator(
+                ['--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile()
+            );
+            $this->assertEquals(0, $exitCode, 'Generator must exit 0 before tsc check');
+
+            foreach (['portal', 'admin'] as $service) {
+                $tscOutput = [];
+                $tscExit   = 0;
+                exec(
+                    escapeshellarg($tscPath)
+                    . ' --project ' . escapeshellarg($outputDir . '/' . $service . '/tsconfig.json')
+                    . ' --noEmit 2>&1',
+                    $tscOutput,
+                    $tscExit
+                );
+
+                $this->assertEquals(
+                    0,
+                    $tscExit,
+                    "Generated $service/src/client.ts does not compile under strict tsc " .
+                    "(full A1-A6 fixture).\ntsc output:\n" . implode("\n", $tscOutput)
+                );
+            }
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    // =========================================================================
     // Fixture helpers
     // =========================================================================
 
@@ -1268,6 +1615,100 @@ PHP
         );
 
         return $file;
+    }
+
+    /**
+     * Returns path to a temporary fixture routes.php that exercises the
+     * mid-path {id} bug (v4.6.0 regression guard).
+     *
+     * Contains:
+     *   - portal group "inventory": GET /items (no id), GET /items/{id} (tail id),
+     *     POST /items/create (no id), POST /items/{id}/update (mid-path id),
+     *     POST /items/{id}/delete (mid-path id)
+     *   - portal group "routes": GET /routes (no id), POST /routes/{id}/start (mid-path),
+     *     POST /routes/{id}/assign-driver (mid-path)
+     *   - admin group "tenants": GET /tenants (no id), GET /tenants/{id} (tail),
+     *     POST /tenants/{id}/suspend (mid-path)
+     *
+     * Each mid-path {id} route would produce `${id}` in the URL template but (pre-fix)
+     * would not declare `id: string | number` in the method signature → TS2304.
+     */
+    private function fixtureRoutesMidPathIdFile(): string
+    {
+        $file = sys_get_temp_dir() . '/ssp-fixture-mid-path-id-' . uniqid() . '.php';
+
+        file_put_contents($file, <<<'PHP'
+<?php
+// Fixture: mid-path {id} parameter bug (v4.6.0 regression guard)
+
+$router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
+    // inventory group — covers tail-id, no-id, and mid-path-id shapes
+    $router->get('/items',              'ListItemsRoute',   group: 'inventory');
+    $router->get('/items/{id}',         'GetItemRoute',     group: 'inventory');
+    $router->get('/items/search',       'SearchItemsRoute', group: 'inventory');
+    $router->post('/items/create',      'CreateItemRoute',  group: 'inventory');
+    $router->post('/items/{id}/update', 'UpdateItemRoute',  group: 'inventory'); // mid-path
+    $router->post('/items/{id}/delete', 'DeleteItemRoute',  group: 'inventory'); // mid-path
+
+    // routes group — RPC-style: POST /routes/{id}/start and /assign-driver are mid-path
+    $router->get('/routes',                        'ListRoutesRoute',  group: 'routes');
+    $router->post('/routes/{id}/start',            'StartRouteRoute',  group: 'routes'); // mid-path
+    $router->post('/routes/{id}/assign-driver',    'AssignDriverRoute', group: 'routes'); // mid-path
+});
+
+// Admin routes — POST /tenants/{id}/suspend is mid-path
+$router->group('/admin', ['service' => 'admin'], function () use ($router) {
+    $router->get('/tenants',              'ListTenantsRoute',   group: 'tenants');
+    $router->get('/tenants/{id}',         'GetTenantRoute',     group: 'tenants'); // tail
+    $router->post('/tenants/{id}/suspend', 'SuspendTenantRoute', group: 'tenants'); // mid-path
+});
+PHP
+        );
+
+        return $file;
+    }
+
+    /**
+     * Locate a `tsc` binary suitable for strict-compile tests.
+     *
+     * Searches the stonescriptphp repo tree for a `typescript/bin/tsc` installed
+     * as a devDependency of our own packages (stonescriptphp-client-core,
+     * stonescriptphp-auth-client, etc.) — no separate install required.
+     *
+     * Returns the absolute path to tsc, or null when none is found (test is
+     * then skipped gracefully via markTestSkipped).
+     */
+    private function findTscBinary(): ?string
+    {
+        // Ordered preference: packages most likely to be installed.
+        //
+        // Directory layout:
+        //   divisions/opensource/stonescriptphp/
+        //     StoneScriptPHP/          ← $repoRoot (this framework)
+        //       tests/Unit/            ← __DIR__
+        //     stonescriptphp-client-core/
+        //     stonescriptphp-auth-client/
+        //     ngx-stonescriptphp-client/
+        //     stonescriptphp-ts-client/
+        //
+        // dirname($repoRoot) = divisions/opensource/stonescriptphp/
+        // sibling packages live there
+        $repoRoot    = realpath(__DIR__ . '/../..');
+        $siblingRoot = dirname($repoRoot);         // .../opensource/stonescriptphp/
+        $searchRoots = [
+            $siblingRoot . '/stonescriptphp-client-core/node_modules/.bin/tsc',
+            $siblingRoot . '/stonescriptphp-auth-client/node_modules/.bin/tsc',
+            $siblingRoot . '/ngx-stonescriptphp-client/node_modules/.bin/tsc',
+            $siblingRoot . '/stonescriptphp-ts-client/node_modules/.bin/tsc',
+        ];
+
+        foreach ($searchRoots as $candidate) {
+            if (file_exists($candidate) && is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**

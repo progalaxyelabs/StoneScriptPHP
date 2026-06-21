@@ -451,6 +451,65 @@ function hasTailId(string $path): bool
     return preg_match('/^\{.+\}$/', $last) || preg_match('/^:/', $last);
 }
 
+/**
+ * Check whether a route path contains ANY {param} / :param placeholder.
+ *
+ * This is the correct signal for whether the generated TypeScript URL template
+ * will contain `${id}` and therefore whether the method signature must declare
+ * `id: string | number`. Using hasTailId() for this purpose was the bug: it
+ * only checks the LAST path segment, so paths like `/routes/{id}/start`
+ * (where {id} is NOT the tail) produced templates with `${id}` in them but
+ * method signatures without the `id` parameter — TS2304 under strict tsc.
+ *
+ * NOTE: the /tenant/{tenantId} placeholder is intentionally included here.
+ * For T3 routes the tenant segment is stripped before URL template emission, but
+ * for T2/T1/admin routes with a /tenant/{param} in the path this check would
+ * still correctly identify that another param follows. In practice T3 routes
+ * always have the tenant prefix, so the check degrades gracefully to "does the
+ * path contain any non-tenantId placeholder", which is exactly what we need:
+ * we just need to know if the URL template will contain `${id}`.
+ */
+function hasAnyPathParam(string $path): bool
+{
+    return (bool) preg_match('/\{[^}]+\}/', $path) || str_contains($path, ':');
+}
+
+/**
+ * Check whether the emitted URL template for a route will contain `${id}`.
+ *
+ * This replaces hasTailId() as the decision function for whether the method
+ * signature must include `id: string | number`. The URL template replaces ALL
+ * {param} placeholders (after stripping /tenant/{tenantId}) with `${id}`, so
+ * any route that has a {param} anywhere in its non-tenant path will produce a
+ * template that references `id` — and the method signature must declare it.
+ *
+ * For T3 routes the tenant-prefix param ({tenantId}) is stripped and replaced
+ * by ${this.t} before emitting, so it never produces a ${id} reference.
+ * For T2/admin routes /tenant/{param} is also stripped. The remaining {param}
+ * segments — those that actually appear as ${id} in the template — are what
+ * this function counts.
+ *
+ * @param string $path          Raw route path from routes.php
+ * @param string $serviceName   e.g. 'portal' (used to strip T3 tenant prefix)
+ * @param bool   $isTenantScoped True when T3 non-admin (uses ${this.t} prefix)
+ */
+function templateNeedsIdParam(string $path, string $serviceName, bool $isTenantScoped): bool
+{
+    if ($isTenantScoped) {
+        // Strip /{service}/tenant/{tenantId} — this becomes ${this.t}, not ${id}
+        $stripped = preg_replace(
+            '#^/' . preg_quote($serviceName, '#') . '/tenant/\{[^}]+\}#',
+            '',
+            $path
+        ) ?? $path;
+    } else {
+        // Strip /tenant/{param} for T2/admin if present
+        $stripped = preg_replace('#/tenant/\{[^}]+\}#', '', $path) ?? $path;
+    }
+    // Any remaining {param} becomes ${id} in the template
+    return (bool) preg_match('/\{[^}]+\}/', $stripped);
+}
+
 // ============================================================================
 // TypeScript verbatim file contents (emitted as-is per spec)
 // ============================================================================
@@ -970,14 +1029,18 @@ function buildGroupMethods(
         // Build TypeScript URL template
         $urlTemplate = buildUrlTemplate($path, $isTenantScoped, $serviceName);
 
-        // Determine if there's a tail id param (A5: always typed as string | number)
-        $tailId = hasTailId($path);
+        // Determine if the emitted URL template will contain ${id} and therefore
+        // whether the method signature must declare `id: string | number`.
+        // Previously used hasTailId() — WRONG: only detected tail params.
+        // The URL template replaces ALL {param} segments with ${id}, so any route
+        // with a non-tail {id} (e.g. /routes/{id}/start) also needs the id param.
+        $needsIdParam = templateNeedsIdParam($path, $serviceName, $isTenantScoped);
 
         // Resolve typed return (CLIENT-SDK-SPEC §10). null → ApiResponse fallback.
         $responseTs = routeResponseTsType($route);
 
         // Build method signature and call
-        $methodTs = buildMethodTs($action, $method, $urlTemplate, $tailId, $responseTs);
+        $methodTs = buildMethodTs($action, $method, $urlTemplate, $needsIdParam, $responseTs);
         $lines[] = $methodTs;
     }
 
@@ -1040,25 +1103,33 @@ function buildUrlTemplate(string $path, bool $isTenantScoped, string $serviceNam
 /**
  * Build a single TypeScript method entry for a group object.
  *
- * Reads → GET; writes → POST/PUT/PATCH/DELETE. Tail id param always typed as
- * string | number (A5). Body verbs (POST/PUT/PATCH/DELETE) without :id take a
- * data parameter; with :id take (id, data?). DELETE's body is optional.
- * GET methods without :id take optional HttpParams; with :id take (id, params?).
+ * Reads → GET; writes → POST/PUT/PATCH/DELETE. Path id param always typed as
+ * string | number (A5). Body verbs (POST/PUT/PATCH/DELETE) without path id take
+ * a data parameter; with path id take (id, data?). DELETE's body is optional.
+ * GET methods without path id take optional HttpParams; with id take (id, params?).
+ *
+ * $needsIdParam: true when the URL template contains `${id}` — i.e. the route
+ * path has any {param} placeholder in its non-tenant portion. This covers both
+ * tail-id routes (/items/{id}) AND mid-path routes (/routes/{id}/start). The
+ * previous parameter was named $tailId and used hasTailId() — which only
+ * detected TAIL params, missing /routes/{id}/start shapes (v4.6.0 fix).
  *
  * Typed returns (CLIENT-SDK-SPEC §10, v4.3.0): when $responseTs is non-null
  * (the route declared `response:`), the http generic + Promise are typed to that
  * DTO type (e.g. `Promise<T.Warehouse[]>` / `this.http.get<T.Warehouse[]>(...)`).
  * When null, the method keeps the `T.ApiResponse` (= unknown) fallback.
  *
- * @param string|null $responseTs Resolved TS return-payload type ('T.Warehouse[]'),
- *                                 or null for the ApiResponse fallback.
+ * @param bool        $needsIdParam True when the URL template will contain `${id}`
+ *                                   (replaces $tailId — see templateNeedsIdParam()).
+ * @param string|null $responseTs   Resolved TS return-payload type ('T.Warehouse[]'),
+ *                                   or null for the ApiResponse fallback.
  * @return string TypeScript source for one method entry (including trailing comma)
  */
 function buildMethodTs(
     string  $action,
     string  $httpMethod,
     string  $urlTemplate,
-    bool    $tailId,
+    bool    $needsIdParam,
     ?string $responseTs = null,
 ): string {
     // Return-payload generic: typed DTO when declared, else ApiResponse (unknown).
@@ -1076,8 +1147,8 @@ function buildMethodTs(
     };
 
     if ($isGet) {
-        if ($tailId) {
-            // GET with :id — e.g. inventory.get(id)
+        if ($needsIdParam) {
+            // GET with path id — e.g. inventory.get(id) or routes.shipments(id)
             return <<<TS
     {$action}: (id: string | number) =>
       this.http.get<{$ret}>({$urlTemplate}),
@@ -1092,14 +1163,14 @@ TS;
     }
 
     if ($bodyVerb !== null) {
-        if ($tailId) {
-            // Body verb with :id — e.g. inventory.update(id, data?) / workspace.delete(id)
+        if ($needsIdParam) {
+            // Body verb with path id — e.g. inventory.update(id, data?) / routes.start(id, data?)
             return <<<TS
     {$action}: (id: string | number, data?: T.ApiRequestBody) =>
       this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data),
 TS;
         } else {
-            // Body verb without :id — e.g. inventory.create(data?)
+            // Body verb without path id — e.g. inventory.create(data?)
             return <<<TS
     {$action}: (data?: T.ApiRequestBody) =>
       this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data),

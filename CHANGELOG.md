@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-06-21
+
+### Fixed
+
+- **Mid-path `{id}` parameter undeclared in sibling method signatures — TS2304 under strict tsc (`cli/generate-client.php` `buildGroupMethods()` / `buildMethodTs()`).** When a resource group has multiple methods sharing a path parameter in a non-tail position — e.g. `GET /routes/{id}` alongside `POST /routes/{id}/start` and `POST /routes/{id}/assign-driver` — only the first method (which happened to have `{id}` as its tail) was declaring `id: string | number` in its TypeScript signature. The sibling methods had `${id}` interpolated in their URL template (because `buildUrlTemplate()` replaces ALL `{param}` segments with `${id}`) but their method signatures were emitted as `(data?) =>` without the `id` parameter — producing `TS2304: Cannot find name 'id'` under strict `tsc`. Detected in production Docker builds on three platforms (webmeteor, btechrecruiter, instituteapp) on 2026-06-21; dev builds passed because dev mounts a pre-built dist and never runs `tsc` on the generated client.
+
+  Root cause: `buildMethodTs()` received a `$tailId` flag from `hasTailId($path)`, which only checked whether the LAST path segment is a `{param}`. Routes with `{id}` in a non-tail position (followed by an action segment like `/start`, `/suspend`, `/assign-driver`, `/update`, `/delete`) returned `hasTailId=false` and therefore received the no-id method signature even though their URL template required `id`.
+
+  Fix: replaced `hasTailId()` with a new `templateNeedsIdParam(string $path, string $serviceName, bool $isTenantScoped): bool` helper that strips the tenant prefix (`/{service}/tenant/{tenantId}` for T3, `/tenant/{param}` for T2/admin) and then checks whether any `{param}` placeholder remains in the path — which is exactly the condition under which `buildUrlTemplate()` will emit `${id}` in the template. The `$tailId` parameter to `buildMethodTs()` is renamed `$needsIdParam` to reflect its corrected semantics.
+
+  Affected route shapes: any resource group with `POST /resource/{id}/action` or `GET /resource/{id}/sub-resource` siblings alongside a plain `GET /resource` or `POST /resource/create`. This is an extremely common REST + RPC pattern (inventory update/delete, route start/assign, tenant suspend, etc.) — all affected platforms had it.
+
+- **Systemic gap: generator test suite never compiled its emitted TypeScript.** All prior generator tests checked string patterns in `client.ts` but never ran `tsc` on the output. This allowed broken TypeScript to ship green through the test suite and only fail at prod Docker build time — the fourth generator defect found this way in a single day. Added four `tsc --noEmit` compile-gate tests (see Tests section below) that prevent this class of defect from shipping again.
+
+### Added
+
+- `templateNeedsIdParam(string $path, string $serviceName, bool $isTenantScoped): bool` — helper that correctly determines whether the emitted URL template will contain `${id}` by scanning all non-tenant path segments. Replaces `hasTailId()` as the method-signature decision gate in `buildGroupMethods()`.
+- `hasAnyPathParam(string $path): bool` — utility that detects any `{param}` or `:param` placeholder anywhere in a path (not yet wired into the main flow, available for future use).
+
+### Tests
+
+- Added `test_mid_path_id_param_declared_in_sibling_post_methods_t3` — T3 portal: `POST /routes/{id}/start` and `/assign-driver` must declare `id` in signature; `list` and routes without id must not. Verifies URL template interpolation position.
+- Added `test_mid_path_id_param_declared_in_admin_sibling_post_methods` — admin: `POST /tenants/{id}/suspend` must declare `id` in signature.
+- Added `test_mid_path_id_param_declared_in_update_delete_action_methods` — portal: `POST /items/{id}/update` and `/items/{id}/delete` must declare `id` in signature.
+- Added `test_generated_portal_client_compiles_under_strict_tsc` — **compile gate**: generates portal package from the mid-path fixture and runs `tsc --project tsconfig.json --noEmit` (strict mode ON, as in prod). Fails with the full `tsc` error output if compilation fails.
+- Added `test_generated_admin_client_compiles_under_strict_tsc` — same compile gate for the admin (non-tenant-scoped) package.
+- Added `test_generated_t2_client_compiles_under_strict_tsc` — compile gate for T2 (no URL tenant segment) client.
+- Added `test_full_fixture_compiles_under_strict_tsc` — compile gate on the full A1–A6 fixture (streaming, infra exclusion, explicit action overrides, RPC verbs, portal + admin) — the test that would have caught every prior generator emission defect.
+- `findTscBinary(): ?string` — locates `tsc` from sibling npm packages in the repo tree (`stonescriptphp-client-core`, `stonescriptphp-auth-client`, etc.); tests are skipped gracefully if none is found.
+- Total: 58 tests in `ClientGeneratorV4Test` (was 51); full suite 322 tests all passing.
+
 ## [4.5.0] - 2026-06-21
 
 ### Fixed
