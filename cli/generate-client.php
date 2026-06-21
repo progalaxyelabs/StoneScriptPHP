@@ -1,20 +1,35 @@
 <?php
 
 /**
- * API Client Generator — v4.4
+ * API Client Generator — v4.5
  *
  * Generates per-service TypeScript client packages from PHP routes.
  * Implements CLIENT-SDK-SPEC §0 Amendments A1–A6 (approved 2026-06-14).
  *
+ * v4.5 (multi-scope clobber fix):
+ *   - Each service package's `name` is now derived from the SERVICE NAME, not the
+ *     <scope> CLI argument. When a routes.php declares multiple services (e.g.
+ *     portal + admin), each emitted package gets its own correct name:
+ *       client/portal/ → {composer-name}-portal-client
+ *       client/admin/  → {composer-name}-admin-client
+ *     Previously all packages in a single run shared the same scope-derived name,
+ *     so a second run with a different scope silently clobbered the first run's
+ *     package.json names (every multi-service platform was affected).
+ *   - The <scope> positional argument is now OPTIONAL. When omitted, generation
+ *     proceeds normally — every service in routes.php gets its own correctly-named
+ *     package. When supplied it is accepted without error (backward-compatible) and
+ *     has no effect on naming.
+ *   - Deprecation notice: passing <scope> is accepted but unnecessary and will be
+ *     removed in a future major version. Remove it from your `stone generate client`
+ *     invocations.
+ *
  * v4.4 (package naming — generate-api-client-spec.md §"Package Naming"):
- *   - <scope> is now a REQUIRED positional argument (the angular service directory:
- *     portal, admin, business, www, …). CLI aborts with an error if omitted.
  *   - Generated package `name` is derived deterministically as
- *     `{composer-name}-{scope}-client`, where `{composer-name}` is the `name` field
+ *     `{composer-name}-{service}-client`, where `{composer-name}` is the `name` field
  *     from the API project's composer.json used AS-IS (no hardcoded npm org scope
  *     prefix like `@stonescript/` is added or stripped). Replaces the prior
  *     `@stonescript/api-client-{service}` convention.
- *   - Example: composer name `medstoreapp-api` + scope `portal`
+ *   - Example: composer name `medstoreapp-api`, service `portal`
  *     → package name `medstoreapp-api-portal-client`
  *   - The `--service=` filter remains for single-package generation.
  *
@@ -78,9 +93,9 @@ $outputBaseDir  = 'client';      // Emits one subdirectory per service
 $tenancyMode    = 'T3';          // T3 | T2 | T1
 $serviceFilter  = null;          // null = all services; string = one service only
 $language       = 'typescript';  // Only TypeScript supported in v4.0
-$scopeArg       = null;          // REQUIRED positional: angular service dir (portal/admin/www/…)
+$scopeArg       = null;          // OPTIONAL positional (deprecated — accepted but no longer used for naming)
 
-// Use the dispatcher-adjusted argv. When invoked via `php stone generate client <scope>`,
+// Use the dispatcher-adjusted argv. When invoked via `php stone generate client [scope]`,
 // the `stone` CLI sets $_SERVER['argv'] = [$scriptPath, ...$args_after_subcommand] — so
 // $_SERVER['argv'][1] is the first real argument (e.g. "www"), NOT "generate" or "client".
 // The global $argv still contains the full stone invocation (stone, generate, client, www …)
@@ -90,20 +105,21 @@ $argv = $_SERVER['argv'];
 // Help check first — before positional parsing
 if (array_intersect(['--help', '-h', 'help'], $argv)) {
     echo <<<HELP
-API Client Generator v4.4
+API Client Generator v4.5
 =========================
 
 Generates per-service TypeScript client packages (CLIENT-SDK-SPEC §0 A1-A6).
-Package name is derived as {composer-name}-{scope}-client (generate-api-client-spec.md).
+Package name for each service package is derived as {composer-name}-{service}-client.
 
-Usage: php stone generate client <scope> [options]
+Usage: php stone generate client [options]
 
 Arguments:
-  <scope>             REQUIRED. Angular service directory name (portal, admin, www,
-                      business, student, …). Used to derive the generated package name:
-                        package name = {composer.json name}-{scope}-client
-                      Example: composer name 'medstoreapp-api' + scope 'portal'
-                               → package name 'medstoreapp-api-portal-client'
+  [scope]             DEPRECATED / OPTIONAL. Previously required; now accepted without
+                      error but has no effect on naming. Package names are derived from
+                      the service name in routes.php, not from this argument:
+                        portal service → {composer.json name}-portal-client
+                        admin service  → {composer.json name}-admin-client
+                      Remove this arg from your invocations — it will be removed in v5.
 
 Options:
   --output=<dir>      Base output directory (default: client)
@@ -143,25 +159,12 @@ foreach ($argv as $i => $arg) {
     }
 }
 
-if ($scopeArg === null) {
-    fwrite(STDERR, <<<ERR
-
-[stone generate client] ERROR: <scope> argument is required.
-
-Usage: php stone generate client <scope>
-
-  <scope> is the angular service directory name (portal, admin, www, business, …).
-  It is used to derive the generated package name:
-    package name = {composer.json name}-{scope}-client
-
-Examples:
-  php stone generate client portal
-  php stone generate client portal --tenancy=T3
-  php stone generate client www --output=../www/src/api-client
-
-ERR
-    );
-    exit(1);
+// $scopeArg is now optional (v4.5). When supplied, emit a deprecation notice;
+// package names are derived from each service name in the generation loop below.
+if ($scopeArg !== null) {
+    fwrite(STDERR, "[stone generate client] NOTICE: <scope> positional arg '$scopeArg' is deprecated (v4.5).\n" .
+        "  Package names now derive from each service name in routes.php.\n" .
+        "  Remove this arg from your invocations — it will be removed in v5.\n");
 }
 
 if (!in_array($tenancyMode, ['T1', 'T2', 'T3'])) {
@@ -197,17 +200,23 @@ if ($composerName === null) {
 /**
  * Derive the generated npm package name per generate-api-client-spec.md §"Package Naming".
  *
+ * The $serviceName parameter is the backend service name from routes.php (e.g. 'portal',
+ * 'admin', 'www'). Using the service name — not the CLI scope arg — ensures that when a
+ * routes.php declares multiple services, each package gets a distinct, correct name:
+ *   portal service → {composer-name}-portal-client
+ *   admin  service → {composer-name}-admin-client
+ *
  * Rules:
  *   - When {composer-name} has NO slash (e.g. 'medstoreapp-api'):
- *       → unscoped npm name: `{composer-name}-{scope}-client`
- *       → example: 'medstoreapp-api' + 'portal' → 'medstoreapp-api-portal-client'
+ *       → unscoped npm name: `{composer-name}-{service}-client`
+ *       → example: 'medstoreapp-api', service 'portal' → 'medstoreapp-api-portal-client'
  *
  *   - When {composer-name} has a vendor prefix (e.g. 'progalaxyelabs/progalaxy-api'):
- *       → scoped npm name: `@{vendor}/{pkg}-{scope}-client`
- *       → example: 'progalaxyelabs/progalaxy-api' + 'www' → '@progalaxyelabs/progalaxy-api-www-client'
+ *       → scoped npm name: `@{vendor}/{pkg}-{service}-client`
+ *       → example: 'progalaxyelabs/progalaxy-api', service 'www' → '@progalaxyelabs/progalaxy-api-www-client'
  *
  *   - When {composer-name} is empty (composer.json missing or no name field):
- *       → fallback: `{scope}-client`
+ *       → fallback: `{service}-client`
  *
  * The vendor/pkg split maps the Composer vendor prefix to an npm org scope (@vendor),
  * producing a valid npm scoped package name. No other transformation is applied.
@@ -216,23 +225,23 @@ if ($composerName === null) {
  *
  * @param string $composerName  Value of `name` from composer.json (e.g. 'medstoreapp-api'
  *                              or 'progalaxyelabs/progalaxy-api')
- * @param string $scope         The <scope> positional argument (e.g. 'portal', 'www')
+ * @param string $serviceName   The service being generated (e.g. 'portal', 'admin', 'www')
  * @return string               Derived npm package name
  */
-function derivePackageName(string $composerName, string $scope): string
+function derivePackageName(string $composerName, string $serviceName): string
 {
     if ($composerName === '') {
-        return $scope . '-client';
+        return $serviceName . '-client';
     }
 
-    // Vendor-prefixed composer name (e.g. 'vendor/pkg') → npm scoped form '@vendor/pkg-{scope}-client'
+    // Vendor-prefixed composer name (e.g. 'vendor/pkg') → npm scoped form '@vendor/pkg-{service}-client'
     if (str_contains($composerName, '/')) {
         [$vendor, $pkg] = explode('/', $composerName, 2);
-        return '@' . $vendor . '/' . $pkg . '-' . $scope . '-client';
+        return '@' . $vendor . '/' . $pkg . '-' . $serviceName . '-client';
     }
 
-    // No vendor prefix (e.g. 'medstoreapp-api') → unscoped 'medstoreapp-api-{scope}-client'
-    return $composerName . '-' . $scope . '-client';
+    // No vendor prefix (e.g. 'medstoreapp-api') → unscoped 'medstoreapp-api-{service}-client'
+    return $composerName . '-' . $serviceName . '-client';
 }
 
 // Convert to absolute path if relative
@@ -1404,7 +1413,7 @@ TS;
  *
  * @param string $serviceName   e.g. 'portal', 'admin'
  * @param string $packageName   Derived npm package name (generate-api-client-spec.md §"Package Naming"):
- *                              {composer-name}-{scope}-client (e.g. 'medstoreapp-api-portal-client')
+ *                              {composer-name}-{serviceName}-client (e.g. 'medstoreapp-api-portal-client')
  */
 function generatePackageJson(string $serviceName, string $packageName): string
 {
@@ -1537,10 +1546,13 @@ foreach ($included as $serviceName => $serviceRoutes) {
     $GLOBALS['__dtoInterfaces'] = [];
     $GLOBALS['__dtoInProgress'] = [];
 
-    // Derive npm package name per generate-api-client-spec.md §"Package Naming".
-    // Rule: {composer-name}-{scope}-client (using global $scopeArg + $composerName).
-    // The scope arg identifies the angular service dir this generated client targets.
-    $packageName = derivePackageName($composerName, $scopeArg);
+    // Derive npm package name per generate-api-client-spec.md §"Package Naming" (v4.5).
+    // Rule: {composer-name}-{serviceName}-client — each service package gets its own name.
+    // The service name (from routes.php) is used, NOT the deprecated $scopeArg, so that
+    // all packages emitted in a single run get distinct correct names:
+    //   portal → {composer-name}-portal-client
+    //   admin  → {composer-name}-admin-client
+    $packageName = derivePackageName($composerName, $serviceName);
 
     // Output directory for this package
     $packageDir = $outputBaseDir . DIRECTORY_SEPARATOR . $serviceName;

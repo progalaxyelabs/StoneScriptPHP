@@ -558,112 +558,199 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     // =========================================================================
-    // v4.4 — Package naming rule (generate-api-client-spec.md §"Package Naming")
+    // v4.4/v4.5 — Package naming rule (generate-api-client-spec.md §"Package Naming")
     // =========================================================================
 
     /**
-     * Generated package.json `name` MUST be `{composer-name}-{scope}-client`.
+     * Generated package.json `name` MUST be `{composer-name}-{serviceName}-client`.
      *
      *   - {composer-name} = `name` field from composer.json AS-IS (no npm org scope added/stripped).
-     *   - {scope}         = the <scope> positional arg passed to the generator.
-     *   - No `@org/` prefix of any kind is emitted.
+     *   - {serviceName}   = the service name declared in routes.php (portal, admin, www, …).
+     *   - No `@org/` prefix of any kind is emitted for non-vendor-prefixed composer names.
      *
-     * Example: composer name `hello-world` + scope `portal` → `hello-world-portal-client`
-     *          composer name `medstoreapp-api` + scope `portal` → `medstoreapp-api-portal-client`
-     *          composer name `hello-world` + scope `www` → `hello-world-www-client`
+     * When a routes.php declares multiple services, each package gets its OWN correct name:
+     *   portal service → hello-world-portal-client
+     *   admin  service → hello-world-admin-client
+     *
+     * The CLI <scope> arg is deprecated (v4.5) and no longer affects package naming.
      */
-    public function test_generator_package_name_is_derived_from_composer_name_and_scope(): void
+    public function test_generator_package_name_uses_service_name_not_scope_arg(): void
     {
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
-            // Inject a composer.json with a known name into the temp project root.
-            // The fixture routes file uses the portal service so we get a portal/ package.
+            // Run generator with scope='www' — a scope that does NOT match either service
+            // in the fixture (portal + admin). The correct behavior is that each service
+            // package uses its own service name, ignoring the scope arg entirely.
             $this->runGenerator(
-                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                ['www', '--output=' . $outputDir, '--tenancy=T3'],
                 $this->fixtureRoutesFile(),
                 ['composer.json' => json_encode(['name' => 'hello-world', 'require' => new \stdClass()]) . "\n"]
             );
 
-            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
-
-            // Rule: {composer-name}-{scope}-client — no @org/ prefix of any kind.
+            // portal package must be named for the portal service, NOT for 'www'
+            $portalPkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
             $this->assertEquals(
                 'hello-world-portal-client',
-                $pkg['name'],
-                'Package name must be {composer-name}-{scope}-client (generate-api-client-spec.md §"Package Naming")'
+                $portalPkg['name'],
+                'portal/ package name must be derived from service name "portal", not from the CLI scope "www"'
             );
 
-            // Must NOT carry a hardcoded npm org scope — the old @stonescript/... convention is gone.
-            $this->assertStringNotContainsString('@stonescript/', $pkg['name'], 'Package name must not carry @stonescript/ prefix');
-            $this->assertStringNotContainsString('@progalaxyelabs/', $pkg['name'], 'Package name must not carry @progalaxyelabs/ prefix');
-
-            // Verify admin package also uses the same derived name (scope stays constant per CLI run).
+            // admin package must be named for the admin service, NOT for 'www'
             $adminPkg = json_decode(file_get_contents($outputDir . '/admin/package.json'), true);
             $this->assertEquals(
-                'hello-world-portal-client',
+                'hello-world-admin-client',
                 $adminPkg['name'],
-                'All service packages in a single CLI run share the same scope-derived name'
+                'admin/ package name must be derived from service name "admin", not from the CLI scope "www"'
             );
+
+            // Confirm no scope-arg leakage in either package name
+            $this->assertStringNotContainsString('-www-', $portalPkg['name'],
+                'portal/ package must not contain the CLI scope "www" in its name');
+            $this->assertStringNotContainsString('-www-', $adminPkg['name'],
+                'admin/ package must not contain the CLI scope "www" in its name');
+
+            // Must NOT carry a hardcoded npm org scope — the old @stonescript/... convention is gone.
+            $this->assertStringNotContainsString('@stonescript/', $portalPkg['name']);
+            $this->assertStringNotContainsString('@progalaxyelabs/', $portalPkg['name']);
         } finally {
             $this->rmdir($outputDir);
         }
     }
 
     /**
-     * Test the two canonical examples from the spec:
-     *   medstoreapp-api + portal → medstoreapp-api-portal-client
-     *   hello-world     + www    → hello-world-www-client
+     * v4.5 multi-scope clobber regression test.
+     *
+     * Bug (v4.4): when a routes.php declares portal + admin services and the generator
+     * runs twice — once with scope=portal then once with scope=admin — the second run
+     * CLOBBERS the first run's portal/package.json name with the admin scope, leaving
+     * both portal/ and admin/ named "...-admin-client".
+     *
+     * Fix (v4.5): package name uses $serviceName (from routes.php), not $scopeArg (the
+     * CLI arg). Each run independently produces correct per-service names regardless of
+     * what scope arg was passed.
+     *
+     * This test exercises the EXACT failure mode reported: sequential runs on a
+     * multi-service platform (medstoreapp, logisticsapp, emcircuitsystems, …).
+     */
+    public function test_multi_scope_sequential_runs_do_not_clobber_package_names(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+        $extraFiles = ['composer.json' => json_encode(['name' => 'myapp-api', 'require' => new \stdClass()]) . "\n"];
+
+        try {
+            // Run 1: stone generate client portal (as a platform's CI might do)
+            $exitCode = $this->runGenerator(
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile(),
+                $extraFiles
+            );
+            $this->assertEquals(0, $exitCode);
+
+            // After run 1: portal gets portal-name, admin also gets portal-name (old bug)
+            // OR portal gets portal-name and admin gets admin-name (correct v4.5)
+            $portalNameAfterRun1 = json_decode(file_get_contents($outputDir . '/portal/package.json'), true)['name'];
+            $adminNameAfterRun1  = json_decode(file_get_contents($outputDir . '/admin/package.json'), true)['name'];
+
+            // Run 2: stone generate client admin (second angular service)
+            $exitCode = $this->runGenerator(
+                ['admin', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile(),
+                $extraFiles
+            );
+            $this->assertEquals(0, $exitCode);
+
+            $portalNameAfterRun2 = json_decode(file_get_contents($outputDir . '/portal/package.json'), true)['name'];
+            $adminNameAfterRun2  = json_decode(file_get_contents($outputDir . '/admin/package.json'), true)['name'];
+
+            // INVARIANT: portal/package.json name must be the same before and after run 2.
+            // If run 2 clobbers it, this assertion fails — that is the bug.
+            $this->assertEquals(
+                $portalNameAfterRun1,
+                $portalNameAfterRun2,
+                'Run 2 (scope=admin) must NOT clobber the portal/ package name written by run 1. ' .
+                "Before: '$portalNameAfterRun1', After: '$portalNameAfterRun2'"
+            );
+
+            // Each service package must have its own service-specific name in both runs.
+            $this->assertEquals('myapp-api-portal-client', $portalNameAfterRun2,
+                'portal/ package must always be named myapp-api-portal-client regardless of CLI scope arg');
+            $this->assertEquals('myapp-api-admin-client', $adminNameAfterRun2,
+                'admin/ package must always be named myapp-api-admin-client regardless of CLI scope arg');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Test the canonical platform examples (matching real medstoreapp + logisticsapp):
+     *   progalaxyelabs/medstoreapp-api, service portal → @progalaxyelabs/medstoreapp-api-portal-client
+     *   progalaxyelabs/medstoreapp-api, service admin  → @progalaxyelabs/medstoreapp-api-admin-client
+     *   medstoreapp-api (bare), service portal         → medstoreapp-api-portal-client
      */
     public function test_generator_package_naming_canonical_examples(): void
     {
-        // medstoreapp-api + portal
+        // Vendor-prefixed composer name: each service gets its own @-scoped package
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
         try {
             $this->runGenerator(
                 ['portal', '--output=' . $outputDir, '--tenancy=T3'],
                 $this->fixtureRoutesFile(),
-                ['composer.json' => json_encode(['name' => 'medstoreapp-api', 'require' => new \stdClass()]) . "\n"]
+                ['composer.json' => json_encode(['name' => 'progalaxyelabs/myapp-api', 'require' => new \stdClass()]) . "\n"]
             );
-            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
-            $this->assertEquals('medstoreapp-api-portal-client', $pkg['name'],
-                'medstoreapp-api + scope portal → medstoreapp-api-portal-client');
+            $portalPkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $adminPkg  = json_decode(file_get_contents($outputDir . '/admin/package.json'), true);
+            $this->assertEquals('@progalaxyelabs/myapp-api-portal-client', $portalPkg['name'],
+                'vendor-prefixed: service portal → @vendor/pkg-portal-client');
+            $this->assertEquals('@progalaxyelabs/myapp-api-admin-client', $adminPkg['name'],
+                'vendor-prefixed: service admin → @vendor/pkg-admin-client');
         } finally {
             $this->rmdir($outputDir);
         }
 
-        // hello-world + www (using the same fixture but scope=www)
+        // Bare (non-vendor-prefixed) composer name
         $outputDir2 = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
         try {
             $this->runGenerator(
-                ['www', '--output=' . $outputDir2, '--tenancy=T3'],
+                ['portal', '--output=' . $outputDir2, '--tenancy=T3'],
                 $this->fixtureRoutesFile(),
-                ['composer.json' => json_encode(['name' => 'hello-world', 'require' => new \stdClass()]) . "\n"]
+                ['composer.json' => json_encode(['name' => 'medstoreapp-api', 'require' => new \stdClass()]) . "\n"]
             );
-            // The fixture registers portal + admin services; with scope=www the derived name is hello-world-www-client
-            $pkg = json_decode(file_get_contents($outputDir2 . '/portal/package.json'), true);
-            $this->assertEquals('hello-world-www-client', $pkg['name'],
-                'hello-world + scope www → hello-world-www-client');
+            $portalPkg = json_decode(file_get_contents($outputDir2 . '/portal/package.json'), true);
+            $adminPkg  = json_decode(file_get_contents($outputDir2 . '/admin/package.json'), true);
+            $this->assertEquals('medstoreapp-api-portal-client', $portalPkg['name'],
+                'bare: service portal → name-portal-client');
+            $this->assertEquals('medstoreapp-api-admin-client', $adminPkg['name'],
+                'bare: service admin → name-admin-client');
         } finally {
             $this->rmdir($outputDir2);
         }
     }
 
     /**
-     * Generator must exit non-zero when <scope> positional arg is missing (v4.4).
-     * The scope is required; omitting it is a hard error.
+     * Generator must succeed (exit 0) when <scope> positional arg is omitted (v4.5).
+     * The scope is now optional; omitting it is no longer an error.
      */
-    public function test_generator_hard_errors_when_scope_arg_missing(): void
+    public function test_generator_succeeds_when_scope_arg_omitted(): void
     {
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
         try {
-            // Pass no scope arg — only flags
+            // Pass no scope arg — only flags. Must succeed and produce correct packages.
             $exitCode = $this->runGenerator(
                 ['--output=' . $outputDir, '--tenancy=T3'],
-                $this->fixtureRoutesFile()
+                $this->fixtureRoutesFile(),
+                ['composer.json' => json_encode(['name' => 'myapp-api', 'require' => new \stdClass()]) . "\n"]
             );
-            $this->assertNotEquals(0, $exitCode,
-                'Generator must exit non-zero when <scope> argument is missing');
+            $this->assertEquals(0, $exitCode,
+                'Generator must exit 0 when <scope> argument is omitted (v4.5: scope is now optional)');
+
+            // Each service package must have its own name derived from the service name.
+            $portalPkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $adminPkg  = json_decode(file_get_contents($outputDir . '/admin/package.json'), true);
+            $this->assertEquals('myapp-api-portal-client', $portalPkg['name'],
+                'Without scope arg: portal/ must be named myapp-api-portal-client');
+            $this->assertEquals('myapp-api-admin-client', $adminPkg['name'],
+                'Without scope arg: admin/ must be named myapp-api-admin-client');
         } finally {
             $this->rmdir($outputDir);
         }
@@ -842,12 +929,16 @@ class ClientGeneratorV4Test extends TestCase
     // =========================================================================
 
     /**
-     * Bug 1 regression test: when invoked via `php stone generate client <scope>`, the
-     * stone dispatcher sets $_SERVER['argv'] = [$scriptPath, $scope, ...flags] and then
+     * Bug 1 regression test (v4.4.0): when invoked via `php stone generate client <scope>`,
+     * the stone dispatcher sets $_SERVER['argv'] = [$scriptPath, $scope, ...flags] and then
      * require's generate-client.php. The global $argv still contains the full stone
      * invocation (stone, generate, client, www) — if the generator reads $argv instead of
-     * $_SERVER['argv'], it picks up "generate" as the scope and produces a package name
-     * ending in "-generate-client".
+     * $_SERVER['argv'], it picks up "generate" as the scope and the scope arg is mis-parsed.
+     *
+     * Although v4.5 no longer uses the scope arg for naming, the generator must still
+     * correctly parse $_SERVER['argv'] (not raw $argv) so that it does not misidentify
+     * stone subcommand tokens ("generate", "client") as other arguments. The test verifies
+     * the generator exits 0 and produces correct service-named packages on the dispatcher path.
      *
      * This test exercises that exact path: the runGeneratorViaStoneDispatch() helper
      * simulates the stone dispatcher by setting $_SERVER['argv'] correctly and leaving
@@ -865,22 +956,26 @@ class ClientGeneratorV4Test extends TestCase
                 extraFiles: ['composer.json' => json_encode(['name' => 'hello-world', 'require' => new \stdClass()]) . "\n"],
             );
 
-            $this->assertEquals(0, $exitCode, 'Generator must exit 0 when scope is supplied via stone dispatcher path');
+            $this->assertEquals(0, $exitCode, 'Generator must exit 0 on the stone dispatcher invocation path');
 
-            // The package name must be derived from scope "www", NOT from the subcommand
-            // tokens "generate" or "client" that appear in the raw $argv.
+            // In v4.5 package names come from service names, not the scope arg.
+            // The portal service always gets "hello-world-portal-client" regardless of
+            // whether scope="www" was passed via the dispatcher.
             $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
             $this->assertEquals(
-                'hello-world-www-client',
+                'hello-world-portal-client',
                 $pkg['name'],
-                'Scope must be parsed from $_SERVER[argv] (dispatcher-adjusted), not raw $argv. ' .
-                'Got "' . $pkg['name'] . '" — if it ends with "-generate-client" the bug is still present.'
+                'portal/ package must be named from the service name "portal", not from the CLI scope arg or ' .
+                'subcommand tokens. Got "' . $pkg['name'] . '"'
             );
 
+            // The generator must NOT misparse the stone subcommand tokens in $argv as the scope.
+            // If Bug 1 regressed, the name would end in "-generate-client" (from "generate" token)
+            // or "-client-client" (from "client" token).
             $this->assertStringNotContainsString('-generate-client', $pkg['name'],
-                'Package name must not contain "generate" — that is the stone subcommand token, not the scope');
+                'Package name must not contain "generate" — that is a stone subcommand token, not a service name');
             $this->assertStringNotContainsString('-client-client', $pkg['name'],
-                'Package name must not contain "client-client" — that is the stone subcommand token, not the scope');
+                'Package name must not contain "client-client" — that is a stone subcommand token, not a service name');
         } finally {
             $this->rmdir($outputDir);
         }
@@ -892,12 +987,12 @@ class ClientGeneratorV4Test extends TestCase
 
     /**
      * When the composer.json name has a vendor prefix (e.g. 'progalaxyelabs/progalaxy-api'),
-     * the plain {name}-{scope}-client rule produces 'progalaxyelabs/progalaxy-api-www-client'
+     * the plain {name}-{service}-client rule would produce 'progalaxyelabs/progalaxy-api-portal-client'
      * which is an INVALID npm package name (slash without @).
      *
-     * Fix: detect a slash in the composer name and emit the valid npm scoped form:
-     *   @{vendor}/{pkg}-{scope}-client
-     *   e.g. 'progalaxyelabs/progalaxy-api' + 'www' → '@progalaxyelabs/progalaxy-api-www-client'
+     * Fix (v4.4.1): detect a slash in the composer name and emit the valid npm scoped form:
+     *   @{vendor}/{pkg}-{service}-client
+     *   e.g. 'progalaxyelabs/progalaxy-api', service 'portal' → '@progalaxyelabs/progalaxy-api-portal-client'
      */
     public function test_vendor_prefixed_composer_name_emits_npm_scoped_package_name(): void
     {
@@ -914,7 +1009,7 @@ class ClientGeneratorV4Test extends TestCase
             $this->assertEquals(
                 '@progalaxyelabs/progalaxy-api-portal-client',
                 $pkg['name'],
-                'vendor/pkg composer name must emit @vendor/pkg-{scope}-client (valid npm scoped name)'
+                'vendor/pkg composer name must emit @vendor/pkg-{service}-client (valid npm scoped name)'
             );
 
             // Must start with '@' — confirm it is an npm-scoped form, not an invalid bare-slash name
@@ -926,10 +1021,12 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     /**
-     * Canonical example from the fix spec: progalaxyelabs/progalaxy-api + scope www
-     * → @progalaxyelabs/progalaxy-api-www-client
+     * Vendor-prefixed composer name: each service gets its own scoped npm name.
+     * The CLI scope arg is ignored for naming (v4.5); service names from routes.php drive names.
+     *   progalaxyelabs/progalaxy-api, service portal → @progalaxyelabs/progalaxy-api-portal-client
+     *   progalaxyelabs/progalaxy-api, service admin  → @progalaxyelabs/progalaxy-api-admin-client
      */
-    public function test_vendor_prefix_with_www_scope(): void
+    public function test_vendor_prefix_each_service_gets_distinct_scoped_name(): void
     {
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
@@ -940,11 +1037,20 @@ class ClientGeneratorV4Test extends TestCase
                 ['composer.json' => json_encode(['name' => 'progalaxyelabs/progalaxy-api', 'require' => new \stdClass()]) . "\n"]
             );
 
-            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            // portal service → @progalaxyelabs/progalaxy-api-portal-client (service name, not scope 'www')
+            $portalPkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
             $this->assertEquals(
-                '@progalaxyelabs/progalaxy-api-www-client',
-                $pkg['name'],
-                'progalaxyelabs/progalaxy-api + scope www → @progalaxyelabs/progalaxy-api-www-client'
+                '@progalaxyelabs/progalaxy-api-portal-client',
+                $portalPkg['name'],
+                'vendor-prefixed: portal service → @vendor/pkg-portal-client (service name drives naming, not CLI scope)'
+            );
+
+            // admin service → @progalaxyelabs/progalaxy-api-admin-client
+            $adminPkg = json_decode(file_get_contents($outputDir . '/admin/package.json'), true);
+            $this->assertEquals(
+                '@progalaxyelabs/progalaxy-api-admin-client',
+                $adminPkg['name'],
+                'vendor-prefixed: admin service → @vendor/pkg-admin-client'
             );
         } finally {
             $this->rmdir($outputDir);
@@ -952,8 +1058,8 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     /**
-     * Non-vendor-prefixed composer name (no slash) must keep the unscoped form
-     * (existing v4.4.0 behaviour must be preserved).
+     * Non-vendor-prefixed composer name (no slash) must keep the unscoped form.
+     * Each service gets its own name: {composer-name}-{service}-client.
      */
     public function test_non_vendor_prefixed_composer_name_keeps_unscoped_form(): void
     {
@@ -966,14 +1072,25 @@ class ClientGeneratorV4Test extends TestCase
                 ['composer.json' => json_encode(['name' => 'medstoreapp-api', 'require' => new \stdClass()]) . "\n"]
             );
 
-            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            // portal service → medstoreapp-api-portal-client
+            $portalPkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
             $this->assertEquals(
                 'medstoreapp-api-portal-client',
-                $pkg['name'],
-                'No-slash composer name must keep the unscoped {name}-{scope}-client form'
+                $portalPkg['name'],
+                'No-slash composer name: portal service → {name}-portal-client (unscoped)'
             );
 
-            $this->assertStringNotContainsString('@', $pkg['name'],
+            // admin service → medstoreapp-api-admin-client
+            $adminPkg = json_decode(file_get_contents($outputDir . '/admin/package.json'), true);
+            $this->assertEquals(
+                'medstoreapp-api-admin-client',
+                $adminPkg['name'],
+                'No-slash composer name: admin service → {name}-admin-client (unscoped)'
+            );
+
+            $this->assertStringNotContainsString('@', $portalPkg['name'],
+                'Unscoped form must not have an @ prefix');
+            $this->assertStringNotContainsString('@', $adminPkg['name'],
                 'Unscoped form must not have an @ prefix');
         } finally {
             $this->rmdir($outputDir);
@@ -981,25 +1098,35 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     /**
-     * Empty / missing composer name must fall back to {scope}-client (existing v4.4.0 behaviour).
+     * Empty / missing composer name must fall back to {serviceName}-client.
+     * v4.5: service name (from routes.php) is the fallback token, not the CLI scope.
      */
-    public function test_empty_composer_name_falls_back_to_scope_client(): void
+    public function test_empty_composer_name_falls_back_to_service_name_client(): void
     {
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
 
         try {
             // No composer.json injected → generator falls back to $composerName = ''
+            // portal service → portal-client  (not "www-client" or "scope-client")
+            // admin service  → admin-client
             $this->runGenerator(
-                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                ['www', '--output=' . $outputDir, '--tenancy=T3'],
                 $this->fixtureRoutesFile()
                 // no extraFiles → no composer.json in tmpRoot
             );
 
-            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $portalPkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
             $this->assertEquals(
                 'portal-client',
-                $pkg['name'],
-                'Missing composer.json must fall back to {scope}-client'
+                $portalPkg['name'],
+                'Missing composer.json: portal service must fall back to "portal-client" (service name), not "www-client" (scope arg)'
+            );
+
+            $adminPkg = json_decode(file_get_contents($outputDir . '/admin/package.json'), true);
+            $this->assertEquals(
+                'admin-client',
+                $adminPkg['name'],
+                'Missing composer.json: admin service must fall back to "admin-client" (service name)'
             );
         } finally {
             $this->rmdir($outputDir);

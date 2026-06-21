@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-06-21
+
+### Fixed
+
+- **Multi-scope clobber — every multi-service platform affected (`cli/generate-client.php` main generation loop).** When a `routes.php` declares multiple backend services (e.g. `portal` + `admin`), running `php stone generate client portal` then `php stone generate client admin` caused the second run to overwrite the first run's `portal/package.json` name with the admin scope — leaving both packages named `...-admin-client`. Root cause: `derivePackageName()` was called with `$scopeArg` (the CLI argument) instead of `$serviceName` (the service currently being generated). Every multi-service platform was affected (medstoreapp, logisticsapp, emcircuitsystems, aasaanwork, progalaxyelabs, and others). Fixed by passing `$serviceName` to `derivePackageName()` so each service package always gets its own correct name regardless of which scope arg was passed on the CLI.
+
+### Changed
+
+- **`<scope>` positional argument is now OPTIONAL and DEPRECATED.** The argument is accepted without error for backward compatibility but no longer affects the generated package names — those now derive from each service's name in `routes.php`. A deprecation notice is emitted to stderr when the arg is supplied. Remove it from your `php stone generate client` invocations; it will be removed in v5. The recommended invocation is now simply `php stone generate client` (or with flags like `--tenancy=T2`).
+- **`derivePackageName(string $composerName, string $serviceName)` parameter rename.** The second parameter was previously described as `$scope` (the CLI arg); it is now correctly documented as `$serviceName` (the routes.php service name). The calling convention is unchanged.
+
+### Tests
+
+- Added `test_generator_package_name_uses_service_name_not_scope_arg` — asserts that passing `scope=www` does NOT affect package names when the services in routes.php are `portal` and `admin`.
+- Added `test_multi_scope_sequential_runs_do_not_clobber_package_names` — the exact regression test for the multi-scope clobber bug: runs the generator twice (scope=portal, then scope=admin) and asserts `portal/package.json` is not overwritten by the second run.
+- Added `test_generator_succeeds_when_scope_arg_omitted` — verifies the generator exits 0 and produces correct per-service names when no scope arg is provided (v4.5 behavior).
+- Replaced `test_generator_package_naming_canonical_examples` — now tests vendor-prefixed and bare composer names, both producing per-service distinct names.
+- Replaced `test_vendor_prefix_with_www_scope` with `test_vendor_prefix_each_service_gets_distinct_scoped_name` — verifies both `portal` and `admin` services get distinct `@vendor/pkg-{service}-client` names.
+- Updated `test_non_vendor_prefixed_composer_name_keeps_unscoped_form` — now asserts both `portal` and `admin` packages get distinct unscoped names.
+- Updated `test_empty_composer_name_falls_back_to_service_name_client` — renamed from `test_empty_composer_name_falls_back_to_scope_client`; verifies fallback uses service name, not scope arg.
+- Updated `test_scope_parsed_from_dispatcher_adjusted_argv_not_raw_argv` (Bug 1 regression) — updated expected name from scope-based to service-based; anti-regression assertions still verify stone subcommand tokens (`"generate"`, `"client"`) don't appear in generated names.
+- Total: 66 tests in ClientGeneratorV4Test (was 65); full suite 315 tests all passing.
+
 ## [4.4.1] - 2026-06-21
 
 ### Fixed
