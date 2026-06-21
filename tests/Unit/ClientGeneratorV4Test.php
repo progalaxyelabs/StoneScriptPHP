@@ -838,6 +838,175 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     // =========================================================================
+    // v4.4.1 Bug 1 — scope arg parsed from dispatcher-adjusted $_SERVER['argv']
+    // =========================================================================
+
+    /**
+     * Bug 1 regression test: when invoked via `php stone generate client <scope>`, the
+     * stone dispatcher sets $_SERVER['argv'] = [$scriptPath, $scope, ...flags] and then
+     * require's generate-client.php. The global $argv still contains the full stone
+     * invocation (stone, generate, client, www) — if the generator reads $argv instead of
+     * $_SERVER['argv'], it picks up "generate" as the scope and produces a package name
+     * ending in "-generate-client".
+     *
+     * This test exercises that exact path: the runGeneratorViaStoneDispatch() helper
+     * simulates the stone dispatcher by setting $_SERVER['argv'] correctly and leaving
+     * the raw $argv containing the stone invocation prefix.
+     */
+    public function test_scope_parsed_from_dispatcher_adjusted_argv_not_raw_argv(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $exitCode = $this->runGeneratorViaStoneDispatch(
+                scope: 'www',
+                flags: ['--output=' . $outputDir, '--tenancy=T3'],
+                routesFile: $this->fixtureRoutesFile(),
+                extraFiles: ['composer.json' => json_encode(['name' => 'hello-world', 'require' => new \stdClass()]) . "\n"],
+            );
+
+            $this->assertEquals(0, $exitCode, 'Generator must exit 0 when scope is supplied via stone dispatcher path');
+
+            // The package name must be derived from scope "www", NOT from the subcommand
+            // tokens "generate" or "client" that appear in the raw $argv.
+            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $this->assertEquals(
+                'hello-world-www-client',
+                $pkg['name'],
+                'Scope must be parsed from $_SERVER[argv] (dispatcher-adjusted), not raw $argv. ' .
+                'Got "' . $pkg['name'] . '" — if it ends with "-generate-client" the bug is still present.'
+            );
+
+            $this->assertStringNotContainsString('-generate-client', $pkg['name'],
+                'Package name must not contain "generate" — that is the stone subcommand token, not the scope');
+            $this->assertStringNotContainsString('-client-client', $pkg['name'],
+                'Package name must not contain "client-client" — that is the stone subcommand token, not the scope');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    // =========================================================================
+    // v4.4.1 Bug 2 — vendor-prefixed composer name → valid npm scoped package name
+    // =========================================================================
+
+    /**
+     * When the composer.json name has a vendor prefix (e.g. 'progalaxyelabs/progalaxy-api'),
+     * the plain {name}-{scope}-client rule produces 'progalaxyelabs/progalaxy-api-www-client'
+     * which is an INVALID npm package name (slash without @).
+     *
+     * Fix: detect a slash in the composer name and emit the valid npm scoped form:
+     *   @{vendor}/{pkg}-{scope}-client
+     *   e.g. 'progalaxyelabs/progalaxy-api' + 'www' → '@progalaxyelabs/progalaxy-api-www-client'
+     */
+    public function test_vendor_prefixed_composer_name_emits_npm_scoped_package_name(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile(),
+                ['composer.json' => json_encode(['name' => 'progalaxyelabs/progalaxy-api', 'require' => new \stdClass()]) . "\n"]
+            );
+
+            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $this->assertEquals(
+                '@progalaxyelabs/progalaxy-api-portal-client',
+                $pkg['name'],
+                'vendor/pkg composer name must emit @vendor/pkg-{scope}-client (valid npm scoped name)'
+            );
+
+            // Must start with '@' — confirm it is an npm-scoped form, not an invalid bare-slash name
+            $this->assertStringStartsWith('@', $pkg['name'],
+                'Vendor-prefixed composer name must emit an @-scoped npm package name, not a bare-slash invalid name');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Canonical example from the fix spec: progalaxyelabs/progalaxy-api + scope www
+     * → @progalaxyelabs/progalaxy-api-www-client
+     */
+    public function test_vendor_prefix_with_www_scope(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(
+                ['www', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile(),
+                ['composer.json' => json_encode(['name' => 'progalaxyelabs/progalaxy-api', 'require' => new \stdClass()]) . "\n"]
+            );
+
+            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $this->assertEquals(
+                '@progalaxyelabs/progalaxy-api-www-client',
+                $pkg['name'],
+                'progalaxyelabs/progalaxy-api + scope www → @progalaxyelabs/progalaxy-api-www-client'
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Non-vendor-prefixed composer name (no slash) must keep the unscoped form
+     * (existing v4.4.0 behaviour must be preserved).
+     */
+    public function test_non_vendor_prefixed_composer_name_keeps_unscoped_form(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile(),
+                ['composer.json' => json_encode(['name' => 'medstoreapp-api', 'require' => new \stdClass()]) . "\n"]
+            );
+
+            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $this->assertEquals(
+                'medstoreapp-api-portal-client',
+                $pkg['name'],
+                'No-slash composer name must keep the unscoped {name}-{scope}-client form'
+            );
+
+            $this->assertStringNotContainsString('@', $pkg['name'],
+                'Unscoped form must not have an @ prefix');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Empty / missing composer name must fall back to {scope}-client (existing v4.4.0 behaviour).
+     */
+    public function test_empty_composer_name_falls_back_to_scope_client(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            // No composer.json injected → generator falls back to $composerName = ''
+            $this->runGenerator(
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile()
+                // no extraFiles → no composer.json in tmpRoot
+            );
+
+            $pkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
+            $this->assertEquals(
+                'portal-client',
+                $pkg['name'],
+                'Missing composer.json must fall back to {scope}-client'
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    // =========================================================================
     // Fixture helpers
     // =========================================================================
 
@@ -1029,8 +1198,13 @@ define('INDEX_START_TIME',  microtime(true));
 
 require_once '$vendorAutoload';
 
+// generate-client.php reads \$_SERVER['argv'] (dispatcher-adjusted) — set it here
+// so the generator sees the correct args. \$argv is also set for completeness but
+// the generator no longer reads it (that was Bug 1).
 \$argv = $argsPhp;
 \$argc = count(\$argv);
+\$_SERVER['argv'] = \$argv;
+\$_SERVER['argc'] = \$argc;
 
 require '$generatorPath';
 PHP;
@@ -1047,6 +1221,95 @@ PHP;
 
         @unlink($wrapperPath);
         // Do NOT remove tmpRoot yet — caller reads files from outputDir first
+
+        return $exitCode;
+    }
+
+    /**
+     * Simulate the stone dispatcher path for Bug 1 regression testing.
+     *
+     * The stone CLI sets $_SERVER['argv'] = [$scriptPath, $scope, ...flags] and leaves
+     * the raw $argv containing the full stone invocation (stone, generate, client, $scope, ...).
+     * This helper replicates that environment so the test exercises the REAL dispatch path
+     * rather than calling the generator with a pre-shifted argv.
+     *
+     * Key difference from runGenerator(): the PHP wrapper sets BOTH:
+     *   $_SERVER['argv'] = [$scriptPath, $scope, ...flags]   ← what stone sets
+     *   $argv            = ['stone', 'generate', 'client', $scope, ...flags]  ← raw argv before dispatch
+     *
+     * If the generator reads $argv instead of $_SERVER['argv'] it will pick up "generate"
+     * as the scope and produce a wrong package name.
+     */
+    private function runGeneratorViaStoneDispatch(
+        string $scope,
+        array  $flags,
+        string $routesFile,
+        array  $extraFiles = [],
+    ): int {
+        $frameworkRoot  = realpath(__DIR__ . '/../..');
+        $generatorPath  = $frameworkRoot . '/cli/generate-client.php';
+        $vendorAutoload = $frameworkRoot . '/vendor/autoload.php';
+
+        $tmpRoot   = sys_get_temp_dir() . '/ssp-gen-root-' . uniqid();
+        $configDir = $tmpRoot . '/src/config';
+        mkdir($configDir, 0755, true);
+        copy($routesFile, $configDir . '/routes.php');
+
+        foreach ($extraFiles as $relPath => $source) {
+            $dest = $tmpRoot . '/' . ltrim($relPath, '/');
+            $dir  = dirname($dest);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+            file_put_contents($dest, $source);
+        }
+
+        // $_SERVER['argv'] as the stone dispatcher sets it: [$scriptPath, $scope, ...flags]
+        $dispatcherArgv = array_merge([$generatorPath, $scope], $flags);
+        $dispatcherArgvPhp = var_export($dispatcherArgv, true);
+
+        // Raw $argv as it exists BEFORE stone's dispatcher rewrites $_SERVER['argv']:
+        // the full stone invocation including the "generate" and "client" subcommand tokens.
+        $rawArgv = array_merge(['stone', 'generate', 'client', $scope], $flags);
+        $rawArgvPhp = var_export($rawArgv, true);
+
+        $wrapperPath = sys_get_temp_dir() . '/ssp-gen-dispatch-wrapper-' . uniqid() . '.php';
+        $wrapperContent = <<<PHP
+<?php
+// Stone-dispatch simulation wrapper for Bug 1 regression test.
+// Replicates exactly what the stone CLI does before require-ing generate-client.php.
+define('ROOT_PATH',        '$tmpRoot/');
+define('SRC_PATH',         '$tmpRoot/src/');
+define('CONFIG_PATH',      '$tmpRoot/src/config/');
+define('DEBUG_MODE',       1);
+define('INDEX_START_TIME', microtime(true));
+
+require_once '$vendorAutoload';
+
+// stone dispatcher sets \$_SERVER['argv'] to the script-only argv (post-shift):
+\$_SERVER['argv'] = $dispatcherArgvPhp;
+\$_SERVER['argc'] = count(\$_SERVER['argv']);
+
+// The raw \$argv (PHP global) still holds the full stone invocation — stone does NOT change it.
+// This is the root of Bug 1: if generate-client.php reads \$argv instead of \$_SERVER['argv'],
+// it picks up "generate" as the scope.
+\$argv = $rawArgvPhp;
+\$argc = count(\$argv);
+
+require '$generatorPath';
+PHP;
+
+        file_put_contents($wrapperPath, $wrapperContent);
+
+        $cmd = PHP_BINARY
+             . ' -d error_reporting=E_ALL'
+             . ' -d display_errors=stderr'
+             . ' ' . escapeshellarg($wrapperPath)
+             . ' 2>/dev/null';
+
+        exec($cmd, $output, $exitCode);
+
+        @unlink($wrapperPath);
 
         return $exitCode;
     }

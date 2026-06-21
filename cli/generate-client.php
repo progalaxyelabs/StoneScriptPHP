@@ -80,6 +80,13 @@ $serviceFilter  = null;          // null = all services; string = one service on
 $language       = 'typescript';  // Only TypeScript supported in v4.0
 $scopeArg       = null;          // REQUIRED positional: angular service dir (portal/admin/www/…)
 
+// Use the dispatcher-adjusted argv. When invoked via `php stone generate client <scope>`,
+// the `stone` CLI sets $_SERVER['argv'] = [$scriptPath, ...$args_after_subcommand] — so
+// $_SERVER['argv'][1] is the first real argument (e.g. "www"), NOT "generate" or "client".
+// The global $argv still contains the full stone invocation (stone, generate, client, www …)
+// and must NOT be read here, or the scope pick-up would misparse "generate" as the scope.
+$argv = $_SERVER['argv'];
+
 // Help check first — before positional parsing
 if (array_intersect(['--help', '-h', 'help'], $argv)) {
     echo <<<HELP
@@ -190,20 +197,41 @@ if ($composerName === null) {
 /**
  * Derive the generated npm package name per generate-api-client-spec.md §"Package Naming".
  *
- * Rule: {composer-name}-{scope}-client
- *   - {composer-name} is the `name` field from composer.json used AS-IS.
- *   - {scope} is the <scope> positional argument.
- *   - No npm org scope prefix is added (no @stonescript/, no @progalaxyelabs/, etc.).
+ * Rules:
+ *   - When {composer-name} has NO slash (e.g. 'medstoreapp-api'):
+ *       → unscoped npm name: `{composer-name}-{scope}-client`
+ *       → example: 'medstoreapp-api' + 'portal' → 'medstoreapp-api-portal-client'
  *
- * @param string $composerName  Value of `name` from composer.json (e.g. 'medstoreapp-api')
- * @param string $scope         The <scope> positional argument (e.g. 'portal')
- * @return string               Derived npm package name (e.g. 'medstoreapp-api-portal-client')
+ *   - When {composer-name} has a vendor prefix (e.g. 'progalaxyelabs/progalaxy-api'):
+ *       → scoped npm name: `@{vendor}/{pkg}-{scope}-client`
+ *       → example: 'progalaxyelabs/progalaxy-api' + 'www' → '@progalaxyelabs/progalaxy-api-www-client'
+ *
+ *   - When {composer-name} is empty (composer.json missing or no name field):
+ *       → fallback: `{scope}-client`
+ *
+ * The vendor/pkg split maps the Composer vendor prefix to an npm org scope (@vendor),
+ * producing a valid npm scoped package name. No other transformation is applied.
+ * No hardcoded org scope (no @stonescript/, no @progalaxyelabs/) is added beyond
+ * what the composer name itself provides.
+ *
+ * @param string $composerName  Value of `name` from composer.json (e.g. 'medstoreapp-api'
+ *                              or 'progalaxyelabs/progalaxy-api')
+ * @param string $scope         The <scope> positional argument (e.g. 'portal', 'www')
+ * @return string               Derived npm package name
  */
 function derivePackageName(string $composerName, string $scope): string
 {
     if ($composerName === '') {
         return $scope . '-client';
     }
+
+    // Vendor-prefixed composer name (e.g. 'vendor/pkg') → npm scoped form '@vendor/pkg-{scope}-client'
+    if (str_contains($composerName, '/')) {
+        [$vendor, $pkg] = explode('/', $composerName, 2);
+        return '@' . $vendor . '/' . $pkg . '-' . $scope . '-client';
+    }
+
+    // No vendor prefix (e.g. 'medstoreapp-api') → unscoped 'medstoreapp-api-{scope}-client'
     return $composerName . '-' . $scope . '-client';
 }
 

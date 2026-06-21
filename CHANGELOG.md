@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-06-21
+
+### Fixed
+- **Bug 1 — scope arg mis-parsed on the real `stone` dispatch path (`cli/generate-client.php` line ~84).** When invoked as `php stone generate client <scope>`, the `stone` dispatcher sets `$_SERVER['argv']` to `[$scriptPath, $scope, ...flags]` and then `require`s the generator. The global `$argv` still held the full stone invocation (`stone generate client <scope>`), so the generator's first-non-flag pick-up would grab `"generate"` instead of the actual scope — producing invalid package names ending in `-generate-client`. Fixed by rewriting `$argv` from `$_SERVER['argv']` at the top of `generate-client.php`. `--service=` workaround is no longer required.
+- **Bug 2 — vendor-prefixed composer name produced an invalid npm package name (`cli/generate-client.php` `derivePackageName()` ~line 208).** The original rule emitted `{composer-name}-{scope}-client` using the composer name AS-IS. Composer names with a vendor prefix (e.g. `progalaxyelabs/progalaxy-api`) produced `progalaxyelabs/progalaxy-api-portal-client` — an invalid npm name (bare slash without `@`). Fixed: when the composer `name` contains a `/`, the generator now emits the valid npm scoped form `@{vendor}/{pkg}-{scope}-client` (e.g. `@progalaxyelabs/progalaxy-api-portal-client`). Non-vendor names (no slash) keep the existing unscoped form `{name}-{scope}-client` unchanged.
+
+## [4.4.0] - 2026-06-19
+
+### Added
+- **`php stone generate client <scope>` — scope-derived package naming.** The `<scope>` positional argument (the Angular service directory name: `portal`, `admin`, `www`, `business`, …) is now **required**. The generator derives the npm package `name` deterministically as `{composer.json name}-{scope}-client` (e.g. `medstoreapp-api` + `portal` → `medstoreapp-api-portal-client`). This replaces the prior `@stonescript/api-client-{service}` convention. The `--service=` filter remains for single-package generation. Omitting `<scope>` is a hard error with a usage message.
+
 ## [4.3.1] - 2026-06-19
 
 ### Fixed
