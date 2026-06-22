@@ -40,9 +40,9 @@ class AuthContext
     /**
      * Get the authenticated user ID
      *
-     * @return int|null
+     * @return string|int|null
      */
-    public static function id(): ?int
+    public static function id(): string|int|null
     {
         return self::$user?->user_id;
     }
