@@ -55,6 +55,9 @@ class ExchangeRouteTest extends TestCase
     {
         return new ExternalAuthConfig(array_merge([
             'platform_code' => 'testapp',
+            // AUTH_ISSUER is required (v4.6.1 fail-fast). Provide a value in tests
+            // to avoid RuntimeException on missing issuer.
+            'auth_issuer' => 'http://localhost:3139',
         ], $options));
     }
 

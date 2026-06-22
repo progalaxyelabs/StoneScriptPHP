@@ -30,7 +30,8 @@ class ExternalAuthConfig
     /**
      * @var string JWT 'iss' claim value (public URL the auth server stamps in tokens).
      * In Docker: AUTH_SERVICE_URL = container URL (JWKS fetch), AUTH_ISSUER = public URL (JWT iss).
-     * Falls back to authServiceUrl when not set (same-host / local dev deployments).
+     * MUST be set explicitly — the old fallback to AUTH_SERVICE_URL is removed because it
+     * silently produces wrong issuer values in Docker (container hostname ≠ JWT 'iss' claim).
      */
     public readonly string $authIssuer;
 
@@ -91,9 +92,24 @@ class ExternalAuthConfig
         $this->prefix = rtrim($options['prefix'] ?? '/api/auth', '/');
         $this->legacyCompat = $options['legacy_compat'] ?? true;
         $this->authServiceUrl = $options['auth_service_url'] ?? $env->AUTH_SERVICE_URL;
-        $this->authIssuer = $options['auth_issuer'] ?? (
-            !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : $this->authServiceUrl
+
+        // AUTH_ISSUER MUST be set explicitly — silently falling back to AUTH_SERVICE_URL
+        // was wrong in Docker: the service URL is the container-internal address used only
+        // for JWKS fetch, but JWTs carry the public hostname in 'iss'. Reusing the service
+        // URL as the issuer caused a guaranteed mismatch → every authed API call 401s.
+        // Verify the correct value by decoding a real JWT and reading its 'iss' claim.
+        $resolvedIssuer = $options['auth_issuer'] ?? (
+            !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : null
         );
+        if ($resolvedIssuer === null || trim($resolvedIssuer) === '') {
+            throw new \RuntimeException(
+                "AUTH_ISSUER is required for ExternalAuth but is not set or empty. "
+                . "Set AUTH_ISSUER to the exact 'iss' claim value stamped in tokens by the auth service "
+                . "(decode a real JWT and read its 'iss' field). AUTH_SERVICE_URL is the NETWORK address "
+                . "for JWKS fetch — it is NOT the issuer."
+            );
+        }
+        $this->authIssuer = $resolvedIssuer;
         $this->platformCode = $options['platform_code'] ?? ($env->PLATFORM_CODE ?? '');
 
         // Registration config

@@ -288,9 +288,26 @@ class Application
 
         // external or hybrid: validate tokens via JWKS
         $serverUrl = $authConfig['server']['url'] ?? $env->AUTH_SERVICE_URL ?? 'http://localhost:3139';
+
+        // AUTH_ISSUER MUST be set explicitly in external/hybrid mode.
+        // The old fallback to AUTH_SERVICE_URL was silently wrong in Docker: AUTH_SERVICE_URL
+        // is the container-internal network address (e.g. http://auth:3139) but JWTs carry
+        // the public hostname in the 'iss' claim (e.g. http://localhost:3139) — a guaranteed
+        // mismatch. Platforms must set AUTH_ISSUER explicitly to the value the auth service
+        // stamps in tokens (JWT_ISSUER on the auth daemon). Verify with: decode a real JWT
+        // and read its 'iss' claim; set AUTH_ISSUER to that exact string.
         $issuer = $authConfig['server']['issuer'] ?? (
-            !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : $serverUrl
+            !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : null
         );
+        if ($issuer === null || trim($issuer) === '') {
+            throw new \RuntimeException(
+                "AUTH_ISSUER is required when AUTH_MODE is '{$mode}' but is not set or empty. "
+                . "Set AUTH_ISSUER to the exact 'iss' claim value stamped in tokens by the auth service "
+                . "(decode a real JWT and read its 'iss' field). AUTH_SERVICE_URL is the NETWORK address "
+                . "for JWKS fetch — it is NOT the issuer. Silently reusing AUTH_SERVICE_URL as the issuer "
+                . "causes every authenticated API call to 401 in Docker environments."
+            );
+        }
         $jwksPath = $authConfig['server']['paths']['jwks'] ?? '/api/auth/jwks';
 
         $validator = new MultiAuthJwtValidator([
@@ -315,8 +332,10 @@ class Application
     private static function buildAuthRouteOptions(array $authConfig, Env $env): array
     {
         $serverUrl  = $authConfig['server']['url'] ?? $env->AUTH_SERVICE_URL ?? 'http://localhost:3139';
+        // AUTH_ISSUER must be set — no fallback to server URL (see buildJwtHandler comment).
+        // ExternalAuthConfig constructor will enforce this; passing null here lets that check fire.
         $issuer     = $authConfig['server']['issuer'] ?? (
-            !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : $serverUrl
+            !empty($env->AUTH_ISSUER) ? $env->AUTH_ISSUER : null
         );
         $platformCode   = $authConfig['platform']['code'] ?? $env->PLATFORM_CODE ?? '';
         $platformSecret = $authConfig['platform']['secret'] ?? $env->EXTERNAL_AUTH_CLIENT_SECRET ?? null;

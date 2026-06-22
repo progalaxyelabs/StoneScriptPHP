@@ -31,6 +31,11 @@ class ExternalAuthConfigTest extends TestCase
         if (empty(getenv('AUTH_SERVICE_URL'))) {
             putenv('AUTH_SERVICE_URL=http://localhost:3139');
         }
+        // AUTH_ISSUER is now required for ExternalAuth (v4.6.1 fail-fast).
+        // Tests that don't pass auth_issuer explicitly must set AUTH_ISSUER in env.
+        if (empty(getenv('AUTH_ISSUER'))) {
+            putenv('AUTH_ISSUER=http://localhost:3139');
+        }
         // Reset Env singleton between tests to pick up the env vars above.
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
@@ -233,5 +238,57 @@ class ExternalAuthConfigTest extends TestCase
     {
         $config = new ExternalAuthConfig(['signing_private_key_path' => '/keys/custom.pem']);
         $this->assertSame('/keys/custom.pem', $config->signingPrivateKeyPath);
+    }
+
+    // ── AUTH_ISSUER fail-fast (v4.6.1) ─────────────────────────────────────
+
+    /**
+     * AUTH_ISSUER must be set explicitly. Empty env + no explicit option → RuntimeException.
+     * This prevents silent Docker mismatch: AUTH_SERVICE_URL (container URL) ≠ JWT 'iss' claim.
+     */
+    public function test_empty_auth_issuer_env_throws_runtime_exception(): void
+    {
+        // Unset AUTH_ISSUER so it resolves to empty
+        putenv('AUTH_ISSUER=');
+        // Reset singleton to pick up the unset value
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/AUTH_ISSUER/');
+
+        new ExternalAuthConfig([]);
+    }
+
+    /**
+     * When auth_issuer is provided explicitly in options, no env var is needed.
+     */
+    public function test_explicit_auth_issuer_option_overrides_env(): void
+    {
+        putenv('AUTH_ISSUER=');
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $config = new ExternalAuthConfig(['auth_issuer' => 'http://localhost:3139']);
+        $this->assertSame('http://localhost:3139', $config->authIssuer);
+    }
+
+    /**
+     * When AUTH_ISSUER env is set, it is used as the issuer.
+     */
+    public function test_auth_issuer_env_is_used_when_set(): void
+    {
+        putenv('AUTH_ISSUER=http://localhost:3139');
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $config = new ExternalAuthConfig([]);
+        $this->assertSame('http://localhost:3139', $config->authIssuer);
     }
 }
