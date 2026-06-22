@@ -206,9 +206,9 @@ function auth(): ?StoneScriptPHP\Auth\AuthenticatedUser
 /**
  * Get the authenticated user ID
  *
- * @return int|null
+ * @return string|int|null
  */
-function auth_id(): ?int
+function auth_id(): string|int|null
 {
     return StoneScriptPHP\Auth\AuthContext::id();
 }
