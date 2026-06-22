@@ -8,17 +8,16 @@ namespace StoneScriptPHP\Auth;
  * Represents the currently authenticated user extracted from JWT token.
  * Contains standard user claims that can be extended by applications.
  *
- * Supports both built-in auth (integer user_id) and external auth
- * (UUID identity_id from an external auth service).
+ * Identity IDs are always UUID strings (from external auth service).
  */
 class AuthenticatedUser
 {
     public function __construct(
-        public readonly string|int $user_id,
+        public readonly string $user_id,
         public readonly ?string $email = null,
         public readonly ?string $display_name = null,
         public readonly ?string $user_role = null,
-        public readonly string|int|null $tenant_id = null,
+        public readonly ?string $tenant_id = null,
         public readonly ?string $tenant_slug = null,
         public readonly ?string $platform_code = null,
         public readonly ?string $issuer_type = null,
@@ -30,8 +29,7 @@ class AuthenticatedUser
      * Create from JWT payload array
      *
      * Supports multiple claim formats:
-     * - Built-in auth: user_id (int), tenant_id (int)
-     * - External auth: identity_id (UUID), tenant_id (string), tenant_slug, platform_code
+     * - External auth: identity_id (UUID string), tenant_id (string), tenant_slug, platform_code
      * - Standard JWT: sub (string)
      *
      * @param array $payload JWT token payload
