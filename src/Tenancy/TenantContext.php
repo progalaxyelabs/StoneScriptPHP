@@ -45,9 +45,9 @@ class TenantContext
     /**
      * Get current tenant ID
      *
-     * @return int|string|null
+     * @return string|null
      */
-    public static function id(): int|string|null
+    public static function id(): ?string
     {
         return self::$tenant?->id;
     }

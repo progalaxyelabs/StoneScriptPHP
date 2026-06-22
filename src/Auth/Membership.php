@@ -13,18 +13,18 @@ class Membership
     /**
      * Create a new Membership instance
      *
-     * @param int|string $identityId Identity/User ID
-     * @param int|string $tenantId Tenant ID
+     * @param string $identityId Identity/User ID (UUID)
+     * @param string $tenantId Tenant ID (UUID or slug)
      * @param string|null $role User's role in this tenant
-     * @param int|string|null $localUserId Tenant-specific user ID (local to tenant's database)
+     * @param string|null $localUserId Tenant-specific user ID (local to tenant's database)
      * @param array $permissions User permissions in this tenant
      * @param array $metadata Additional membership metadata
      */
     public function __construct(
-        public readonly int|string $identityId,
-        public readonly int|string $tenantId,
+        public readonly string $identityId,
+        public readonly string $tenantId,
         public readonly ?string $role = null,
-        public readonly int|string|null $localUserId = null,
+        public readonly ?string $localUserId = null,
         public readonly array $permissions = [],
         public readonly array $metadata = []
     ) {}
@@ -85,10 +85,10 @@ class Membership
         }
 
         return new self(
-            identityId: is_numeric($identityId) ? (int) $identityId : $identityId,
-            tenantId: is_numeric($tenantId) ? (int) $tenantId : $tenantId,
+            identityId: (string) $identityId,
+            tenantId: (string) $tenantId,
             role: $role,
-            localUserId: $localUserId !== null && is_numeric($localUserId) ? (int) $localUserId : $localUserId,
+            localUserId: $localUserId !== null ? (string) $localUserId : null,
             permissions: $permissions,
             metadata: $metadata
         );

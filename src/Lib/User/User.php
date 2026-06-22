@@ -4,7 +4,7 @@ namespace StoneScriptPHP\Lib\User;
 
 class User
 {
-    public int $user_id;
+    public string $user_id;
     public string $name;
     public string $email;
     public bool $is_email_verified;

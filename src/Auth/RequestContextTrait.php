@@ -108,7 +108,7 @@ trait RequestContextTrait
 
         try {
             // Call database function to fetch user
-            // Assumes function signature: get_user_by_id(user_id int) returns table
+            // Assumes function signature: get_user_by_id(user_id uuid) returns table
             $result = Database::fn($functionName, ['user_id' => $localUserId]);
 
             return !empty($result) ? $result[0] : null;

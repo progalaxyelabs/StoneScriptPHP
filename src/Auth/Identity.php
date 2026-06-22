@@ -13,13 +13,13 @@ class Identity
     /**
      * Create a new Identity instance
      *
-     * @param int|string $id User/Identity ID
+     * @param string $id User/Identity ID (UUID)
      * @param string|null $email User email
      * @param string|null $role User role (admin, user, etc.)
      * @param array $attributes Additional identity attributes
      */
     public function __construct(
-        public readonly int|string $id,
+        public readonly string $id,
         public readonly ?string $email = null,
         public readonly ?string $role = null,
         public readonly array $attributes = []
@@ -68,7 +68,7 @@ class Identity
         }
 
         return new self(
-            id: is_numeric($id) ? (int) $id : $id,
+            id: (string) $id,
             email: $email,
             role: $role,
             attributes: $attributes

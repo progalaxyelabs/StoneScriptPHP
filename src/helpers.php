@@ -303,9 +303,9 @@ function tenant(): ?StoneScriptPHP\Tenancy\Tenant
 /**
  * Get current tenant ID
  *
- * @return int|string|null
+ * @return string|null
  */
-function tenant_id(): int|string|null
+function tenant_id(): ?string
 {
     return StoneScriptPHP\Tenancy\TenantContext::id();
 }

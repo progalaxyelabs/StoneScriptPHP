@@ -21,7 +21,7 @@ namespace StoneScriptPHP\Auth;
  * class PostgresTokenStorage implements TokenStorageInterface {
  *     private PDO $db;
  *
- *     public function storeRefreshToken(string $tokenHash, int $userId, int $expiresAt, array $metadata = []): void {
+ *     public function storeRefreshToken(string $tokenHash, string $userId, int $expiresAt, array $metadata = []): void {
  *         $stmt = $this->db->prepare(
  *             "INSERT INTO refresh_tokens (token_hash, user_id, expires_at, ip_address, user_agent)
  *              VALUES (?, ?, to_timestamp(?), ?, ?)"
@@ -51,7 +51,7 @@ namespace StoneScriptPHP\Auth;
  *         $stmt->execute([$tokenHash]);
  *     }
  *
- *     public function revokeAllUserTokens(int $userId): void {
+ *     public function revokeAllUserTokens(string $userId): void {
  *         $stmt = $this->db->prepare(
  *             "UPDATE refresh_tokens SET revoked_at = NOW()
  *              WHERE user_id = ? AND revoked_at IS NULL"
@@ -70,14 +70,14 @@ interface TokenStorageInterface
      * Store a refresh token in persistent storage
      *
      * @param string $tokenHash SHA256 hash of the refresh token (never store plaintext!)
-     * @param int $userId User ID associated with this token
+     * @param string $userId User ID associated with this token
      * @param int $expiresAt Unix timestamp when token expires
      * @param array $metadata Optional metadata (ip_address, user_agent, device_name, etc.)
      * @return void
      */
     public function storeRefreshToken(
         string $tokenHash,
-        int $userId,
+        string $userId,
         int $expiresAt,
         array $metadata = []
     ): void;
@@ -108,10 +108,10 @@ interface TokenStorageInterface
      * - Password change
      * - Security breach response
      *
-     * @param int $userId User ID whose tokens should be revoked
+     * @param string $userId User ID whose tokens should be revoked
      * @return void
      */
-    public function revokeAllUserTokens(int $userId): void;
+    public function revokeAllUserTokens(string $userId): void;
 
     /**
      * Update last used timestamp for a token (optional)
@@ -130,10 +130,10 @@ interface TokenStorageInterface
      * Useful for device management UI.
      * Return empty array if not implemented.
      *
-     * @param int $userId User ID
+     * @param string $userId User ID
      * @return array Array of token metadata (id, created_at, last_used_at, ip_address, user_agent, etc.)
      */
-    public function getUserTokens(int $userId): array;
+    public function getUserTokens(string $userId): array;
 
     /**
      * Clean up expired tokens (optional)

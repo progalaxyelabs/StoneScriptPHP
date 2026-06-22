@@ -16,14 +16,14 @@ class Tenant
     /**
      * Create a new Tenant instance
      *
-     * @param int|string $id Tenant ID (can be integer or string/UUID)
+     * @param string $id Tenant ID (UUID or slug)
      * @param string|null $uuid Tenant UUID (for distributed systems)
      * @param string|null $slug Tenant slug (for URL-based resolution)
      * @param string|null $dbName Database name for per-tenant DB strategy
      * @param array $metadata Additional tenant metadata (settings, features, etc.)
      */
     public function __construct(
-        public readonly int|string $id,
+        public readonly string $id,
         public readonly ?string $uuid = null,
         public readonly ?string $slug = null,
         public readonly ?string $dbName = null,
@@ -75,7 +75,7 @@ class Tenant
         }
 
         return new self(
-            id: is_numeric($id) ? (int) $id : $id,
+            id: (string) $id,
             uuid: $uuid,
             slug: $slug,
             dbName: $dbName,
@@ -103,7 +103,7 @@ class Tenant
             throw new \InvalidArgumentException('Database row must contain id column');
         }
 
-        $id = is_numeric($row['id']) ? (int) $row['id'] : $row['id'];
+        $id = (string) $row['id'];
         $uuid = $row['uuid'] ?? null;
         $slug = $row['slug'] ?? null;
         $dbName = $row['db_name'] ?? $row['database_name'] ?? $row['biz_db_name'] ?? null;

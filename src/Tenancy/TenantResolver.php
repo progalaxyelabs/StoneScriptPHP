@@ -225,10 +225,10 @@ class TenantResolver
     /**
      * Lookup tenant by ID from database
      *
-     * @param int|string $id
+     * @param string $id
      * @return Tenant|null
      */
-    private function lookupTenantById(int|string $id): ?Tenant
+    private function lookupTenantById(string $id): ?Tenant
     {
         if (!$this->authDb || !$this->tenantTable) {
             return null;
