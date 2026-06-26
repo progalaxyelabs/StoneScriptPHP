@@ -15,7 +15,9 @@ class GatewayConnection implements ConnectionInterface
 {
     private string $gateway_url;
     private ?string $platform;
-    private ?string $tenant_id;
+    private ?string $schema_name;
+    private ?string $uuid;
+    private ?string $base_schema_name;
     private bool $connected = false;
     private ?string $last_error = null;
 
@@ -24,17 +26,22 @@ class GatewayConnection implements ConnectionInterface
      *
      * @param string $gateway_url The URL of the gateway service
      * @param string|null $platform The platform identifier
-     * @param string|null $tenant_id The tenant identifier
+     * @param string|null $schema_name Schema name (e.g. "main", "tenant")
+     * @param string|null $uuid Tenant UUID for tenant databases; null for main
      */
-    public function __construct(string $gateway_url, ?string $platform = null, ?string $tenant_id = null)
+    public function __construct(string $gateway_url, ?string $platform = null, ?string $schema_name = null, ?string $uuid = null)
     {
         $this->gateway_url = rtrim($gateway_url, '/');
         $this->platform = $platform;
-        $this->tenant_id = $tenant_id;
+        $this->schema_name = $schema_name;
+        $this->base_schema_name = $schema_name;
+        $this->uuid = $uuid;
     }
 
     /**
      * Create a GatewayConnection from environment configuration.
+     *
+     * Reads DB_GATEWAY_SCHEMA_NAME (preferred) or falls back to DB_GATEWAY_TENANT_ID.
      *
      * @return self
      * @throws Exception If gateway URL is not configured
@@ -47,10 +54,15 @@ class GatewayConnection implements ConnectionInterface
             throw new Exception('DB_GATEWAY_URL must be configured for gateway connection mode');
         }
 
+        $schema_name = !empty($env->DB_GATEWAY_SCHEMA_NAME)
+            ? $env->DB_GATEWAY_SCHEMA_NAME
+            : ($env->DB_GATEWAY_TENANT_ID ?? null);
+
         return new self(
             $env->DB_GATEWAY_URL,
             $env->DB_GATEWAY_PLATFORM,
-            $env->DB_GATEWAY_TENANT_ID
+            $schema_name,
+            $env->DB_GATEWAY_UUID ?? null
         );
     }
 
@@ -63,7 +75,8 @@ class GatewayConnection implements ConnectionInterface
 
         $payload = [
             'platform' => $this->platform,
-            'tenant_id' => $this->tenant_id,
+            'schema_name' => $this->schema_name,
+            'uuid' => $this->uuid,
             'function' => $function_name,
             'params' => $params
         ];
@@ -116,24 +129,75 @@ class GatewayConnection implements ConnectionInterface
     }
 
     /**
-     * Set the tenant ID for subsequent requests.
+     * Route subsequent requests to a tenant database.
      *
-     * @param string|null $tenant_id The tenant identifier
+     * Called by GatewayTenantMiddleware with the user's tenant UUID.
+     * Passing null resets routing back to the base schema (main database).
+     *
+     * @param string|null $tenant_id Tenant UUID, or null to reset to main
      * @return void
      */
     public function setTenantId(?string $tenant_id): void
     {
-        $this->tenant_id = $tenant_id;
+        if ($tenant_id === null) {
+            $this->schema_name = $this->base_schema_name;
+            $this->uuid = null;
+        } else {
+            $this->schema_name = 'tenant';
+            $this->uuid = $tenant_id;
+        }
     }
 
     /**
-     * Get the current tenant ID.
+     * Get the current tenant UUID (null when on main database).
      *
-     * @return string|null The current tenant identifier
+     * @return string|null
      */
     public function getTenantId(): ?string
     {
-        return $this->tenant_id;
+        return $this->uuid;
+    }
+
+    /**
+     * Set the schema name for subsequent requests.
+     *
+     * @param string|null $schema_name Schema name (e.g. "main", "tenant")
+     * @return void
+     */
+    public function setSchemaName(?string $schema_name): void
+    {
+        $this->schema_name = $schema_name;
+    }
+
+    /**
+     * Get the current schema name.
+     *
+     * @return string|null
+     */
+    public function getSchemaName(): ?string
+    {
+        return $this->schema_name;
+    }
+
+    /**
+     * Set the UUID for tenant database routing.
+     *
+     * @param string|null $uuid Tenant UUID; null for main database
+     * @return void
+     */
+    public function setUuid(?string $uuid): void
+    {
+        $this->uuid = $uuid;
+    }
+
+    /**
+     * Get the current UUID.
+     *
+     * @return string|null
+     */
+    public function getUuid(): ?string
+    {
+        return $this->uuid;
     }
 
     /**
