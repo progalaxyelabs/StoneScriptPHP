@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Routing;
 
 use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Validator;
 use StoneScriptPHP\TenantDatabaseUnavailableException;
 use StoneScriptPHP\Routing\MiddlewarePipeline;
 use StoneScriptPHP\Routing\MiddlewareInterface;
@@ -635,6 +636,27 @@ class Router
 
             // Merge input and params
             $allInput = array_merge($request['input'] ?? [], $request['params'] ?? []);
+
+            // Honor the handler's declared validation_rules() at the edge. Without
+            // this, declared required-field rules were dead code under the new
+            // router: missing/invalid input reached the handler (and SQL functions)
+            // as NULL, surfacing as a 500 instead of a clean 400. (#3055)
+            $validationRules = $handler->validation_rules();
+            if (!empty($validationRules)) {
+                $validator = new Validator($allInput, $validationRules);
+                if (!$validator->validate()) {
+                    $errors = $validator->errors();
+                    log_debug('Validation failed: ' . json_encode($errors));
+                    http_response_code(400);
+                    return new ApiResponse(
+                        'error',
+                        'Validation failed',
+                        DEBUG_MODE ? $errors : null,
+                        400,
+                        $errors
+                    );
+                }
+            }
 
             // Populate handler properties from input
             $reflection = new \ReflectionClass($handler);
