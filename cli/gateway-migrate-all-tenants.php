@@ -13,8 +13,8 @@
  * Environment variables (required):
  *   DB_GATEWAY_URL        - Gateway URL (e.g., http://localhost:9000)
  *   PLATFORM_ID           - Platform identifier (e.g., myapp)
- *   TENANT_SCHEMA_NAME    - Tenant schema version name (e.g., v1_0) [preferred]
- *   SCHEMA_NAME           - Schema version name (fallback if TENANT_SCHEMA_NAME not set)
+ *   TENANT_SCHEMA_NAME    - Tenant schema name, use a descriptive name like "tenant" (not a version-tagged name like "v1_0") [preferred]
+ *   SCHEMA_NAME           - Schema name fallback (e.g., "tenant"); avoid version-tagged names like "v1_0"
  *
  * Options:
  *   --retry=<n>                Number of retry attempts (default: 3)

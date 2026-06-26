@@ -16,7 +16,7 @@
  * Environment variables (required):
  *   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
  *   PLATFORM_ID       - Platform identifier (e.g., myapp)
- *   SCHEMA_NAME       - Schema version name (e.g., v1_0)
+ *   SCHEMA_NAME       - Schema name, use a descriptive name like "tenant" (not a version-tagged name like "v1_0")
  *
  * Options:
  *   --quiet            Suppress output

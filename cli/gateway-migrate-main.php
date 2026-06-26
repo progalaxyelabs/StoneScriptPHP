@@ -12,8 +12,8 @@
  * Environment variables (required):
  *   DB_GATEWAY_URL      - Gateway URL (e.g., http://localhost:9000)
  *   PLATFORM_ID         - Platform identifier (e.g., myapp)
- *   MAIN_SCHEMA_NAME    - Main schema version name (e.g., main_v1) [preferred]
- *   SCHEMA_NAME         - Schema version name (fallback if MAIN_SCHEMA_NAME not set)
+ *   MAIN_SCHEMA_NAME    - Main schema name, use a descriptive name like "main" (not a version-tagged name like "main_v1") [preferred]
+ *   SCHEMA_NAME         - Schema name fallback (e.g., "main"); avoid version-tagged names like "v1_0"
  *   DATABASE_ID         - Database to migrate (default: main)
  *
  * Options:
@@ -67,11 +67,11 @@ $archive = buildGatewayArchive('main', $env['platform_id'], 'migrate_main', $opt
 if (!$options['quiet']) echo "Step 1/2: ";
 stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet']);
 
-// Step 2: Migrate main database
+// Step 2: Migrate main database (uuid is null for the main/platform database)
 if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
-    $env['database_id'], $env['admin_token'], $options['force'],
+    null, $env['admin_token'], $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
     $options['allow'], $options['skip_verification'],
     $env['cross_db_link']

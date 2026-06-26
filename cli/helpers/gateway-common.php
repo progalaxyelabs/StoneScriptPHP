@@ -140,11 +140,11 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
     $databaseId = $options['database_id'] ?: (getenv('DATABASE_ID') ?: 'main');
     $adminToken = getenv('DB_GATEWAY_ADMIN_TOKEN') ?: (getenv('ADMIN_TOKEN') ?: null);
 
-    // Main schema: MAIN_SCHEMA_NAME takes priority, falls back to SCHEMA_NAME
-    $mainSchemaName = $options['main_schema_name'] ?: (getenv('MAIN_SCHEMA_NAME') ?: $schemaName);
+    // Main schema: MAIN_SCHEMA_NAME takes priority, no fallback to SCHEMA_NAME
+    $mainSchemaName = $options['main_schema_name'] ?: (getenv('MAIN_SCHEMA_NAME') ?: null);
 
-    // Tenant schema: TENANT_SCHEMA_NAME takes priority, falls back to SCHEMA_NAME
-    $tenantSchemaName = $options['tenant_schema_name'] ?: (getenv('TENANT_SCHEMA_NAME') ?: $schemaName);
+    // Tenant schema: TENANT_SCHEMA_NAME takes priority, no fallback to SCHEMA_NAME
+    $tenantSchemaName = $options['tenant_schema_name'] ?: (getenv('TENANT_SCHEMA_NAME') ?: null);
 
     if (!$gatewayUrl) {
         fwrite(STDERR, "ERROR: DB_GATEWAY_URL environment variable is required\n");
@@ -372,12 +372,24 @@ function stepUploadSchema(string $gatewayUrl, string $platformId, string $schema
 /**
  * Step: Create database from stored schema (with retry).
  *
+ * @param string      $gatewayUrl
+ * @param string      $platformId
+ * @param string      $schemaName
+ * @param string|null $uuid        Tenant UUID to create; null for the main (platform) database.
+ * @param string|null $adminToken
+ * @param int         $retryCount
+ * @param int         $retryDelay
+ * @param bool        $quiet
  * @return void Exits on failure.
  */
-function stepCreateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, ?string $adminToken, int $retryCount, int $retryDelay, bool $quiet): void
+function stepCreateDatabase(string $gatewayUrl, string $platformId, string $schemaName, ?string $uuid = null, ?string $adminToken = null, int $retryCount = 3, int $retryDelay = 5, bool $quiet = false): void
 {
     if (!$quiet) {
-        echo "Creating database '{$databaseId}'...\n";
+        if ($uuid !== null) {
+            echo "Creating tenant database '{$uuid}'...\n";
+        } else {
+            echo "Creating main database...\n";
+        }
     }
 
     $attempt = 1;
@@ -388,11 +400,15 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
             echo "  Attempt {$attempt} of {$retryCount}...\n";
         }
 
-        $payload = json_encode([
-            'platform' => $platformId,
+        // uuid is omitted for main DB (null), included for tenant DBs
+        $bodyData = [
+            'platform'    => $platformId,
             'schema_name' => $schemaName,
-            'database_id' => $databaseId,
-        ]);
+        ];
+        if ($uuid !== null) {
+            $bodyData['uuid'] = $uuid;
+        }
+        $payload = json_encode($bodyData);
 
         $headers = gatewayJsonHeaders($payload, $adminToken);
 
@@ -438,19 +454,32 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
 /**
  * Step: Migrate database using stored schema (with retry).
  *
- * @return void Exits on failure.
- */
-/**
- * @param array|null $crossDbLink  Authorization block for the gateway's cross-DB-link
+ * @param string      $gatewayUrl
+ * @param string      $platformId
+ * @param string      $schemaName
+ * @param string|null $uuid             Tenant UUID to migrate; null for the main (platform) database.
+ * @param string|null $adminToken
+ * @param bool        $force
+ * @param int         $retryCount
+ * @param int         $retryDelay
+ * @param bool        $quiet
+ * @param array       $allow            Granular allow-tokens (gate #1).
+ * @param bool        $skipVerification Bypass holistic post-migration check only.
+ * @param array|null  $crossDbLink      Authorization block for the gateway's cross-DB-link
  *   capability. When non-null, included in the request body as
  *   `cross_db_link: {authorized, deploy_ref, grants[]}`. Null (default) = absent, which
  *   causes the gateway to fail-closed any cross_db manifest in the schema bundle.
  *   Sourced from deployment tooling env vars via loadGatewayEnv()['cross_db_link'].
+ * @return void Exits on failure.
  */
-function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, string $databaseId, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null): void
+function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, ?string $uuid = null, ?string $adminToken = null, bool $force = false, int $retryCount = 3, int $retryDelay = 5, bool $quiet = false, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null): void
 {
     if (!$quiet) {
-        echo "Migrating database '{$databaseId}'...\n";
+        if ($uuid !== null) {
+            echo "Migrating tenant database '{$uuid}'...\n";
+        } else {
+            echo "Migrating main database...\n";
+        }
         if ($crossDbLink !== null) {
             echo "  cross-DB-link: authorized (deploy_ref=" . ($crossDbLink['deploy_ref'] ?? 'null') . ", grants=" . count($crossDbLink['grants'] ?? []) . ")\n";
         }
@@ -464,14 +493,17 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
             echo "  Attempt {$attempt} of {$retryCount}...\n";
         }
 
+        // uuid is omitted for main DB (null), included for tenant DBs
         $body = [
             'platform'          => $platformId,
             'schema_name'       => $schemaName,
-            'database_id'       => $databaseId,
             'force'             => $force,
             'allow'             => array_values($allow),
             'skip_verification' => $skipVerification,
         ];
+        if ($uuid !== null) {
+            $body['uuid'] = $uuid;
+        }
         if ($crossDbLink !== null) {
             $body['cross_db_link'] = $crossDbLink;
         }
@@ -611,6 +643,22 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
         if (!$quiet) {
             echo "\n  No tenant databases found — skipping (nothing to migrate)\n";
         }
+        return;
+    }
+
+    if ($resp['code'] === 409) {
+        // A job is already running for this platform/schema — attach to it.
+        $conflictResponse = json_decode($resp['body'], true) ?? [];
+        $jobId = $conflictResponse['job_id'] ?? null;
+        if (!$jobId) {
+            fwrite(STDERR, "ERROR: Gateway returned 409 but no job_id in response body\n");
+            if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+            exit(1);
+        }
+        if (!$quiet) {
+            echo "  Existing job found (409), polling job: {$jobId}\n";
+        }
+        gatewayPollMigrateAllJob($gatewayUrl, $jobId, $platformId, $schemaName, $body, $adminToken, $quiet, $maxWait);
         return;
     }
 

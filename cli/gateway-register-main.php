@@ -13,8 +13,8 @@
  * Environment variables (required):
  *   DB_GATEWAY_URL         - Gateway URL (e.g., http://localhost:9000)
  *   PLATFORM_ID            - Platform identifier (e.g., myapp)
- *   MAIN_SCHEMA_NAME       - Main schema version name (e.g., main_v1) [preferred]
- *   SCHEMA_NAME            - Schema version name fallback (e.g., v1_0)
+ *   MAIN_SCHEMA_NAME       - Main schema name, use a descriptive name like "main" (not a version-tagged name like "main_v1") [preferred]
+ *   SCHEMA_NAME            - Schema name fallback (e.g., "main"); avoid version-tagged names like "v1_0"
  *   DB_GATEWAY_ADMIN_TOKEN - Admin token for /admin/* endpoints (legacy: ADMIN_TOKEN)
  *
  * Environment variables (optional):
@@ -82,11 +82,11 @@ stepRegisterPlatform($env['gateway_url'], $env['platform_id'], $options['quiet']
 if (!$options['quiet']) echo "Step 2/3: ";
 stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet']);
 
-// Step 3: Create main database
+// Step 3: Create main database (uuid is null for the main/platform database)
 if (!$options['quiet']) echo "Step 3/3: ";
 stepCreateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
-    $env['database_id'], $env['admin_token'],
+    null, $env['admin_token'],
     $options['retry'], $options['delay'], $options['quiet']
 );
 
