@@ -10,11 +10,12 @@
  *   php stone gateway:migrate-main [options]
  *
  * Environment variables (required):
- *   DB_GATEWAY_URL      - Gateway URL (e.g., http://localhost:9000)
- *   PLATFORM_ID         - Platform identifier (e.g., myapp)
- *   MAIN_SCHEMA_NAME    - Main schema name, use a descriptive name like "main" (not a version-tagged name like "main_v1") [preferred]
- *   SCHEMA_NAME         - Schema name fallback (e.g., "main"); avoid version-tagged names like "v1_0"
- *   DATABASE_ID         - Database to migrate (default: main)
+ *   DB_GATEWAY_URL           - Gateway URL (e.g., http://localhost:9000)
+ *   PLATFORM_ID              - Platform identifier (e.g., myapp)
+ *   MAIN_SCHEMA_NAME         - Main schema name, use a descriptive name like "main" (not a version-tagged name like "main_v1") [preferred]
+ *   SCHEMA_NAME              - Schema name fallback (e.g., "main"); avoid version-tagged names like "v1_0"
+ *   DATABASE_ID              - Database to migrate (default: main)
+ *   DB_GATEWAY_PLATFORM_TOKEN - Platform token (required by gateway v4.1.0+; auto-provisioned if absent and DB_GATEWAY_ADMIN_TOKEN is set)
  *
  * Options:
  *   --retry=<n>              Number of retry attempts (default: 3)
@@ -67,11 +68,12 @@ $archive = buildGatewayArchive('main', $env['platform_id'], 'migrate_main', $opt
 if (!$options['quiet']) echo "Step 1/2: ";
 stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet']);
 
-// Step 2: Migrate main database (uuid is null for the main/platform database)
+// Step 2: Migrate main database (uuid is null for the main/platform database).
+// Gateway v4.1.0+ requires a platform token (not admin token) for POST /v2/migrate.
 if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
-    null, $env['admin_token'], $options['force'],
+    null, resolveGatewayPlatformToken($env, $options['quiet']), $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
     $options['allow'], $options['skip_verification'],
     $env['cross_db_link']

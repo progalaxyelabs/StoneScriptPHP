@@ -2,10 +2,11 @@
 /**
  * StoneScriptPHP CLI - Gateway Register Main Database (V2 API)
  *
- * Three-step registration flow for the main (platform) database:
+ * Four-step registration flow for the main (platform) database:
  *   1. Register platform (idempotent)
  *   2. Upload main schema archive (from main/postgresql/)
- *   3. Create main database from stored schema
+ *   3. Provision platform token (required by gateway v4.1.0+ for database creation)
+ *   4. Create main database from stored schema
  *
  * Usage:
  *   php stone gateway:register-main [options]
@@ -15,10 +16,11 @@
  *   PLATFORM_ID            - Platform identifier (e.g., myapp)
  *   MAIN_SCHEMA_NAME       - Main schema name, use a descriptive name like "main" (not a version-tagged name like "main_v1") [preferred]
  *   SCHEMA_NAME            - Schema name fallback (e.g., "main"); avoid version-tagged names like "v1_0"
- *   DB_GATEWAY_ADMIN_TOKEN - Admin token for /admin/* endpoints (legacy: ADMIN_TOKEN)
+ *   DB_GATEWAY_ADMIN_TOKEN - Admin token for platform registration and token provisioning
  *
  * Environment variables (optional):
- *   DATABASE_ID            - Database identifier (default: main)
+ *   DATABASE_ID              - Database identifier (default: main)
+ *   DB_GATEWAY_PLATFORM_TOKEN - Pre-existing platform token (skips provisioning step)
  *
  * Options:
  *   --retry=<n>              Number of retry attempts (default: 3)
@@ -75,18 +77,25 @@ if (!$options['force'] && $currentHash !== '') {
 $archive = buildGatewayArchive('main', $env['platform_id'], 'register_main', $options['quiet']);
 
 // Step 1: Register platform
-if (!$options['quiet']) echo "Step 1/3: ";
+if (!$options['quiet']) echo "Step 1/4: ";
 stepRegisterPlatform($env['gateway_url'], $env['platform_id'], $options['quiet']);
 
 // Step 2: Upload main schema
-if (!$options['quiet']) echo "Step 2/3: ";
+if (!$options['quiet']) echo "Step 2/4: ";
 stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet']);
 
-// Step 3: Create main database (uuid is null for the main/platform database)
-if (!$options['quiet']) echo "Step 3/3: ";
+// Step 3: Provision platform token (required by gateway v4.1.0+ for POST /admin/database/create)
+// If DB_GATEWAY_PLATFORM_TOKEN is already set, skip provisioning and reuse it.
+if (!$options['quiet']) echo "Step 3/4: ";
+$platformToken = !empty($env['platform_token'])
+    ? $env['platform_token']
+    : stepProvisionPlatformToken($env['gateway_url'], $env['platform_id'], $env['admin_token'], $options['quiet']);
+
+// Step 4: Create main database (uuid is null for the main/platform database)
+if (!$options['quiet']) echo "Step 4/4: ";
 stepCreateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
-    null, $env['admin_token'],
+    null, $platformToken,
     $options['retry'], $options['delay'], $options['quiet']
 );
 

@@ -11,10 +11,11 @@
  *   php stone gateway:migrate-all-tenants
  *
  * Environment variables (required):
- *   DB_GATEWAY_URL        - Gateway URL (e.g., http://localhost:9000)
- *   PLATFORM_ID           - Platform identifier (e.g., myapp)
- *   TENANT_SCHEMA_NAME    - Tenant schema name, use a descriptive name like "tenant" (not a version-tagged name like "v1_0") [preferred]
- *   SCHEMA_NAME           - Schema name fallback (e.g., "tenant"); avoid version-tagged names like "v1_0"
+ *   DB_GATEWAY_URL             - Gateway URL (e.g., http://localhost:9000)
+ *   PLATFORM_ID                - Platform identifier (e.g., myapp)
+ *   TENANT_SCHEMA_NAME         - Tenant schema name, use a descriptive name like "tenant" (not a version-tagged name like "v1_0") [preferred]
+ *   SCHEMA_NAME                - Schema name fallback (e.g., "tenant"); avoid version-tagged names like "v1_0"
+ *   DB_GATEWAY_PLATFORM_TOKEN  - Platform token (required by gateway v4.1.0+; auto-provisioned if absent and DB_GATEWAY_ADMIN_TOKEN is set)
  *
  * Options:
  *   --retry=<n>                Number of retry attempts (default: 3)
@@ -56,11 +57,12 @@ $archive = buildGatewayArchive('tenant', $env['platform_id'], 'migrate_all_tenan
 if (!$options['quiet']) echo "Step 1/2: ";
 stepUploadSchema($env['gateway_url'], $env['platform_id'], $tenantSchemaName, $archive['tar_file'], $options['quiet']);
 
-// Step 2: Migrate ALL tenant databases
+// Step 2: Migrate ALL tenant databases.
+// Gateway v4.1.0+ requires a platform token (not admin token) for POST /v2/migrate-all.
 if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateAllDatabases(
     $env['gateway_url'], $env['platform_id'], $tenantSchemaName,
-    $env['admin_token'], $options['force'],
+    resolveGatewayPlatformToken($env, $options['quiet']), $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
     $options['allow'], $options['skip_verification'],
     $env['cross_db_link']

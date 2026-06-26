@@ -9,10 +9,11 @@
  *   php stone gateway:migrate-tenant --database-id=<uuid>
  *
  * Environment variables (required):
- *   DB_GATEWAY_URL        - Gateway URL (e.g., http://localhost:9000)
- *   PLATFORM_ID           - Platform identifier (e.g., myapp)
- *   TENANT_SCHEMA_NAME    - Tenant schema version name (e.g., v1_0) [preferred]
- *   SCHEMA_NAME           - Schema version name (fallback if TENANT_SCHEMA_NAME not set)
+ *   DB_GATEWAY_URL             - Gateway URL (e.g., http://localhost:9000)
+ *   PLATFORM_ID                - Platform identifier (e.g., myapp)
+ *   TENANT_SCHEMA_NAME         - Tenant schema version name (e.g., v1_0) [preferred]
+ *   SCHEMA_NAME                - Schema version name (fallback if TENANT_SCHEMA_NAME not set)
+ *   DB_GATEWAY_PLATFORM_TOKEN  - Platform token (required by gateway v4.1.0+; auto-provisioned if absent and DB_GATEWAY_ADMIN_TOKEN is set)
  *
  * Options:
  *   --database-id=<id>         REQUIRED. Tenant database ID (UUID)
@@ -78,11 +79,12 @@ $archive = buildGatewayArchive('tenant', $env['platform_id'], 'migrate_tenant', 
 if (!$options['quiet']) echo "Step 1/2: ";
 stepUploadSchema($env['gateway_url'], $env['platform_id'], $tenantSchemaName, $archive['tar_file'], $options['quiet']);
 
-// Step 2: Migrate specific tenant database
+// Step 2: Migrate specific tenant database.
+// Gateway v4.1.0+ requires a platform token (not admin token) for POST /v2/migrate.
 if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $tenantSchemaName,
-    $databaseId, $env['admin_token'], $options['force'],
+    $databaseId, resolveGatewayPlatformToken($env, $options['quiet']), $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
     $options['allow'], $options['skip_verification'],
     $env['cross_db_link']

@@ -128,17 +128,26 @@ function loadCrossDbLinkAuth(): ?array
 /**
  * Load and validate gateway environment variables.
  *
- * @param array  $options     Parsed CLI options (may override env vars)
- * @param bool   $requireDb   Whether DATABASE_ID is required
- * @return array{gateway_url: string, platform_id: string, schema_name: string, main_schema_name: string, tenant_schema_name: string, database_id: string, admin_token: ?string, cross_db_link: array|null}
+ * @param array  $options       Parsed CLI options (may override env vars)
+ * @param bool   $requireDb     Whether DATABASE_ID is required
+ * @param bool   $requireSchema Whether a schema name (SCHEMA_NAME / MAIN_SCHEMA_NAME /
+ *                              TENANT_SCHEMA_NAME) is required. Set false for commands
+ *                              that do not target a specific schema (e.g. gateway:provision-token).
+ * @return array{gateway_url: string, platform_id: string, schema_name: ?string, main_schema_name: ?string, tenant_schema_name: ?string, database_id: string, admin_token: ?string, platform_token: ?string, cross_db_link: array|null}
  */
-function loadGatewayEnv(array $options, bool $requireDb = true): array
+function loadGatewayEnv(array $options, bool $requireDb = true, bool $requireSchema = true): array
 {
     $gatewayUrl = getenv('DB_GATEWAY_URL');
     $platformId = getenv('PLATFORM_ID');
     $schemaName = $options['schema_name'] ?: (getenv('SCHEMA_NAME') ?: null);
     $databaseId = $options['database_id'] ?: (getenv('DATABASE_ID') ?: 'main');
+
+    // Admin token: used for gateway-wide operations (platform register, schema upload, token provision)
     $adminToken = getenv('DB_GATEWAY_ADMIN_TOKEN') ?: (getenv('ADMIN_TOKEN') ?: null);
+
+    // Platform token: used for platform-scoped operations (database create, migrate, migrate-all).
+    // Provisioned via POST /admin/platform-token. Store as DB_GATEWAY_PLATFORM_TOKEN in .env.
+    $platformToken = getenv('DB_GATEWAY_PLATFORM_TOKEN') ?: null;
 
     // Main schema: MAIN_SCHEMA_NAME takes priority, no fallback to SCHEMA_NAME
     $mainSchemaName = $options['main_schema_name'] ?: (getenv('MAIN_SCHEMA_NAME') ?: null);
@@ -156,7 +165,7 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
         exit(1);
     }
 
-    if (!$schemaName && !$mainSchemaName && !$tenantSchemaName) {
+    if ($requireSchema && !$schemaName && !$mainSchemaName && !$tenantSchemaName) {
         fwrite(STDERR, "ERROR: SCHEMA_NAME (or MAIN_SCHEMA_NAME/TENANT_SCHEMA_NAME) environment variable is required (or use --schema-name=...)\n");
         exit(1);
     }
@@ -167,37 +176,141 @@ function loadGatewayEnv(array $options, bool $requireDb = true): array
     }
 
     return [
-        'gateway_url'   => $gatewayUrl,
-        'platform_id'   => $platformId,
-        'schema_name'   => $schemaName,
+        'gateway_url'        => $gatewayUrl,
+        'platform_id'        => $platformId,
+        'schema_name'        => $schemaName,
         'main_schema_name'   => $mainSchemaName,
         'tenant_schema_name' => $tenantSchemaName,
-        'database_id'   => $databaseId,
-        'admin_token'   => $adminToken,
-        'cross_db_link' => loadCrossDbLinkAuth(),
+        'database_id'        => $databaseId,
+        'admin_token'        => $adminToken,
+        'platform_token'     => $platformToken,
+        'cross_db_link'      => loadCrossDbLinkAuth(),
     ];
 }
 
 /**
- * Build JSON request headers, optionally adding the admin bearer token.
+ * Resolve the platform token to use for platform-scoped gateway operations.
  *
- * The gateway's /v2/migrate, /v2/migrate-all and /admin/* endpoints are guarded by
- * admin_auth_middleware (shared admin bearer + IP allowlist). When an admin token is
- * available it MUST be presented as `Authorization: Bearer <token>`. When no token is
- * configured (local/ungated gateway) the header is omitted so behaviour is unchanged.
+ * Gateway v4.1.0+ requires a per-platform bearer token (not the admin token) for:
+ *   POST /admin/database/create
+ *   POST /v2/migrate
+ *   POST /v2/migrate-all
+ *   GET  /v2/migrate-all/{job_id}
  *
- * @param string      $payload     JSON body the request will send (for Content-Length).
- * @param string|null $adminToken  Admin token, or null to omit the Authorization header.
+ * Resolution order:
+ *   1. $env['platform_token'] (DB_GATEWAY_PLATFORM_TOKEN env var) — explicit, preferred
+ *   2. Auto-provision via $env['admin_token'] when platform token not set — prints a
+ *      warning advising the user to persist the token in .env
+ *   3. null — when neither token is available (gateway may return 403; caller decides)
+ *
+ * Auto-provisioning re-provisions on every call if DB_GATEWAY_PLATFORM_TOKEN is absent.
+ * This invalidates any previously stored platform token. Store the returned token in
+ * DB_GATEWAY_PLATFORM_TOKEN to avoid this.
+ *
+ * @param array $env    Result of loadGatewayEnv().
+ * @param bool  $quiet  Suppress informational output.
+ * @return string|null  Platform token, or null if unavailable.
+ */
+function resolveGatewayPlatformToken(array $env, bool $quiet = false): ?string
+{
+    if (!empty($env['platform_token'])) {
+        return $env['platform_token'];
+    }
+
+    if (empty($env['admin_token'])) {
+        return null;
+    }
+
+    if (!$quiet) {
+        fwrite(STDERR, "WARNING: DB_GATEWAY_PLATFORM_TOKEN not set — auto-provisioning via admin token.\n");
+        fwrite(STDERR, "  To avoid re-provisioning on every run, add to your .env:\n");
+        fwrite(STDERR, "  DB_GATEWAY_PLATFORM_TOKEN=<token returned below>\n");
+        fwrite(STDERR, "  Or run: php stone gateway:provision-token\n\n");
+    }
+
+    return stepProvisionPlatformToken($env['gateway_url'], $env['platform_id'], $env['admin_token'], $quiet);
+}
+
+/**
+ * Provision (or re-provision) a platform token via POST /admin/platform-token.
+ *
+ * Requires the admin token. Returns the newly provisioned platform token string.
+ * Re-provisioning replaces any existing platform token for the platform.
+ *
+ * @param string      $gatewayUrl  Gateway base URL.
+ * @param string      $platformId  Platform name.
+ * @param string|null $adminToken  Admin bearer token.
+ * @param bool        $quiet       Suppress informational output.
+ * @return string                  The provisioned platform token.
+ *                                 Exits with code 1 on failure.
+ */
+function stepProvisionPlatformToken(string $gatewayUrl, string $platformId, ?string $adminToken, bool $quiet = false): string
+{
+    if (!$quiet) {
+        echo "Provisioning platform token for '{$platformId}'...\n";
+    }
+
+    if (!$adminToken) {
+        fwrite(STDERR, "ERROR: DB_GATEWAY_ADMIN_TOKEN is required to provision a platform token.\n");
+        fwrite(STDERR, "  Set DB_GATEWAY_ADMIN_TOKEN in your .env or environment.\n");
+        exit(1);
+    }
+
+    $payload = json_encode(['platform' => $platformId]);
+    $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/admin/platform-token", [
+        'Content-Type: application/json',
+        'Content-Length: ' . strlen($payload),
+        "Authorization: Bearer {$adminToken}",
+    ], $payload, 30);
+
+    if ($resp['code'] === 200 || $resp['code'] === 201) {
+        $response = json_decode($resp['body'], true);
+        $token = $response['token'] ?? null;
+        if (!$token) {
+            fwrite(STDERR, "ERROR: Gateway returned success but no 'token' field in response.\n");
+            fwrite(STDERR, "  Response: {$resp['body']}\n");
+            exit(1);
+        }
+        if (!$quiet) {
+            echo "  Platform token provisioned.\n";
+            echo "  Add to your .env: DB_GATEWAY_PLATFORM_TOKEN={$token}\n\n";
+        }
+        return $token;
+    }
+
+    if ($resp['code'] === 404) {
+        fwrite(STDERR, "ERROR: Platform '{$platformId}' is not registered on the gateway.\n");
+        fwrite(STDERR, "  Register it first: php stone gateway:register-main\n");
+        exit(1);
+    }
+
+    fwrite(STDERR, "ERROR: Failed to provision platform token (HTTP {$resp['code']})\n");
+    if ($resp['body']) {
+        fwrite(STDERR, "  {$resp['body']}\n");
+    }
+    exit(1);
+}
+
+/**
+ * Build JSON request headers, optionally adding a bearer token.
+ *
+ * Pass the admin token for gateway-wide operations (platform register, schema upload,
+ * token provisioning) or the platform token for platform-scoped operations (database
+ * create, migrate, migrate-all). When no token is configured (local/ungated gateway)
+ * the Authorization header is omitted so behaviour is unchanged.
+ *
+ * @param string      $payload  JSON body the request will send (for Content-Length).
+ * @param string|null $token    Bearer token, or null to omit the Authorization header.
  * @return string[] HTTP header lines.
  */
-function gatewayJsonHeaders(string $payload, ?string $adminToken = null): array
+function gatewayJsonHeaders(string $payload, ?string $token = null): array
 {
     $headers = [
         'Content-Type: application/json',
         'Content-Length: ' . strlen($payload),
     ];
-    if ($adminToken) {
-        $headers[] = "Authorization: Bearer {$adminToken}";
+    if ($token) {
+        $headers[] = "Authorization: Bearer {$token}";
     }
     return $headers;
 }
@@ -372,17 +485,20 @@ function stepUploadSchema(string $gatewayUrl, string $platformId, string $schema
 /**
  * Step: Create database from stored schema (with retry).
  *
+ * Calls POST /admin/database/create which requires a platform token (not admin token)
+ * in gateway v4.1.0+. Use resolveGatewayPlatformToken() to obtain the token.
+ *
  * @param string      $gatewayUrl
  * @param string      $platformId
  * @param string      $schemaName
- * @param string|null $uuid        Tenant UUID to create; null for the main (platform) database.
- * @param string|null $adminToken
+ * @param string|null $uuid          Tenant UUID to create; null for the main (platform) database.
+ * @param string|null $platformToken Platform bearer token (from DB_GATEWAY_PLATFORM_TOKEN).
  * @param int         $retryCount
  * @param int         $retryDelay
  * @param bool        $quiet
  * @return void Exits on failure.
  */
-function stepCreateDatabase(string $gatewayUrl, string $platformId, string $schemaName, ?string $uuid = null, ?string $adminToken = null, int $retryCount = 3, int $retryDelay = 5, bool $quiet = false): void
+function stepCreateDatabase(string $gatewayUrl, string $platformId, string $schemaName, ?string $uuid = null, ?string $platformToken = null, int $retryCount = 3, int $retryDelay = 5, bool $quiet = false): void
 {
     if (!$quiet) {
         if ($uuid !== null) {
@@ -410,7 +526,7 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
         }
         $payload = json_encode($bodyData);
 
-        $headers = gatewayJsonHeaders($payload, $adminToken);
+        $headers = gatewayJsonHeaders($payload, $platformToken);
 
         $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/admin/database/create", $headers, $payload, 60);
 
@@ -454,11 +570,14 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
 /**
  * Step: Migrate database using stored schema (with retry).
  *
+ * Calls POST /v2/migrate which requires a platform token (not admin token)
+ * in gateway v4.1.0+. Use resolveGatewayPlatformToken() to obtain the token.
+ *
  * @param string      $gatewayUrl
  * @param string      $platformId
  * @param string      $schemaName
  * @param string|null $uuid             Tenant UUID to migrate; null for the main (platform) database.
- * @param string|null $adminToken
+ * @param string|null $platformToken    Platform bearer token (from DB_GATEWAY_PLATFORM_TOKEN).
  * @param bool        $force
  * @param int         $retryCount
  * @param int         $retryDelay
@@ -472,7 +591,7 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
  *   Sourced from deployment tooling env vars via loadGatewayEnv()['cross_db_link'].
  * @return void Exits on failure.
  */
-function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, ?string $uuid = null, ?string $adminToken = null, bool $force = false, int $retryCount = 3, int $retryDelay = 5, bool $quiet = false, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null): void
+function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $schemaName, ?string $uuid = null, ?string $platformToken = null, bool $force = false, int $retryCount = 3, int $retryDelay = 5, bool $quiet = false, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null): void
 {
     if (!$quiet) {
         if ($uuid !== null) {
@@ -509,7 +628,7 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
         }
         $payload = json_encode($body);
 
-        $headers = gatewayJsonHeaders($payload, $adminToken);
+        $headers = gatewayJsonHeaders($payload, $platformToken);
 
         $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/v2/migrate", $headers, $payload, 120);
 
@@ -581,10 +700,13 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
  * read but never-returned fields databases_updated / migrations_applied /
  * functions_updated at the top level.
  *
+ * Calls POST /v2/migrate-all which requires a platform token (not admin token)
+ * in gateway v4.1.0+. Use resolveGatewayPlatformToken() to obtain the token.
+ *
  * @param string      $gatewayUrl
  * @param string      $platformId
  * @param string      $schemaName
- * @param string|null $adminToken
+ * @param string|null $platformToken    Platform bearer token (from DB_GATEWAY_PLATFORM_TOKEN).
  * @param bool        $force
  * @param int         $retryCount       Retry attempts for the INITIATE call only.
  * @param int         $retryDelay       Delay between INITIATE retries (seconds).
@@ -597,7 +719,7 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
  *                                      job continues beyond this limit.
  * @return void Exits on failure.
  */
-function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, ?string $adminToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null, int $maxWait = 3600): void
+function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string $schemaName, ?string $platformToken, bool $force, int $retryCount, int $retryDelay, bool $quiet, array $allow = [], bool $skipVerification = false, ?array $crossDbLink = null, int $maxWait = 3600): void
 {
     if (!$quiet) {
         echo "Migrating all tenant databases (POST /v2/migrate-all)...\n";
@@ -621,7 +743,7 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
     // -----------------------------------------------------------------------
     // INITIATE (with retry on connection/5xx failures)
     // -----------------------------------------------------------------------
-    $resp = gatewayInitiateMigrateAll($gatewayUrl, $body, $adminToken, $retryCount, $retryDelay, $quiet);
+    $resp = gatewayInitiateMigrateAll($gatewayUrl, $body, $platformToken, $retryCount, $retryDelay, $quiet);
 
     // -----------------------------------------------------------------------
     // BACKWARD-COMPAT BRANCH (§8.2.5)
@@ -658,7 +780,7 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
         if (!$quiet) {
             echo "  Existing job found (409), polling job: {$jobId}\n";
         }
-        gatewayPollMigrateAllJob($gatewayUrl, $jobId, $platformId, $schemaName, $body, $adminToken, $quiet, $maxWait);
+        gatewayPollMigrateAllJob($gatewayUrl, $jobId, $platformId, $schemaName, $body, $platformToken, $quiet, $maxWait);
         return;
     }
 
@@ -686,7 +808,7 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
         echo "  Polling for completion...\n";
     }
 
-    gatewayPollMigrateAllJob($gatewayUrl, $jobId, $platformId, $schemaName, $body, $adminToken, $quiet, $maxWait);
+    gatewayPollMigrateAllJob($gatewayUrl, $jobId, $platformId, $schemaName, $body, $platformToken, $quiet, $maxWait);
 }
 
 /**
@@ -698,10 +820,10 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
  * @internal
  * @return array{code: int, body: string|false}
  */
-function gatewayInitiateMigrateAll(string $gatewayUrl, array $body, ?string $adminToken, int $retryCount, int $retryDelay, bool $quiet): array
+function gatewayInitiateMigrateAll(string $gatewayUrl, array $body, ?string $platformToken, int $retryCount, int $retryDelay, bool $quiet): array
 {
     $payload  = json_encode($body);
-    $headers  = gatewayJsonHeaders($payload, $adminToken);
+    $headers  = gatewayJsonHeaders($payload, $platformToken);
     $attempt  = 1;
 
     while (true) {
@@ -754,7 +876,7 @@ function gatewayInitiateMigrateAll(string $gatewayUrl, array $body, ?string $adm
  * @internal
  * @return void Exits on failure or timeout.
  */
-function gatewayPollMigrateAllJob(string $gatewayUrl, string $jobId, string $platformId, string $schemaName, array $initiateBody, ?string $adminToken, bool $quiet, int $maxWait): void
+function gatewayPollMigrateAllJob(string $gatewayUrl, string $jobId, string $platformId, string $schemaName, array $initiateBody, ?string $platformToken, bool $quiet, int $maxWait): void
 {
     $pollUrl      = "{$gatewayUrl}/v2/migrate-all/{$jobId}";
     $backoff      = 3;
@@ -778,8 +900,8 @@ function gatewayPollMigrateAllJob(string $gatewayUrl, string $jobId, string $pla
         }
 
         $headers = [];
-        if ($adminToken) {
-            $headers[] = "Authorization: Bearer {$adminToken}";
+        if ($platformToken) {
+            $headers[] = "Authorization: Bearer {$platformToken}";
         }
 
         $resp = gatewayHttpRequest('GET', $pollUrl, $headers, null, 30);
@@ -845,7 +967,7 @@ function gatewayPollMigrateAllJob(string $gatewayUrl, string $jobId, string $pla
                 if (!$quiet) {
                     echo "  Job {$jobId} was interrupted (gateway restart). Re-initiating...\n";
                 }
-                $reResp = gatewayInitiateMigrateAll($gatewayUrl, $initiateBody, $adminToken, 3, 5, $quiet);
+                $reResp = gatewayInitiateMigrateAll($gatewayUrl, $initiateBody, $platformToken, 3, 5, $quiet);
                 if ($reResp['code'] !== 202) {
                     fwrite(STDERR, "ERROR: Re-initiate after interrupt returned HTTP {$reResp['code']}\n");
                     if ($reResp['body']) fwrite(STDERR, "  {$reResp['body']}\n");

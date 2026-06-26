@@ -111,6 +111,18 @@ $commands = [
         'description' => 'Migrate ALL tenant databases (bulk operation)',
         'file' => 'cli/gateway-migrate-all-tenants.php',
     ],
+    'gateway:provision-token' => [
+        'description' => 'Provision a per-platform bearer token required by gateway v4.1.0+',
+        'file' => 'cli/gateway-provision-token.php',
+    ],
+    'gateway:list-schemas' => [
+        'description' => 'List schema archives registered on the gateway for this platform',
+        'file' => 'cli/gateway-list-schemas.php',
+    ],
+    'gateway:list-databases' => [
+        'description' => 'List databases registered on the gateway for this platform',
+        'file' => 'cli/gateway-list-databases.php',
+    ],
 ];
 
 // Parse command
@@ -172,6 +184,9 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone gateway:migrate-main                          # Migrate main database schema\n";
     echo "  php stone gateway:migrate-tenant --database-id=<uuid>  # Migrate ONE tenant database\n";
     echo "  php stone gateway:migrate-all-tenants                  # Migrate ALL tenant databases\n";
+    echo "  php stone gateway:provision-token                      # Provision DB_GATEWAY_PLATFORM_TOKEN\n";
+    echo "  php stone gateway:list-schemas                         # List registered schema archives\n";
+    echo "  php stone gateway:list-databases                       # List registered databases\n";
     echo "\n";
     echo "Run 'php stone <command> --help' for detailed help on any command.\n";
     echo "\n";
