@@ -11,21 +11,23 @@
  *   php stone gateway:register-main [options]
  *
  * Environment variables (required):
- *   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
- *   PLATFORM_ID       - Platform identifier (e.g., myapp)
- *   SCHEMA_NAME       - Schema version name (e.g., v1_0)
+ *   DB_GATEWAY_URL         - Gateway URL (e.g., http://localhost:9000)
+ *   PLATFORM_ID            - Platform identifier (e.g., myapp)
+ *   MAIN_SCHEMA_NAME       - Main schema version name (e.g., main_v1) [preferred]
+ *   SCHEMA_NAME            - Schema version name fallback (e.g., v1_0)
  *   DB_GATEWAY_ADMIN_TOKEN - Admin token for /admin/* endpoints (legacy: ADMIN_TOKEN)
  *
  * Environment variables (optional):
- *   DATABASE_ID       - Database identifier (default: main)
+ *   DATABASE_ID            - Database identifier (default: main)
  *
  * Options:
- *   --retry=<n>        Number of retry attempts (default: 3)
- *   --delay=<s>        Delay between retries in seconds (default: 5)
- *   --quiet            Suppress output
- *   --force            Skip checksum check and always run all steps
- *   --database-id=<id> Override DATABASE_ID
- *   --schema-name=<n>  Override SCHEMA_NAME
+ *   --retry=<n>              Number of retry attempts (default: 3)
+ *   --delay=<s>              Delay between retries in seconds (default: 5)
+ *   --quiet                  Suppress output
+ *   --force                  Skip checksum check and always run all steps
+ *   --database-id=<id>       Override DATABASE_ID
+ *   --main-schema-name=<n>   Override MAIN_SCHEMA_NAME
+ *   --schema-name=<n>        Override SCHEMA_NAME (fallback)
  *
  * Idempotency:
  *   A SHA-256 hash of src/postgresql/ is saved to .cache/.gateway-schema-hash-main
@@ -38,10 +40,18 @@ require_once __DIR__ . '/helpers/gateway-common.php';
 $options = parseGatewayOptions($argv);
 $env = loadGatewayEnv($options);
 
+// Use MAIN_SCHEMA_NAME for the main database; falls back to SCHEMA_NAME for backward compat
+$mainSchemaName = $env['main_schema_name'];
+
+if (!$mainSchemaName) {
+    fwrite(STDERR, "ERROR: MAIN_SCHEMA_NAME (or SCHEMA_NAME) environment variable is required (or use --main-schema-name=...)\n");
+    exit(1);
+}
+
 if (!$options['quiet']) {
     echo "=== Gateway Register Main Database (V2) ===\n";
     echo "Platform:    {$env['platform_id']}\n";
-    echo "Schema:      {$env['schema_name']}\n";
+    echo "Schema:      {$mainSchemaName}\n";
     echo "Database ID: {$env['database_id']}\n";
     echo "Gateway:     {$env['gateway_url']}\n\n";
 }
@@ -70,12 +80,12 @@ stepRegisterPlatform($env['gateway_url'], $env['platform_id'], $options['quiet']
 
 // Step 2: Upload main schema
 if (!$options['quiet']) echo "Step 2/3: ";
-stepUploadSchema($env['gateway_url'], $env['platform_id'], $env['schema_name'], $archive['tar_file'], $options['quiet']);
+stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet']);
 
 // Step 3: Create main database
 if (!$options['quiet']) echo "Step 3/3: ";
 stepCreateDatabase(
-    $env['gateway_url'], $env['platform_id'], $env['schema_name'],
+    $env['gateway_url'], $env['platform_id'], $mainSchemaName,
     $env['database_id'], $env['admin_token'],
     $options['retry'], $options['delay'], $options['quiet']
 );
