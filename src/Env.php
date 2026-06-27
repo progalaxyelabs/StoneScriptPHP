@@ -19,6 +19,10 @@ class Env
     // Database - Gateway Connection (Required in v3+)
     public string $DB_GATEWAY_URL;
     public string $DB_GATEWAY_PLATFORM;
+    // Gateway v4 routing: base schema (defaults to "main") + optional tenant uuid.
+    // DB_GATEWAY_TENANT_ID is retained as a legacy fallback for DB_GATEWAY_SCHEMA_NAME.
+    public ?string $DB_GATEWAY_SCHEMA_NAME = null;
+    public ?string $DB_GATEWAY_UUID = null;
     public ?string $DB_GATEWAY_TENANT_ID = null;
     public ?string $DB_GATEWAY_ADMIN_TOKEN = null;
     public string $PLATFORM_ID = '';

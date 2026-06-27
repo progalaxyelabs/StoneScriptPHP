@@ -47,10 +47,17 @@ class Database
 
         $start_time = microtime(true);
 
+        // Gateway v4 routing: prefer DB_GATEWAY_SCHEMA_NAME, fall back to the
+        // legacy DB_GATEWAY_TENANT_ID; base schema defaults to "main" inside the client.
+        $schema_name = !empty($env->DB_GATEWAY_SCHEMA_NAME)
+            ? $env->DB_GATEWAY_SCHEMA_NAME
+            : ($env->DB_GATEWAY_TENANT_ID ?? null);
+
         $this->client = new GatewayClient(
             $env->DB_GATEWAY_URL,
             $env->DB_GATEWAY_PLATFORM,
-            $env->DB_GATEWAY_TENANT_ID ?? null
+            $schema_name,
+            $env->DB_GATEWAY_UUID ?? null
         );
 
         log_debug('Database: Gateway client initialized');
