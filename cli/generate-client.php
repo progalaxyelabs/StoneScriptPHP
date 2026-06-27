@@ -1,10 +1,24 @@
 <?php
 
 /**
- * API Client Generator — v4.5
+ * API Client Generator — v4.6
  *
  * Generates per-service TypeScript client packages from PHP routes.
  * Implements CLIENT-SDK-SPEC §0 Amendments A1–A6 (approved 2026-06-14).
+ *
+ * v4.6 (orphan cross-product cleanup):
+ *   - Added removeOrphanNestedPackages() that runs at the start of every generation.
+ *   - Before v4.0, the generator emitted a {consumer}×{service} cross-product layout:
+ *     client/{consumer}/{service}/ — e.g. client/admin/finance/, client/ats/finance/.
+ *     These directories are not referenced by any Angular frontend and have no
+ *     package-lock.json (they were never npm-installed in that nested form). They
+ *     accumulated in repos and caused deploy-manager lint failures ("Missing
+ *     package-lock.json" for ~100 dirs fleet-wide). The cleanup step removes them
+ *     automatically on the next `php stone generate client` run so platforms do not
+ *     need manual deletion.
+ *   - Safe: only directories inside a flat service package dir (client/{service}/)
+ *     that themselves contain a package.json are removed; src/, dist/, node_modules/,
+ *     and streaming/ subdirs are left untouched.
  *
  * v4.5 (multi-scope clobber fix):
  *   - Each service package's `name` is now derived from the SERVICE NAME, not the
@@ -1555,8 +1569,150 @@ TS;
 }
 
 // ============================================================================
+// Orphan cross-product cleanup (v4.6)
+// ============================================================================
+
+/**
+ * Remove orphan nested API-client packages left behind by pre-v4.0 generator versions.
+ *
+ * Before v4.0, the generator was invoked per-consumer with the consumer as the scope
+ * and emitted all service packages nested under that consumer:
+ *   client/{consumer}/{service}/   (e.g. client/admin/finance/, client/ats/finance/)
+ * These dirs accumulate in git and cause lint failures because they lack package-lock.json
+ * (they were never npm-installed in the nested location). The current generator uses a
+ * flat layout (client/{service}/) which is the only correct layout.
+ *
+ * This function runs once at the start of every generate-client invocation. It:
+ *   1. Enumerates service-package dirs at depth 1 from $outputBaseDir (skipping
+ *      known non-package dirs: node_modules, src, dist, .git).
+ *   2. Inside each service-package dir, finds sub-directories that contain a
+ *      package.json (i.e., are themselves nested API-client packages).
+ *   3. Removes those nested dirs entirely (recursively).
+ *   4. Logs each removal and returns the total count.
+ *
+ * Safe guards:
+ *   - Only processes dirs at exactly depth 2 (client/{service}/{orphan}/).
+ *   - Skips src/, dist/, node_modules/, streaming/ subdirs — these are legitimate
+ *     sub-dirs of a flat service package and must not be removed.
+ *   - Only removes a nested dir when it contains a package.json — the presence of
+ *     a package.json is the unambiguous signal that it is an npm package, not user content.
+ *   - Does NOT remove the flat service packages themselves (depth 1).
+ *
+ * @param string $outputBaseDir Absolute path to the client output root (e.g. /…/docker/api/client)
+ * @return int   Number of orphan directories removed
+ */
+function removeOrphanNestedPackages(string $outputBaseDir): int
+{
+    if (!is_dir($outputBaseDir)) {
+        return 0;
+    }
+
+    /** Sub-dir names inside a flat service package that are NOT orphan nested packages */
+    $skipNames = ['node_modules', 'src', 'dist', 'streaming', '.git', '.'];
+
+    $removed = 0;
+
+    // Enumerate depth-1 entries: $outputBaseDir/{item}
+    $depth1 = scandir($outputBaseDir);
+    if ($depth1 === false) {
+        return 0;
+    }
+
+    foreach ($depth1 as $item1) {
+        if ($item1 === '.' || $item1 === '..') {
+            continue;
+        }
+        $serviceDir = $outputBaseDir . DIRECTORY_SEPARATOR . $item1;
+        if (!is_dir($serviceDir)) {
+            continue;
+        }
+
+        // Skip dirs that are not service packages (no package.json at this level)
+        if (!file_exists($serviceDir . '/package.json')) {
+            continue;
+        }
+
+        // This is a flat service package dir (e.g. client/admin/).
+        // Now look for nested package dirs inside it.
+        $depth2 = scandir($serviceDir);
+        if ($depth2 === false) {
+            continue;
+        }
+
+        foreach ($depth2 as $item2) {
+            if ($item2 === '.' || $item2 === '..') {
+                continue;
+            }
+            if (in_array($item2, $skipNames, true)) {
+                continue;
+            }
+
+            $nestedDir = $serviceDir . DIRECTORY_SEPARATOR . $item2;
+            if (!is_dir($nestedDir)) {
+                continue;
+            }
+
+            // Remove only if this nested dir is itself an npm package
+            if (!file_exists($nestedDir . '/package.json')) {
+                continue;
+            }
+
+            // Orphan confirmed — remove it recursively
+            removeDirectoryRecursive($nestedDir);
+            echo "  Removed orphan nested package: {$item1}/{$item2}\n";
+            $removed++;
+        }
+    }
+
+    return $removed;
+}
+
+/**
+ * Recursively delete a directory and all its contents.
+ *
+ * Uses RecursiveIteratorIterator so it handles arbitrarily deep trees.
+ * Silently returns if $dir does not exist.
+ *
+ * @param string $dir Absolute path to the directory to delete
+ */
+function removeDirectoryRecursive(string $dir): void
+{
+    if (!is_dir($dir)) {
+        return;
+    }
+
+    $iterator = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+        \RecursiveIteratorIterator::CHILD_FIRST
+    );
+
+    foreach ($iterator as $item) {
+        if ($item->isDir()) {
+            rmdir($item->getRealPath());
+        } else {
+            unlink($item->getRealPath());
+        }
+    }
+
+    rmdir($dir);
+}
+
+// ============================================================================
 // Main execution
 // ============================================================================
+
+// Allow the file to be included for unit testing without triggering generation.
+// When GENERATE_CLIENT_TESTING is defined, function definitions above are loaded
+// but the main execution block below is skipped.
+if (defined('GENERATE_CLIENT_TESTING')) {
+    return;
+}
+
+// Purge orphan nested packages left by pre-v4.0 generator before writing anything (v4.6)
+$orphansRemoved = removeOrphanNestedPackages($outputBaseDir);
+if ($orphansRemoved > 0) {
+    echo "Cleaned up $orphansRemoved orphan nested package(s) from previous generator version.\n\n";
+}
 
 echo "Scanning routes...\n";
 $allRoutes = loadRoutesFromPlatform();
