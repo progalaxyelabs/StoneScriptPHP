@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-06-29
+
+### Added
+
+- **`HybridCardJwtHandler`** (`src/Auth/HybridCardJwtHandler.php`) — New `JwtHandlerInterface`
+  implementation that validates BOTH platform-minted cards (platform RSA key, fast, no network) AND
+  auth-service passports (JWKS fallback). This is the load-bearing fix for the passport/card model
+  (TENANCY-IDENTITY-MODEL §1–§4): `Application::run()` in `external`/`hybrid` mode now defaults to
+  `HybridCardJwtHandler` instead of the previous JWKS-only `MultiAuthJwtAdapter`. Without this fix,
+  platform-minted cards were rejected with "Unknown issuer" because only the auth service's JWKS key
+  was known to the validator. Validation order: platform RSA → JWKS fallback (passports on non-excluded
+  routes). Expose a custom handler via `$config['jwt']['handler']` if needed.
+
+- **`RequireCardMiddleware`** (`src/Auth/Middleware/RequireCardMiddleware.php`) — Global enforcement
+  middleware for the card model with public-route pass-through. Differs from `RequireTenantMiddleware`
+  in one critical way: when `jwt_claims` is absent (public route excluded by `JwtAuthMiddleware`), it
+  passes through to the route handler instead of returning 401. This allows the exchange endpoint
+  (`POST /api/auth/exchange`) — which validates its own inbound passport — to be wired globally without
+  self-blocking. Wire on multi-tenant platforms via `$config['middleware'] => [new RequireCardMiddleware()]`
+  in `Application::run()`. T1 platforms (no card concept) must NOT wire it.
+
+- **`jwt.handler` injection key** — `Application::run()` now accepts `$config['jwt']['handler']` as a
+  pre-built `JwtHandlerInterface` instance. When supplied it takes precedence over the default handler
+  selection (builtin → RsaJwtHandler, external/hybrid → HybridCardJwtHandler). Use for custom JWKS
+  sources, multi-issuer setups, or unit-test doubles.
+
+### Fixed
+
+- **Defect 1 — `Application::run()` rejected platform-minted cards** (`src/Application.php`).
+  `buildJwtHandler()` in external/hybrid mode created `MultiAuthJwtAdapter` (JWKS-only). Cards signed
+  by the platform's own RSA key carried `iss=JWT_ISSUER` (not the auth service issuer) and were rejected.
+  Fixed: external/hybrid mode now defaults to `HybridCardJwtHandler` (RSA + JWKS chain). The old
+  `MultiAuthJwtAdapter` path is removed from the default; platforms can still inject it via `jwt.handler`.
+
+- **Defect 3 — `buildAuthRouteOptions()` did not thread resolver closures** (`src/Application.php`).
+  `Application::run()` accepted `tenants_resolver` and `roles_resolver` in `$config['auth']` but
+  `buildAuthRouteOptions()` only flat-merged `features` and `hooks` — the resolver closures were
+  silently dropped. This forced the canary platform to bypass `Application::run()` entirely and call
+  `ExternalAuthRoutes::register()` directly with a manual bootstrap. Fixed: both closures are now
+  forwarded to the options array passed to `ExternalAuthRoutes::register()`, which already accepts them.
+  Platforms can now wire the card model via the standard `Application::run()` config without any manual
+  bootstrap replacement.
+
+- **Defect 4 — `JWT_ISSUER` defaulted silently to `'example.com'`** (`src/Auth/RsaJwtHandler.php`).
+  `generateToken()` used `$env->JWT_ISSUER ?? 'example.com'` — minting cards with `iss=example.com`
+  when `JWT_ISSUER` was unset. These cards passed local validation (both sides using the placeholder)
+  but broke the moment `JWT_ISSUER` was set to a real value. Fixed: `generateToken()` now throws
+  `RuntimeException('JWT_ISSUER is not set or empty...')` if `JWT_ISSUER` is absent. Additionally,
+  `verifyToken()` now skips the issuer check when `JWT_ISSUER` is unset rather than comparing against
+  `'example.com'` — this allows `HybridCardJwtHandler`'s RSA-then-JWKS chain to return `false` cleanly
+  and attempt the JWKS fallback without a false positive on the placeholder issuer.
+
+- **Defect 5 — memberships guidance clarified** (TENANCY-IDENTITY-MODEL.md §10, canary playbook).
+  The main-DB SQL function `auth_get_memberships()` returns empty (`WHERE false` stub). The correct
+  approach is `ExternalAuthServiceClient::getMemberships(authHeader)` in the `tenants_resolver`.
+  This is now documented in TENANCY-IDENTITY-MODEL.md §10 and the canary playbook.
+
+### Changed
+
+- `Application::buildAuthRouteOptions()` — now passes `tenants_resolver` and `roles_resolver` through
+  to `ExternalAuthRoutes::register()`. Fully backward-compatible: platforms that do not supply these
+  keys see no change in behaviour.
+
+- `Application::buildJwtHandler()` — signature extended with `array $jwtConfig = []` to accept the
+  `jwt.handler` injection key. Backward-compatible.
+
+- `RsaJwtHandler::verifyToken()` — issuer check now skips (rather than failing against `'example.com'`)
+  when `JWT_ISSUER` is unset. This improves `HybridCardJwtHandler` chain behaviour: the RSA path returns
+  `false` cleanly, letting JWKS attempt the token.
+
+- `TENANCY-IDENTITY-MODEL.md` — added §10 (Cross-fleet implementation decisions): role source-of-truth,
+  memberships via HTTP client, identity bridge via email, gateway tenant restore, JWT_ISSUER enforcement,
+  HybridCardJwtHandler default, TenantUrlMatchMiddleware guidance, RequireCardMiddleware guidance, and a
+  reference `auth.php` + `index.php` config snippet for multi-tenant platforms.
+
+### Tests
+
+- Added `HybridCardJwtHandlerTest` (7 tests) — validates platform card via RSA path, rejects wrong-key
+  token, generation round-trip, JWT_ISSUER fail-loud on generate, JWT_ISSUER-unset skip on verify,
+  invalid JWT returns false.
+- Added `RequireCardMiddlewareTest` (7 tests) — no claims pass-through, empty claims pass-through, card
+  with tenant_id passes, passport on business route 403, null tenant_id 403, contrast with
+  RequireTenantMiddleware (no 401 on absent claims), request not mutated.
+- Added `ApplicationResolverThreadingTest` (4 tests) — tenants_resolver exposed via ExternalAuthConfig,
+  null default, ExchangeRoute end-to-end with threaded resolvers, pre-fix 501 contrast test.
+
 ## [4.6.0] - 2026-06-21
 
 ### Fixed

@@ -13,6 +13,7 @@ use StoneScriptPHP\Routing\Middleware\GatewayTenantMiddleware;
 use StoneScriptPHP\Routing\MiddlewareInterface;
 use StoneScriptPHP\Auth\JwtHandlerInterface;
 use StoneScriptPHP\Auth\RsaJwtHandler;
+use StoneScriptPHP\Auth\HybridCardJwtHandler;
 use StoneScriptPHP\Auth\MultiAuthJwtValidator;
 use StoneScriptPHP\Auth\MultiAuthJwtAdapter;
 use StoneScriptPHP\Auth\AuthRoutes;
@@ -87,7 +88,7 @@ class Application
         // (mirrors the store_access gate below). See self::isSubscriptionEnabled().
         $subscriptionEnabled = self::isSubscriptionEnabled($subscriptionConfig);
 
-        $jwtHandler = self::buildJwtHandler($authConfig, $env);
+        $jwtHandler = self::buildJwtHandler($authConfig, $env, $jwtConfig);
 
         // Build JWT excluded paths from config
         $jwtExcludedPaths = $jwtConfig['excluded_paths'] ?? [];
@@ -267,26 +268,55 @@ class Application
     }
 
     /**
-     * Build the JWT handler based on auth mode config
+     * Build the JWT handler based on auth mode config.
      *
-     * Key: issuer (for JWT 'iss' claim validation) may differ from server URL
-     * (for JWKS HTTP fetch). In Docker environments:
-     *   - AUTH_SERVICE_URL = container hostname (JWKS fetch URL)
-     *   - AUTH_ISSUER      = public hostname (value in JWT 'iss' claim)
+     * ## Injection (card model platforms)
      *
-     * @param array $authConfig Auth section of the config array
-     * @param Env $env Framework Env instance
+     * Pass a pre-built handler via `$config['jwt']['handler']` to override the default:
+     *
+     *   Application::run([
+     *       'jwt'  => ['handler' => new HybridCardJwtHandler(...)],
+     *       'auth' => ['mode' => 'external', ...],
+     *   ]);
+     *
+     * ## Default behaviour per mode
+     *
+     * - `builtin`        → `RsaJwtHandler` (platform RSA key, self-contained auth).
+     * - `external/hybrid` → **`HybridCardJwtHandler`** (platform RSA for cards +
+     *   JWKS fallback for passports). This is the card-model default: the platform
+     *   mints and validates its own cards while still accepting auth-service passports
+     *   on public-adjacent routes (e.g. exchange validates the inbound passport itself,
+     *   but after exchange all subsequent requests carry platform-signed cards).
+     *
+     * ## Key: issuer vs network URL
+     *
+     * In Docker environments:
+     *   - `AUTH_SERVICE_URL` = container hostname for JWKS fetch (e.g. http://auth:3139)
+     *   - `AUTH_ISSUER`      = public hostname stamped in JWT 'iss' claims (e.g. https://auth.example.com)
+     *
+     * These are DIFFERENT values. `AUTH_ISSUER` must match the auth service's `JWT_ISSUER`
+     * env exactly. Reusing `AUTH_SERVICE_URL` as the issuer is always wrong in Docker.
+     *
+     * @param array $authConfig   Auth section of the config array.
+     * @param Env   $env          Framework Env instance.
+     * @param array $jwtConfig    JWT section of the config array (for handler injection).
      * @return JwtHandlerInterface
      */
-    private static function buildJwtHandler(array $authConfig, Env $env): JwtHandlerInterface
+    private static function buildJwtHandler(array $authConfig, Env $env, array $jwtConfig = []): JwtHandlerInterface
     {
+        // Explicit injection: platforms can pass their own handler via config['jwt']['handler'].
+        // This is the escape hatch for advanced scenarios (custom JWKS, multi-issuer, etc.).
+        if (isset($jwtConfig['handler']) && $jwtConfig['handler'] instanceof JwtHandlerInterface) {
+            return $jwtConfig['handler'];
+        }
+
         $mode = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
 
         if ($mode === 'builtin') {
             return new RsaJwtHandler();
         }
 
-        // external or hybrid: validate tokens via JWKS
+        // external or hybrid: need to validate BOTH platform-minted cards AND auth-service passports.
         $serverUrl = $authConfig['server']['url'] ?? $env->AUTH_SERVICE_URL ?? 'http://localhost:3139';
 
         // AUTH_ISSUER MUST be set explicitly in external/hybrid mode.
@@ -310,16 +340,11 @@ class Application
         }
         $jwksPath = $authConfig['server']['paths']['jwks'] ?? '/api/auth/jwks';
 
-        $validator = new MultiAuthJwtValidator([
-            'primary' => [
-                'issuer'    => $issuer,
-                'jwks_url'  => rtrim($serverUrl, '/') . $jwksPath,
-                'audience'  => null,
-                'cache_ttl' => 3600,
-            ],
-        ]);
-
-        return new MultiAuthJwtAdapter($validator);
+        // Default for external/hybrid: HybridCardJwtHandler validates platform-minted cards
+        // (platform RSA key) AND falls back to JWKS for auth-service passports.
+        // This replaces the former MultiAuthJwtAdapter (JWKS-only), which rejected cards
+        // because it only knew the auth service's public key, not the platform's.
+        return new HybridCardJwtHandler($serverUrl, $issuer, $jwksPath);
     }
 
     /**
@@ -367,6 +392,23 @@ class Application
             $options['provisioner'] = $authConfig['provisioner'];
             // Enable provision_tenant route when provisioner is provided
             $options['provision_tenant'] = true;
+        }
+
+        // Card model resolver closures (TENANCY-IDENTITY-MODEL §4/§6).
+        // These were previously NOT threaded through buildAuthRouteOptions(), which forced
+        // platforms to bypass Application::run() entirely and call ExternalAuthRoutes::register()
+        // directly (the canary's manual bootstrap workaround). Threading them here means
+        // platforms can wire the card model via the normal Application::run() config.
+        //
+        // tenants_resolver: fn(array $passportClaims): array[] — tenants for this identity.
+        // roles_resolver:   fn(array $claimsWithTenant): string[] — roles in that tenant.
+        //
+        // ExternalAuthRoutes::register() and ExternalAuthConfig both accept these keys directly.
+        if (isset($authConfig['tenants_resolver']) && is_callable($authConfig['tenants_resolver'])) {
+            $options['tenants_resolver'] = $authConfig['tenants_resolver'];
+        }
+        if (isset($authConfig['roles_resolver']) && is_callable($authConfig['roles_resolver'])) {
+            $options['roles_resolver'] = $authConfig['roles_resolver'];
         }
 
         return $options;

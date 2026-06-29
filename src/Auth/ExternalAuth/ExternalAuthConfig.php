@@ -157,8 +157,12 @@ class ExternalAuthConfig
             ?? $env->JWT_PRIVATE_KEY_PATH;
         $this->signingPrivateKeyPassphrase = $options['signing_private_key_passphrase']
             ?? ($env->JWT_PRIVATE_KEY_PASSPHRASE ?? null);
-        $this->signingIssuer = $options['signing_issuer']
-            ?? $env->JWT_ISSUER;
+
+        // JWT_ISSUER MUST be set explicitly — it is stamped as 'iss' on every card this platform
+        // mints via POST /api/auth/exchange. If unset, TokenExchangeService::mintToken() will
+        // throw at card-signing time (it already validates that issuer is non-empty).
+        // See also: RsaJwtHandler::generateToken() throws on empty JWT_ISSUER.
+        $this->signingIssuer = (string) ($options['signing_issuer'] ?? ($env->JWT_ISSUER ?? ''));
 
         // Tenants resolver for the card model (TENANCY-IDENTITY-MODEL §4/§6).
         // fn(array $passportClaims): array — returns tenant objects for the identity.

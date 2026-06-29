@@ -68,8 +68,20 @@ class RsaJwtHandler implements JwtHandlerInterface
         $issuedAt = time();
         $expire = $issuedAt + $expirySeconds;
 
-        // Support custom issuer from .env
-        $issuer = $env->JWT_ISSUER ?? 'example.com';
+        // JWT_ISSUER MUST be set explicitly — defaulting to 'example.com' is a security trap:
+        // a card minted with iss=example.com will only pass verification if the server still
+        // has JWT_ISSUER=example.com, creating a false sense of working auth that breaks the
+        // moment the issuer is corrected. Fail loud so the misconfiguration is caught at token
+        // generation time rather than as an intermittent 401 in production.
+        $issuer = $env->JWT_ISSUER ?? null;
+        if (empty($issuer)) {
+            throw new \RuntimeException(
+                'JWT_ISSUER is not set or empty. Set JWT_ISSUER in .env to the canonical API URL '
+                . 'for this platform (e.g. https://api.logisticsapp.in). This value is stamped as '
+                . "the 'iss' claim on every JWT this platform mints. Defaulting to a placeholder "
+                . 'silently produces tokens that fail issuer validation after any issuer correction.'
+            );
+        }
 
         // AUTH-SPEC §4: custom claims at top level alongside standard JWT claims.
         // Spreading $payload after the standard claims means any claim in $payload
@@ -104,11 +116,15 @@ class RsaJwtHandler implements JwtHandlerInterface
 
             $decoded = JWT::decode($token, new Key($publicKey, self::ALGORITHM));
 
-            // Optionally verify issuer
+            // Optionally verify issuer.
+            // If JWT_ISSUER is not set, skip issuer verification rather than comparing
+            // against a placeholder — this prevents false 'example.com' matches and
+            // lets the HybridCardJwtHandler's RSA-then-JWKS chain return false cleanly
+            // so the JWKS fallback can try the token instead.
             if ($verifyIssuer) {
                 $env = Env::get_instance();
-                $expectedIssuer = $env->JWT_ISSUER ?? 'example.com';
-                if (isset($decoded->iss) && $decoded->iss !== $expectedIssuer) {
+                $expectedIssuer = $env->JWT_ISSUER ?? null;
+                if (!empty($expectedIssuer) && isset($decoded->iss) && $decoded->iss !== $expectedIssuer) {
                     error_log("JWT issuer mismatch: expected '$expectedIssuer', got '{$decoded->iss}'");
                     return false;
                 }
