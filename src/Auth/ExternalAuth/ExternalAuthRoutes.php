@@ -77,12 +77,15 @@ class ExternalAuthRoutes
         $config = new ExternalAuthConfig($options);
         $client = new ExternalAuthServiceClient($config->authServiceUrl, $config->platformCode);
         $provisioner = $options['provisioner'] ?? null;
-        // Platform-specific role resolver for the token exchange route.
-        // Signature: fn(array $identityClaims): array. Injected like $provisioner.
-        $rolesResolver = $options['roles_resolver'] ?? null;
+
+        // Card model resolvers (TENANCY-IDENTITY-MODEL §4/§6).
+        // roles_resolver: fn(array $claimsWithTenant): string[] — roles for identity in tenant.
+        // tenants_resolver: fn(array $passportClaims): array[] — tenants the identity belongs to.
+        $rolesResolver   = $options['roles_resolver']   ?? null;
+        $tenantsResolver = $config->tenantsResolver;
 
         // Register routes under the canonical prefix
-        self::registerForPrefix($router, $config->prefix, $client, $config, $provisioner, $rolesResolver);
+        self::registerForPrefix($router, $config->prefix, $client, $config, $provisioner, $rolesResolver, $tenantsResolver);
 
         // AUTH-SPEC §S1 legacy compat: also register under /auth if the canonical
         // prefix differs from /auth. This keeps existing clients working during
@@ -92,7 +95,7 @@ class ExternalAuthRoutes
                 "ExternalAuthRoutes: legacy_compat=true — also registering routes under " .
                 self::LEGACY_PREFIX . " (deprecated; set legacy_compat=false once clients use {$config->prefix})"
             );
-            self::registerForPrefix($router, self::LEGACY_PREFIX, $client, $config, $provisioner, $rolesResolver);
+            self::registerForPrefix($router, self::LEGACY_PREFIX, $client, $config, $provisioner, $rolesResolver, $tenantsResolver);
         }
 
         log_info("ExternalAuthRoutes: Registration complete with prefix '{$config->prefix}'" .
@@ -113,7 +116,8 @@ class ExternalAuthRoutes
         ExternalAuthServiceClient $client,
         ExternalAuthConfig $config,
         mixed $provisioner,
-        mixed $rolesResolver = null
+        mixed $rolesResolver = null,
+        mixed $tenantsResolver = null
     ): void {
         // Public routes (no auth required)
         if ($config->isEnabled('register') && $config->registrationMode !== 'none') {
@@ -178,17 +182,18 @@ class ExternalAuthRoutes
             log_debug("ExternalAuthRoutes: Registered GET $prefix/health");
         }
 
-        // Token exchange is PUBLIC: the inbound Authorization token is an
-        // auth-service identity token (not a platform token), so it must bypass
-        // JwtAuthMiddleware — the route validates it itself against the JWKS.
+        // Token exchange is PUBLIC: the inbound Authorization token is a passport (identity
+        // JWT from the auth service, not a platform card). JwtAuthMiddleware validates platform
+        // cards and would reject it. The exchange route validates the passport itself via JWKS.
+        // Card model: body carries tenant_id + optional role_id. Returns §6 session contract.
         if ($config->isEnabled('exchange')) {
             $router->post(
                 "$prefix/exchange",
-                new ExchangeRoute($client, $config->hooks, $config, $rolesResolver),
+                new ExchangeRoute($client, $config->hooks, $config, $rolesResolver, $tenantsResolver),
                 [],
                 true
             );
-            log_debug("ExternalAuthRoutes: Registered POST $prefix/exchange (public)");
+            log_debug("ExternalAuthRoutes: Registered POST $prefix/exchange (public, card model)");
         }
 
         // Protected routes (auth required)
@@ -240,9 +245,9 @@ class ExternalAuthRoutes
         if ($config->isEnabled('profile')) {
             $router->get(
                 "$prefix/me",
-                new ProfileRoute($client, $config->hooks, $config)
+                new ProfileRoute($client, $config->hooks, $config, $rolesResolver, $tenantsResolver)
             );
-            log_debug("ExternalAuthRoutes: Registered GET $prefix/me (protected)");
+            log_debug("ExternalAuthRoutes: Registered GET $prefix/me (protected, card-model session)");
         }
     }
 

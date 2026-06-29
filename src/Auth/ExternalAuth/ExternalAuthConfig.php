@@ -74,6 +74,23 @@ class ExternalAuthConfig
     /** @var string Issuer (`iss`) stamped on platform tokens (defaults to JWT_ISSUER). */
     public readonly string $signingIssuer;
 
+    /**
+     * @var callable|null Platform-specific tenants resolver (card model — §4/§6).
+     *
+     * Signature: fn(array $passportClaims): array
+     *   Returns a list of tenant objects the identity has access to on this platform.
+     *   Each element: [ 'id' => string, 'name' => string, ... ]
+     *
+     * Used by the exchange route to:
+     *   1. Verify the requested tenant_id is in the identity's membership set.
+     *   2. Build the available_tenants[] array in the §6 response.
+     *   3. Power the /me (session) endpoint's available_tenants field.
+     *
+     * When null, the requested tenant_id is trusted without membership verification
+     * (suitable only for T1 platforms or during migration).
+     */
+    public readonly mixed $tenantsResolver;
+
     /** @var array<string, callable|null> Lifecycle hooks */
     public readonly array $hooks;
 
@@ -142,6 +159,10 @@ class ExternalAuthConfig
             ?? ($env->JWT_PRIVATE_KEY_PASSPHRASE ?? null);
         $this->signingIssuer = $options['signing_issuer']
             ?? $env->JWT_ISSUER;
+
+        // Tenants resolver for the card model (TENANCY-IDENTITY-MODEL §4/§6).
+        // fn(array $passportClaims): array — returns tenant objects for the identity.
+        $this->tenantsResolver = $options['tenants_resolver'] ?? null;
 
         // Hooks
         $this->hooks = [

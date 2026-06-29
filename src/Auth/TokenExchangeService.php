@@ -10,42 +10,24 @@ use Firebase\JWT\JWK;
 /**
  * Token Exchange Service
  *
- * Exchanges identity tokens (from external auth service) for platform tokens
- * with roles from the platform's tenant database.
+ * Validates identity tokens (passports from the central auth service) and mints
+ * platform tokens (cards). Central to the passport/card tenancy model:
  *
- * Use case: Platform-owned roles architecture where:
- * - Auth service issues identity tokens (who you are)
- * - Platform issues platform tokens (what you can do in this platform)
+ *   Passport = identity JWT from auth service. Tenant-less. Proves *who you are*.
+ *   Card     = platform JWT from this service. Carries identity_id + tenant_id +
+ *              single active role_id. Authorises all tenant-scoped requests.
  *
- * Flow:
- * 1. Client authenticates with auth service -> gets identity token
- * 2. Client calls platform's /api/auth/exchange endpoint
- * 3. Platform validates identity token via JWKS
- * 4. Platform looks up user's roles from tenant DB
- * 5. Platform issues platform token with original claims + roles
+ * ## Canonical flow (TENANCY-IDENTITY-MODEL §4)
  *
- * Example usage in platform endpoint:
- * ```php
- * $service = new TokenExchangeService();
+ * 1. Client authenticates with auth service → gets **passport** (identity JWT)
+ * 2. Client calls platform's POST /api/auth/exchange with:
+ *      Authorization: Bearer <passport>
+ *      Body: { tenant_id, role_id? }
+ * 3. Platform validates passport via JWKS
+ * 4. Platform looks up identity's memberships (tenants + roles)
+ * 5. Platform issues a **card** via exchangeCard()
  *
- * // 1. Validate identity token
- * $identityClaims = $service->validateIdentityToken(
- *     $identityToken,
- *     'https://auth.example.com/.well-known/jwks.json',
- *     'https://auth.example.com'
- * );
- *
- * // 2. Look up roles from tenant DB (platform provides this)
- * $roles = $this->getRolesFromDb($identityClaims['tenant_id'], $identityClaims['sub']);
- *
- * // 3. Exchange for platform token
- * $platformToken = $service->exchange($identityClaims, $roles, [
- *     'private_key_path' => '/path/to/private.pem',
- *     'issuer' => 'https://api.myplatform.com',
- *     'audience' => 'myplatform-api',
- *     'ttl' => 900, // 15 minutes
- * ]);
- * ```
+ * @package StoneScriptPHP\Auth
  */
 class TokenExchangeService
 {
@@ -57,14 +39,16 @@ class TokenExchangeService
     /** @var int JWKS cache TTL in seconds */
     private int $cacheTTL = 3600;
 
+    // ── Public API ────────────────────────────────────────────────────────────
+
     /**
-     * Validate an identity token against a JWKS endpoint.
+     * Validate an identity token (passport) against a JWKS endpoint.
      *
-     * @param string $token JWT token from identity provider
+     * @param string $token JWT passport from identity provider
      * @param string $jwksUrl JWKS endpoint URL (e.g., https://auth.example.com/.well-known/jwks.json)
      * @param string $expectedIssuer Expected issuer claim (e.g., https://auth.example.com)
      * @param string|null $expectedAudience Optional audience to verify
-     * @return array Decoded token claims
+     * @return array Decoded passport claims
      * @throws TokenExchangeException If validation fails
      */
     public function validateIdentityToken(
@@ -132,7 +116,50 @@ class TokenExchangeService
     }
 
     /**
-     * Exchange identity claims for a platform token with roles.
+     * Mint a **card token** — the canonical platform JWT in the passport/card model.
+     *
+     * The card carries:
+     *   - identity_id (preserved from passport)
+     *   - tenant_id (from the merged claims / chosen at exchange time)
+     *   - role_id (single active role — NOT an array)
+     *   - iss = platform API (not the auth service)
+     *
+     * TENANCY-IDENTITY-MODEL §2 — there is one card shape for all multi-tenant platforms.
+     *
+     * @param array  $identityClaimsWithTenant Passport claims + 'tenant_id' merged in
+     * @param string $activeRoleId             The single active role to stamp on the card
+     * @param array  $config Platform signing configuration:
+     *   - private_key_path: string - Path to RSA private key (PEM format)
+     *   - private_key_passphrase: string|null - Passphrase if key is encrypted
+     *   - issuer: string - Platform issuer URL (iss = platform API)
+     *   - audience: string|null - Optional audience claim
+     *   - ttl: int - Token TTL in seconds (default: 3600)
+     *   - custom_claims: array - Extra claims merged into the card
+     * @return string Signed card JWT
+     * @throws TokenExchangeException If token generation fails
+     */
+    public function exchangeCard(
+        array $identityClaimsWithTenant,
+        string $activeRoleId,
+        array $config
+    ): string {
+        return $this->mintToken(
+            $identityClaimsWithTenant,
+            $config,
+            static function (array $base) use ($activeRoleId): array {
+                $base['token_type'] = 'card';
+                $base['role_id']    = $activeRoleId;
+                return $base;
+            }
+        );
+    }
+
+    /**
+     * Exchange identity claims for a platform token with a roles array.
+     *
+     * @deprecated Use exchangeCard() for the passport/card tenancy model.
+     *   This method retains the legacy `roles` array claim and is kept for
+     *   backward compatibility with platforms that have not yet migrated.
      *
      * @param array $identityClaims Claims from validated identity token
      * @param array $roles Roles array from platform's tenant DB (e.g., ['owner', 'admin'])
@@ -146,6 +173,112 @@ class TokenExchangeService
      * @throws TokenExchangeException If token generation fails
      */
     public function exchange(array $identityClaims, array $roles, array $config): string
+    {
+        return $this->mintToken(
+            $identityClaims,
+            $config,
+            static function (array $base) use ($roles): array {
+                $base['token_type'] = 'platform';
+                $base['roles']      = $roles;
+                return $base;
+            }
+        );
+    }
+
+    /**
+     * Convenience method: validate passport and mint a card in one call.
+     *
+     * @param string $passportToken JWT passport from identity provider
+     * @param string $activeRoleId  The single active role to stamp on the card
+     * @param array  $authConfig Auth validation config:
+     *   - jwks_url: string - JWKS endpoint
+     *   - issuer: string - Expected issuer
+     *   - audience: string|null - Expected audience
+     * @param array $platformConfig Platform signing config (see exchangeCard())
+     * @return array{token: string, claims: array} Card token and decoded passport claims
+     * @throws TokenExchangeException If validation or exchange fails
+     */
+    public function validateAndExchangeCard(
+        string $passportToken,
+        string $activeRoleId,
+        array $authConfig,
+        array $platformConfig
+    ): array {
+        $passportClaims = $this->validateIdentityToken(
+            $passportToken,
+            $authConfig['jwks_url'],
+            $authConfig['issuer'],
+            $authConfig['audience'] ?? null
+        );
+
+        $cardToken = $this->exchangeCard($passportClaims, $activeRoleId, $platformConfig);
+
+        return [
+            'token'  => $cardToken,
+            'claims' => $passportClaims,
+        ];
+    }
+
+    /**
+     * Convenience method: validate and exchange in one call (legacy).
+     *
+     * @deprecated Use validateAndExchangeCard() for the card model.
+     *
+     * @param string $identityToken JWT from identity provider
+     * @param array $roles Roles from platform's tenant DB
+     * @param array $authConfig Auth validation config:
+     *   - jwks_url: string - JWKS endpoint
+     *   - issuer: string - Expected issuer
+     *   - audience: string|null - Expected audience
+     * @param array $platformConfig Platform signing config (see exchange())
+     * @return array{token: string, claims: array} Platform token and decoded claims
+     * @throws TokenExchangeException If validation or exchange fails
+     */
+    public function validateAndExchange(
+        string $identityToken,
+        array $roles,
+        array $authConfig,
+        array $platformConfig
+    ): array {
+        $identityClaims = $this->validateIdentityToken(
+            $identityToken,
+            $authConfig['jwks_url'],
+            $authConfig['issuer'],
+            $authConfig['audience'] ?? null
+        );
+
+        $platformToken = $this->exchange($identityClaims, $roles, $platformConfig);
+
+        return [
+            'token'  => $platformToken,
+            'claims' => $identityClaims,
+        ];
+    }
+
+    /**
+     * Set JWKS cache TTL.
+     *
+     * @param int $seconds Cache TTL in seconds
+     * @return self
+     */
+    public function setCacheTTL(int $seconds): self
+    {
+        $this->cacheTTL = $seconds;
+        return $this;
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Shared token-minting logic used by both exchangeCard() and exchange().
+     *
+     * @param array    $identityClaims  Source identity/passport claims
+     * @param array    $config          Signing configuration
+     * @param callable $claimsDecorator fn(array $base): array — adds token-type-specific claims
+     * @return string Signed JWT
+     * @throws TokenExchangeException
+     */
+    private function mintToken(array $identityClaims, array $config, callable $claimsDecorator): string
     {
         // Validate required config
         if (empty($config['private_key_path'])) {
@@ -187,104 +320,55 @@ class TokenExchangeService
             );
         }
 
-        // Build platform token claims
+        // Build base claims (common to all token types)
         $now = time();
-        $ttl = $config['ttl'] ?? 900; // 15 minutes default
+        $ttl = $config['ttl'] ?? 3600;
 
-        // Preserve key identity claims from original token
-        $platformClaims = [
+        $baseClaims = [
             // Standard JWT claims
             'iss' => $config['issuer'],
             'iat' => $now,
             'exp' => $now + $ttl,
-            'token_type' => 'platform',
 
-            // Identity claims (preserved from identity token)
-            'sub' => $identityClaims['sub'] ?? null,
-            'identity_id' => $identityClaims['sub'] ?? $identityClaims['identity_id'] ?? null,
-            'tenant_id' => $identityClaims['tenant_id'] ?? null,
-            'tenant_slug' => $identityClaims['tenant_slug'] ?? null,
-            'email' => $identityClaims['email'] ?? null,
-            'name' => $identityClaims['name'] ?? null,
+            // Identity claims (preserved from passport / identity token)
+            'sub'          => $identityClaims['sub'] ?? null,
+            'identity_id'  => $identityClaims['sub'] ?? $identityClaims['identity_id'] ?? null,
+            'tenant_id'    => $identityClaims['tenant_id'] ?? null,
+            'tenant_slug'  => $identityClaims['tenant_slug'] ?? null,
+            'email'        => $identityClaims['email'] ?? null,
+            'name'         => $identityClaims['name'] ?? null,
             'display_name' => $identityClaims['display_name'] ?? $identityClaims['name'] ?? null,
-
-            // Platform-specific claims
-            'roles' => $roles,
         ];
 
         // Add audience if specified
         if (!empty($config['audience'])) {
-            $platformClaims['aud'] = $config['audience'];
+            $baseClaims['aud'] = $config['audience'];
         }
 
-        // Add any custom claims from config
+        // Allow the decorator to add token-type-specific claims (role_id for cards,
+        // roles[] for legacy platform tokens).
+        $tokenClaims = $claimsDecorator($baseClaims);
+
+        // Merge custom claims (lowest priority — do not overwrite identity claims).
         if (!empty($config['custom_claims']) && is_array($config['custom_claims'])) {
             foreach ($config['custom_claims'] as $key => $value) {
-                if (!isset($platformClaims[$key])) {
-                    $platformClaims[$key] = $value;
+                if (!isset($tokenClaims[$key])) {
+                    $tokenClaims[$key] = $value;
                 }
             }
         }
 
-        // Remove null values for cleaner token
-        $platformClaims = array_filter($platformClaims, fn($v) => $v !== null);
+        // Remove null values for a cleaner token.
+        $tokenClaims = array_filter($tokenClaims, fn($v) => $v !== null);
 
         try {
-            return JWT::encode($platformClaims, $privateKey, self::ALGORITHM);
+            return JWT::encode($tokenClaims, $privateKey, self::ALGORITHM);
         } catch (\Exception $e) {
             throw new TokenExchangeException(
-                'Failed to sign platform token: ' . $e->getMessage(),
+                'Failed to sign token: ' . $e->getMessage(),
                 'SIGNING_ERROR'
             );
         }
-    }
-
-    /**
-     * Convenience method: validate and exchange in one call.
-     *
-     * @param string $identityToken JWT from identity provider
-     * @param array $roles Roles from platform's tenant DB
-     * @param array $authConfig Auth validation config:
-     *   - jwks_url: string - JWKS endpoint
-     *   - issuer: string - Expected issuer
-     *   - audience: string|null - Expected audience
-     * @param array $platformConfig Platform signing config (see exchange())
-     * @return array{token: string, claims: array} Platform token and decoded claims
-     * @throws TokenExchangeException If validation or exchange fails
-     */
-    public function validateAndExchange(
-        string $identityToken,
-        array $roles,
-        array $authConfig,
-        array $platformConfig
-    ): array {
-        // Validate identity token
-        $identityClaims = $this->validateIdentityToken(
-            $identityToken,
-            $authConfig['jwks_url'],
-            $authConfig['issuer'],
-            $authConfig['audience'] ?? null
-        );
-
-        // Exchange for platform token
-        $platformToken = $this->exchange($identityClaims, $roles, $platformConfig);
-
-        return [
-            'token' => $platformToken,
-            'claims' => $identityClaims,
-        ];
-    }
-
-    /**
-     * Set JWKS cache TTL.
-     *
-     * @param int $seconds Cache TTL in seconds
-     * @return self
-     */
-    public function setCacheTTL(int $seconds): self
-    {
-        $this->cacheTTL = $seconds;
-        return $this;
     }
 
     /**
