@@ -4,6 +4,7 @@ namespace StoneScriptPHP;
 
 use StoneScriptPHP\Exceptions\FrameworkException;
 use StoneScriptPHP\Exceptions\ValidationException;
+use StoneScriptPHP\RequestLogging\RequestContext;
 use Throwable;
 use Error;
 
@@ -40,6 +41,10 @@ class ExceptionHandler
      */
     public function handleException(Throwable $exception): void
     {
+        // §5 — stamp error into request-scoped context BEFORE rendering so the
+        // shutdown function (RequestLogger::persistRequestLog) can read it.
+        RequestContext::captureException($exception);
+
         $this->logException($exception);
         $this->renderException($exception);
     }
@@ -77,6 +82,10 @@ class ExceptionHandler
 
         // Check if it's a fatal error
         if (in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+            // §5 — stamp into request-scoped context BEFORE rendering so the
+            // RequestLogger shutdown function (registered later) can read it.
+            RequestContext::captureFatalError($error);
+
             $this->logFatalError($error);
             $this->renderFatalError($error);
         }

@@ -22,6 +22,7 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes;
 use StoneScriptPHP\Subscriptions\SubscriptionMiddleware;
 use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
 use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
+use StoneScriptPHP\RequestLogging\RequestLogger;
 
 /**
  * Application entry point
@@ -66,7 +67,15 @@ class Application
      */
     public static function run(array $config): void
     {
-        self::$startTime = microtime(true);
+        // §2 — prefer INDEX_START_TIME (set at the very top of public/index.php before autoload).
+        // Fall back to now() for older platforms whose index.php predates the constant.
+        self::$startTime = defined('INDEX_START_TIME')
+            ? (float) INDEX_START_TIME
+            : microtime(true);
+
+        // §1 — arm the request logger FIRST, before any middleware / router wiring,
+        // so the shutdown function fires even if run() throws mid-pipeline.
+        RequestLogger::arm($config, self::$startTime);
 
         // Define STDIN, STDOUT, STDERR for PHP-FPM compatibility (CLI has them by default)
         self::defineStdStreams();

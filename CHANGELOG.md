@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-06-29
+
+### Added
+
+- **Platform-level request logging** (`src/RequestLogging/`) — Every HTTP request is now persisted to
+  `{platform}_main.request_logs` in a self-sufficient row, regardless of whether the request succeeded,
+  threw an uncaught exception, or died on a fatal error. Implemented per the approved request-logging spec.
+
+  Key design points:
+  - `RequestLogger::arm()` is called as the FIRST action in `Application::run()`, registering a
+    `register_shutdown_function` before any middleware/router wiring — the only hook that survives
+    success, uncaught exceptions, AND PHP fatal errors.
+  - Duration measured from `INDEX_START_TIME` constant (standardized in the skeleton `public/index.php`);
+    falls back to the time captured at the top of `run()` for older platforms.
+  - `RequestContext` static class holds `error_class`/`error_message` for the current request;
+    stamped by `ExceptionHandler` on both uncaught exceptions and fatal errors.
+  - `RequestLogger::resolveClientIp()` is proxy-aware: `trust_proxy=true` uses `X-Real-IP` /
+    rightmost XFF entry; `trust_proxy=false` uses `REMOTE_ADDR` only (no XFF spoofing).
+  - `X-Request-Id` header captured if present (Traefik join key); else UUIDv4 generated.
+  - `fastcgi_finish_request()` called before the DB write — logging is off the critical path.
+  - **Fail-open on all errors**: gateway down, table missing, any exception → swallowed to STDERR,
+    response unaffected. The framework ships independent of the migration being applied.
+  - Config keys: `request_logging.enabled` (default `true`) and `trust_proxy` in the
+    `request_logging` config section; also reads `TRUST_PROXY` env var.
+  - Migration file `src/RequestLogging/Schema/tables/req_001_request_logs.pgsql` and insert
+    function `src/RequestLogging/Schema/functions/rl_insert_request_log.pgsql` shipped with
+    the framework. Platforms copy/symlink and run `php stone migrate up` to activate.
+  - 35 unit tests covering all §10 scenarios: success, exception, fatal, null identity,
+    fail-open (gateway down + table missing), client_ip (trust_proxy on/off), request_id
+    (generated vs captured).
+
 ## [5.4.0] - 2026-06-29
 
 ### Added
