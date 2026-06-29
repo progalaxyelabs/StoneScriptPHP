@@ -10,7 +10,7 @@ use StoneScriptPHP\ApiResponse;
 /**
  * RequireTenantMiddleware
  *
- * Enforces authorization invariant §5.1 of the Tenancy & Identity Model:
+ * Enforces the authorization invariant for tenant-scoped routes (framework-spec.md §6 §5.1):
  *   "A tenant-less token MUST be rejected on any tenant-scoped route."
  *
  * In the passport/card model:
@@ -38,7 +38,7 @@ class RequireTenantMiddleware implements MiddlewareInterface
 
         $claims = $request['jwt_claims'];
 
-        // TENANCY-IDENTITY-MODEL §5.1 — reject passport/tenant-less tokens on tenant-scoped routes.
+        // framework-spec.md §6 §5.1 — reject passport/tenant-less tokens on tenant-scoped routes.
         if (empty($claims['tenant_id'])) {
             http_response_code(403);
             return new ApiResponse(

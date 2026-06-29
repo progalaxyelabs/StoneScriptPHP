@@ -13,7 +13,7 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
  *
  * Returns the session context for the currently authenticated card token.
  *
- * ## Card model response (TENANCY-IDENTITY-MODEL §6)
+ * ## Card model response (framework-spec.md §6)
  *
  * When the platform has configured `tenants_resolver` + `roles_resolver`, this
  * endpoint returns the full session contract:

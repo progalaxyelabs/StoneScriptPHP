@@ -9,7 +9,7 @@ namespace StoneScriptPHP\Auth;
  *
  * ## The problem it solves
  *
- * In the passport/card model (TENANCY-IDENTITY-MODEL §1–§4) the platform mints two
+ * In the passport/card model (framework-spec.md §6) the platform mints two
  * completely different kinds of JWTs:
  *
  *   - **Passport** — identity JWT issued by the central auth service.

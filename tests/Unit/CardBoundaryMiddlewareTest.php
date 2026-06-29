@@ -12,11 +12,9 @@ use StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware;
 /**
  * Tests for card model boundary enforcement middleware.
  *
- * Covers TENANCY-IDENTITY-MODEL §5 authorization invariants:
+ * Covers framework-spec.md §6 authorization invariants:
  *   §5.1 — tenant-less token MUST be rejected on any tenant-scoped route
  *   §5.2 — url.tenantId MUST equal card.tenant_id
- *
- * Task #3139
  */
 class CardBoundaryMiddlewareTest extends TestCase
 {

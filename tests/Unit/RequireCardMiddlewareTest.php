@@ -11,7 +11,7 @@ use StoneScriptPHP\Auth\Middleware\RequireCardMiddleware;
 /**
  * Tests for RequireCardMiddleware — card-model global enforcement with public-route pass-through.
  *
- * Validates TENANCY-IDENTITY-MODEL §5.1 + the public-route pass-through behaviour
+ * Validates framework-spec.md §6 §5.1 + the public-route pass-through behaviour
  * that allows the exchange endpoint (and other explicitly excluded paths) to be
  * wired as global middleware without self-blocking.
  *
@@ -99,7 +99,7 @@ class RequireCardMiddlewareTest extends TestCase
 
     /**
      * A passport (identity JWT, no tenant_id) on a tenant-scoped route MUST be
-     * rejected with 403 tenant_context_required (TENANCY-IDENTITY-MODEL §5.1).
+     * rejected with 403 tenant_context_required (framework-spec.md §6 §5.1).
      *
      * This is the core guard: the exchange endpoint is excluded from JwtAuthMiddleware
      * so passports reach the exchange route normally. But if a client sends a passport

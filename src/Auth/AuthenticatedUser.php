@@ -9,7 +9,7 @@ namespace StoneScriptPHP\Auth;
  *
  * Represents the context extracted from a validated JWT token.
  *
- * ## Passport vs Card (TENANCY-IDENTITY-MODEL §2)
+ * ## Passport vs Card (framework-spec.md §6)
  *
  * - **Passport** (identity JWT from auth service): has user_id/identity_id, email.
  *   tenant_id and role_id are NULL — a passport is always tenant-less.

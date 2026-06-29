@@ -154,7 +154,7 @@ class ClientGeneratorOrphanCleanupTest extends TestCase
 
     public function test_handles_multiple_flat_services_each_with_multiple_orphans(): void
     {
-        // Simulate btechrecruiter pattern: 8 services × 7 other services = 56 orphans (subset)
+        // Simulate a platform with many services: 8 services × 7 other services = 56 orphans (subset)
         $services = ['admin', 'ats', 'finance', 'payroll'];
         foreach ($services as $svc) {
             $this->mkdir($svc);

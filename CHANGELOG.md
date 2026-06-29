@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.1] - 2026-06-29
+
+### Changed
+
+- De-brand: replaced all private `TENANCY-IDENTITY-MODEL` doc citations with public
+  `framework-spec.md §6` references throughout src/ and tests/.
+- De-brand: genericized private platform names used as examples/fixtures in src/ and
+  tests/ (`logisticsapp.in` → `exampleapp.in`, platform codes → `exampleapp`/`sampleapp`).
+- De-brand: removed internal task numbers from code comments and test doc blocks.
+- De-brand: genericized private auth-server name in `StoreAccessMiddleware` comment.
+- Spec: genericized private platform examples in `generate-api-client-spec.md` and
+  `navigation-spec.md`; removed private doc reference from `auth-server-spec.md`;
+  genericized `deploy-manager` product name in `gateway-spec.md`.
+
 ## [5.5.0] - 2026-06-29
 
 ### Added
@@ -45,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`HybridCardJwtHandler`** (`src/Auth/HybridCardJwtHandler.php`) — New `JwtHandlerInterface`
   implementation that validates BOTH platform-minted cards (platform RSA key, fast, no network) AND
   auth-service passports (JWKS fallback). This is the load-bearing fix for the passport/card model
-  (TENANCY-IDENTITY-MODEL §1–§4): `Application::run()` in `external`/`hybrid` mode now defaults to
+  (framework-spec.md §6): `Application::run()` in `external`/`hybrid` mode now defaults to
   `HybridCardJwtHandler` instead of the previous JWKS-only `MultiAuthJwtAdapter`. Without this fix,
   platform-minted cards were rejected with "Unknown issuer" because only the auth service's JWKS key
   was known to the validator. Validation order: platform RSA → JWKS fallback (passports on non-excluded
@@ -90,10 +104,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `'example.com'` — this allows `HybridCardJwtHandler`'s RSA-then-JWKS chain to return `false` cleanly
   and attempt the JWKS fallback without a false positive on the placeholder issuer.
 
-- **Defect 5 — memberships guidance clarified** (TENANCY-IDENTITY-MODEL.md §10, canary playbook).
+- **Defect 5 — memberships guidance clarified** (framework-spec.md §6).
   The main-DB SQL function `auth_get_memberships()` returns empty (`WHERE false` stub). The correct
   approach is `ExternalAuthServiceClient::getMemberships(authHeader)` in the `tenants_resolver`.
-  This is now documented in TENANCY-IDENTITY-MODEL.md §10 and the canary playbook.
+  This is now documented in framework-spec.md §6.
 
 ### Changed
 
@@ -108,7 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when `JWT_ISSUER` is unset. This improves `HybridCardJwtHandler` chain behaviour: the RSA path returns
   `false` cleanly, letting JWKS attempt the token.
 
-- `TENANCY-IDENTITY-MODEL.md` — added §10 (Cross-fleet implementation decisions): role source-of-truth,
+- `framework-spec.md §6` — expanded cross-platform implementation guidance: role source-of-truth,
   memberships via HTTP client, identity bridge via email, gateway tenant restore, JWT_ISSUER enforcement,
   HybridCardJwtHandler default, TenantUrlMatchMiddleware guidance, RequireCardMiddleware guidance, and a
   reference `auth.php` + `index.php` config snippet for multi-tenant platforms.
@@ -128,7 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Mid-path `{id}` parameter undeclared in sibling method signatures — TS2304 under strict tsc (`cli/generate-client.php` `buildGroupMethods()` / `buildMethodTs()`).** When a resource group has multiple methods sharing a path parameter in a non-tail position — e.g. `GET /routes/{id}` alongside `POST /routes/{id}/start` and `POST /routes/{id}/assign-driver` — only the first method (which happened to have `{id}` as its tail) was declaring `id: string | number` in its TypeScript signature. The sibling methods had `${id}` interpolated in their URL template (because `buildUrlTemplate()` replaces ALL `{param}` segments with `${id}`) but their method signatures were emitted as `(data?) =>` without the `id` parameter — producing `TS2304: Cannot find name 'id'` under strict `tsc`. Detected in production Docker builds on three platforms (webmeteor, btechrecruiter, instituteapp) on 2026-06-21; dev builds passed because dev mounts a pre-built dist and never runs `tsc` on the generated client.
+- **Mid-path `{id}` parameter undeclared in sibling method signatures — TS2304 under strict tsc (`cli/generate-client.php` `buildGroupMethods()` / `buildMethodTs()`).** When a resource group has multiple methods sharing a path parameter in a non-tail position — e.g. `GET /routes/{id}` alongside `POST /routes/{id}/start` and `POST /routes/{id}/assign-driver` — only the first method (which happened to have `{id}` as its tail) was declaring `id: string | number` in its TypeScript signature. The sibling methods had `${id}` interpolated in their URL template (because `buildUrlTemplate()` replaces ALL `{param}` segments with `${id}`) but their method signatures were emitted as `(data?) =>` without the `id` parameter — producing `TS2304: Cannot find name 'id'` under strict `tsc`. Detected in production Docker builds on multiple platforms on 2026-06-21; dev builds passed because dev mounts a pre-built dist and never runs `tsc` on the generated client.
 
   Root cause: `buildMethodTs()` received a `$tailId` flag from `hasTailId($path)`, which only checked whether the LAST path segment is a `{param}`. Routes with `{id}` in a non-tail position (followed by an action segment like `/start`, `/suspend`, `/assign-driver`, `/update`, `/delete`) returned `hasTailId=false` and therefore received the no-id method signature even though their URL template required `id`.
 
@@ -159,7 +173,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Multi-scope clobber — every multi-service platform affected (`cli/generate-client.php` main generation loop).** When a `routes.php` declares multiple backend services (e.g. `portal` + `admin`), running `php stone generate client portal` then `php stone generate client admin` caused the second run to overwrite the first run's `portal/package.json` name with the admin scope — leaving both packages named `...-admin-client`. Root cause: `derivePackageName()` was called with `$scopeArg` (the CLI argument) instead of `$serviceName` (the service currently being generated). Every multi-service platform was affected (medstoreapp, logisticsapp, emcircuitsystems, aasaanwork, progalaxyelabs, and others). Fixed by passing `$serviceName` to `derivePackageName()` so each service package always gets its own correct name regardless of which scope arg was passed on the CLI.
+- **Multi-scope clobber — every multi-service platform affected (`cli/generate-client.php` main generation loop).** When a `routes.php` declares multiple backend services (e.g. `portal` + `admin`), running `php stone generate client portal` then `php stone generate client admin` caused the second run to overwrite the first run's `portal/package.json` name with the admin scope — leaving both packages named `...-admin-client`. Root cause: `derivePackageName()` was called with `$scopeArg` (the CLI argument) instead of `$serviceName` (the service currently being generated). Every multi-service platform with multiple Angular service directories was affected. Fixed by passing `$serviceName` to `derivePackageName()` so each service package always gets its own correct name regardless of which scope arg was passed on the CLI.
 
 ### Changed
 
@@ -187,7 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [4.4.0] - 2026-06-19
 
 ### Added
-- **`php stone generate client <scope>` — scope-derived package naming.** The `<scope>` positional argument (the Angular service directory name: `portal`, `admin`, `www`, `business`, …) is now **required**. The generator derives the npm package `name` deterministically as `{composer.json name}-{scope}-client` (e.g. `medstoreapp-api` + `portal` → `medstoreapp-api-portal-client`). This replaces the prior `@stonescript/api-client-{service}` convention. The `--service=` filter remains for single-package generation. Omitting `<scope>` is a hard error with a usage message.
+- **`php stone generate client <scope>` — scope-derived package naming.** The `<scope>` positional argument (the Angular service directory name: `portal`, `admin`, `www`, `business`, …) is now **required**. The generator derives the npm package `name` deterministically as `{composer.json name}-{scope}-client` (e.g. `exampleapp-api` + `portal` → `exampleapp-api-portal-client`). This replaces the prior `@stonescript/api-client-{service}` convention. The `--service=` filter remains for single-package generation. Omitting `<scope>` is a hard error with a usage message.
 
 ## [4.3.1] - 2026-06-19
 

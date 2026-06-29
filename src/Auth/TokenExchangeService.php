@@ -17,7 +17,7 @@ use Firebase\JWT\JWK;
  *   Card     = platform JWT from this service. Carries identity_id + tenant_id +
  *              single active role_id. Authorises all tenant-scoped requests.
  *
- * ## Canonical flow (TENANCY-IDENTITY-MODEL §4)
+ * ## Canonical flow (framework-spec.md §6)
  *
  * 1. Client authenticates with auth service → gets **passport** (identity JWT)
  * 2. Client calls platform's POST /api/auth/exchange with:
@@ -124,7 +124,7 @@ class TokenExchangeService
      *   - role_id (single active role — NOT an array)
      *   - iss = platform API (not the auth service)
      *
-     * TENANCY-IDENTITY-MODEL §2 — there is one card shape for all multi-tenant platforms.
+     * framework-spec.md §6 — there is one card shape for all multi-tenant platforms.
      *
      * @param array  $identityClaimsWithTenant Passport claims + 'tenant_id' merged in
      * @param string $activeRoleId             The single active role to stamp on the card

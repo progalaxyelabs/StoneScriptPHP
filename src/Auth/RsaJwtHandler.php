@@ -77,7 +77,7 @@ class RsaJwtHandler implements JwtHandlerInterface
         if (empty($issuer)) {
             throw new \RuntimeException(
                 'JWT_ISSUER is not set or empty. Set JWT_ISSUER in .env to the canonical API URL '
-                . 'for this platform (e.g. https://api.logisticsapp.in). This value is stamped as '
+                . 'for this platform (e.g. https://api.exampleapp.in). This value is stamped as '
                 . "the 'iss' claim on every JWT this platform mints. Defaulting to a placeholder "
                 . 'silently produces tokens that fail issuer validation after any issuer correction.'
             );

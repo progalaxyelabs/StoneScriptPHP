@@ -78,7 +78,7 @@ class ExternalAuthRoutes
         $client = new ExternalAuthServiceClient($config->authServiceUrl, $config->platformCode);
         $provisioner = $options['provisioner'] ?? null;
 
-        // Card model resolvers (TENANCY-IDENTITY-MODEL §4/§6).
+        // Card model resolvers (framework-spec.md §6).
         // roles_resolver: fn(array $claimsWithTenant): string[] — roles for identity in tenant.
         // tenants_resolver: fn(array $passportClaims): array[] — tenants the identity belongs to.
         $rolesResolver   = $options['roles_resolver']   ?? null;

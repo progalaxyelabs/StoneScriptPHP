@@ -10,7 +10,7 @@ use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\IRouteHandler;
 
 /**
- * Regression guard for #3055: the active runtime Router
+ * Regression guard: the active runtime Router
  * (StoneScriptPHP\Routing\Router) must honor a handler's declared
  * validation_rules() and reject missing/invalid required fields with a clean
  * 400 AT THE EDGE — before the handler runs and before NULLs reach the SQL
@@ -19,7 +19,7 @@ use StoneScriptPHP\IRouteHandler;
  * validation_rules(), so declared validation was dead code fleet-wide.
  */
 
-/** Mimics the medstoreapp dropdown route: p_dropdown_type is required. */
+/** Mimics a required-field dropdown route: p_dropdown_type is required. */
 class StubDropdownRoute implements IRouteHandler
 {
     public string $p_dropdown_type = '';

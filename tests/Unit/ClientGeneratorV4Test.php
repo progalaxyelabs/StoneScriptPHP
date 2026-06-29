@@ -631,7 +631,7 @@ class ClientGeneratorV4Test extends TestCase
      * what scope arg was passed.
      *
      * This test exercises the EXACT failure mode reported: sequential runs on a
-     * multi-service platform (medstoreapp, logisticsapp, emcircuitsystems, …).
+     * multi-service platform (any platform with multiple Angular service directories).
      */
     public function test_multi_scope_sequential_runs_do_not_clobber_package_names(): void
     {
@@ -683,10 +683,10 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     /**
-     * Test the canonical platform examples (matching real medstoreapp + logisticsapp):
-     *   progalaxyelabs/medstoreapp-api, service portal → @progalaxyelabs/medstoreapp-api-portal-client
-     *   progalaxyelabs/medstoreapp-api, service admin  → @progalaxyelabs/medstoreapp-api-admin-client
-     *   medstoreapp-api (bare), service portal         → medstoreapp-api-portal-client
+     * Test the canonical package naming examples:
+     *   progalaxyelabs/myapp-api, service portal → @progalaxyelabs/myapp-api-portal-client
+     *   progalaxyelabs/myapp-api, service admin  → @progalaxyelabs/myapp-api-admin-client
+     *   exampleapp-api (bare), service portal    → exampleapp-api-portal-client
      */
     public function test_generator_package_naming_canonical_examples(): void
     {
@@ -714,13 +714,13 @@ class ClientGeneratorV4Test extends TestCase
             $this->runGenerator(
                 ['portal', '--output=' . $outputDir2, '--tenancy=T3'],
                 $this->fixtureRoutesFile(),
-                ['composer.json' => json_encode(['name' => 'medstoreapp-api', 'require' => new \stdClass()]) . "\n"]
+                ['composer.json' => json_encode(['name' => 'exampleapp-api', 'require' => new \stdClass()]) . "\n"]
             );
             $portalPkg = json_decode(file_get_contents($outputDir2 . '/portal/package.json'), true);
             $adminPkg  = json_decode(file_get_contents($outputDir2 . '/admin/package.json'), true);
-            $this->assertEquals('medstoreapp-api-portal-client', $portalPkg['name'],
+            $this->assertEquals('exampleapp-api-portal-client', $portalPkg['name'],
                 'bare: service portal → name-portal-client');
-            $this->assertEquals('medstoreapp-api-admin-client', $adminPkg['name'],
+            $this->assertEquals('exampleapp-api-admin-client', $adminPkg['name'],
                 'bare: service admin → name-admin-client');
         } finally {
             $this->rmdir($outputDir2);
@@ -760,7 +760,7 @@ class ClientGeneratorV4Test extends TestCase
      * The generated ApiClient must expose the IApiClient infra-probe passthroughs
      * (get/post delegating to MinimalHttp) so it structurally satisfies the shared
      * IApiClient contract — without importing client-core (zero-dep invariant).
-     * (Task #3033 / CLIENT-SDK-SPEC §12.)
+     * (CLIENT-SDK-SPEC §12.)
      */
     public function test_generator_emits_iapiclient_passthroughs_without_importing_contract(): void
     {
@@ -774,7 +774,7 @@ class ClientGeneratorV4Test extends TestCase
             $this->assertStringContainsString('get<R = unknown>(path: string', $clientTs, 'generated client must expose get() passthrough');
             $this->assertStringContainsString('post<R = unknown>(path: string', $clientTs, 'generated client must expose post() passthrough');
             // T3 (tenant-scoped, non-admin) escape hatch is TENANT-AWARE (CLIENT-SDK-SPEC
-            // §12, proven by the #3033 medstoreapp e2e): get/post route the logical
+            // §12): get/post route the logical
             // `/portal/...` path through escapePath() so the CLIENT applies the active
             // tenant prefix. (Admin/T2 clients use a plain passthrough — asserted in
             // test_generator_admin_client_has_no_set_tenant / _t2_client_*.)
@@ -1069,21 +1069,21 @@ class ClientGeneratorV4Test extends TestCase
             $this->runGenerator(
                 ['portal', '--output=' . $outputDir, '--tenancy=T3'],
                 $this->fixtureRoutesFile(),
-                ['composer.json' => json_encode(['name' => 'medstoreapp-api', 'require' => new \stdClass()]) . "\n"]
+                ['composer.json' => json_encode(['name' => 'exampleapp-api', 'require' => new \stdClass()]) . "\n"]
             );
 
-            // portal service → medstoreapp-api-portal-client
+            // portal service → exampleapp-api-portal-client
             $portalPkg = json_decode(file_get_contents($outputDir . '/portal/package.json'), true);
             $this->assertEquals(
-                'medstoreapp-api-portal-client',
+                'exampleapp-api-portal-client',
                 $portalPkg['name'],
                 'No-slash composer name: portal service → {name}-portal-client (unscoped)'
             );
 
-            // admin service → medstoreapp-api-admin-client
+            // admin service → exampleapp-api-admin-client
             $adminPkg = json_decode(file_get_contents($outputDir . '/admin/package.json'), true);
             $this->assertEquals(
-                'medstoreapp-api-admin-client',
+                'exampleapp-api-admin-client',
                 $adminPkg['name'],
                 'No-slash composer name: admin service → {name}-admin-client (unscoped)'
             );
@@ -1149,7 +1149,6 @@ class ClientGeneratorV4Test extends TestCase
      * Fix: templateNeedsIdParam() scans ALL non-tenant path segments. Any route with
      * a {param} anywhere in its non-tenant path produces a method with id in its sig.
      *
-     * Failing platforms: webmeteor, btechrecruiter, instituteapp (2026-06-21).
      * Pattern: resource group with GET /things/{id} + POST /things/{id}/action siblings.
      */
     public function test_mid_path_id_param_declared_in_sibling_post_methods_t3(): void

@@ -185,7 +185,7 @@ class StoreAccessMiddleware implements MiddlewareInterface
             throw new \RuntimeException('Auth service returned invalid JSON (HTTP ' . $httpCode . ')');
         }
 
-        // The auth server (progalaxyelabs-auth) returns its native flat shape
+        // The auth server returns its native flat shape
         // {"memberships":[...]}. Older/enveloped responses use
         // {"status":"ok","data":{"memberships":[...]}}. Accept either so the middleware
         // doesn't 500 on the live auth contract (AUTH-SPEC §6 — /api/auth/memberships

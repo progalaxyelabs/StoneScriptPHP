@@ -403,7 +403,7 @@ class Application
             $options['provision_tenant'] = true;
         }
 
-        // Card model resolver closures (TENANCY-IDENTITY-MODEL §4/§6).
+        // Card model resolver closures (framework-spec.md §6).
         // These were previously NOT threaded through buildAuthRouteOptions(), which forced
         // platforms to bypass Application::run() entirely and call ExternalAuthRoutes::register()
         // directly (the canary's manual bootstrap workaround). Threading them here means

@@ -164,7 +164,7 @@ class ExternalAuthConfig
         // See also: RsaJwtHandler::generateToken() throws on empty JWT_ISSUER.
         $this->signingIssuer = (string) ($options['signing_issuer'] ?? ($env->JWT_ISSUER ?? ''));
 
-        // Tenants resolver for the card model (TENANCY-IDENTITY-MODEL §4/§6).
+        // Tenants resolver for the card model (framework-spec.md §6).
         // fn(array $passportClaims): array — returns tenant objects for the identity.
         $this->tenantsResolver = $options['tenants_resolver'] ?? null;
 

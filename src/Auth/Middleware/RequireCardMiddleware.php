@@ -26,11 +26,11 @@ use StoneScriptPHP\ApiResponse;
  *     via `publicPaths()`). Pass through — the route is responsible for its own auth.
  *
  *   - **`jwt_claims` present, no `tenant_id`** → authenticated identity (passport) on a
- *     tenant-scoped route → reject 403 (TENANCY-IDENTITY-MODEL §5.1).
+ *     tenant-scoped route → reject 403 (framework-spec.md §6 §5.1).
  *
  *   - **`jwt_claims` present, `tenant_id` set** → valid card → pass through.
  *
- * ## Usage (TENANCY-IDENTITY-MODEL §5.1, multi-tenant platforms)
+ * ## Usage (framework-spec.md §6 §5.1, multi-tenant platforms)
  *
  * Add to the `middleware` array in `Application::run()` config, AFTER `JwtAuthMiddleware`
  * and `GatewayTenantMiddleware`:
@@ -73,7 +73,7 @@ class RequireCardMiddleware implements MiddlewareInterface
 
         $claims = $request['jwt_claims'];
 
-        // TENANCY-IDENTITY-MODEL §5.1 — a tenant-less token CANNOT authorize a
+        // framework-spec.md §6 §5.1 — a tenant-less token CANNOT authorize a
         // tenant-scoped route. This catches passports accidentally sent to business
         // routes (identity is authenticated, but the token type is wrong).
         if (empty($claims['tenant_id'])) {

@@ -47,7 +47,7 @@ class Env
     public string $JWT_PUBLIC_KEY_PATH = './keys/jwt-public.pem';
     public ?string $JWT_PRIVATE_KEY_PASSPHRASE = null;
     // JWT_ISSUER: the 'iss' claim stamped on every JWT this platform mints.
-    // MUST be set explicitly in .env (e.g. https://api.logisticsapp.in).
+    // MUST be set explicitly in .env (e.g. https://api.exampleapp.in).
     // Default is empty — RsaJwtHandler::generateToken() throws if empty.
     // The old default was 'example.com', removed because it silently produced
     // tokens with a placeholder issuer that worked locally but broke after

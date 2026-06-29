@@ -88,17 +88,17 @@ class RequestLoggerTest extends TestCase
     public function test_arm_reads_platform_code_from_config(): void
     {
         RequestLogger::arm(
-            ['auth' => ['platform' => ['code' => 'medstoreapp']]],
+            ['auth' => ['platform' => ['code' => 'exampleapp']]],
             microtime(true)
         );
-        $this->assertSame('medstoreapp', RequestLogger::getPlatformCode());
+        $this->assertSame('exampleapp', RequestLogger::getPlatformCode());
     }
 
     public function test_arm_reads_platform_code_from_env(): void
     {
-        $_ENV['PLATFORM_CODE'] = 'restrantapp';
+        $_ENV['PLATFORM_CODE'] = 'sampleapp';
         RequestLogger::arm([], microtime(true));
-        $this->assertSame('restrantapp', RequestLogger::getPlatformCode());
+        $this->assertSame('sampleapp', RequestLogger::getPlatformCode());
         unset($_ENV['PLATFORM_CODE']);
     }
 

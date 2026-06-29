@@ -193,7 +193,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         }
 
         // Determine effective tenant data (idempotent replay returns existing tenant).
-        // TENANCY-IDENTITY-MODEL §4.2: provision-tenant grants owner role + mints the
+        // framework-spec.md §6: provision-tenant grants owner role + mints the
         // same card that exchange would mint. The card is minted here rather than
         // relayed from the auth service (which issues passports, not cards).
         $tenantSlug = $data['tenant_slug'] ?? ($result['tenant_slug'] ?? null);
@@ -206,7 +206,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         $statusCode = $isNewTenant ? 201 : 200;
         $message    = $isNewTenant ? 'Tenant provisioned' : 'Tenant already provisioned';
 
-        // TENANCY-IDENTITY-MODEL §1/§4.2: provision grants 'owner' and mints a card.
+        // framework-spec.md §6: provision grants 'owner' and mints a card.
         // The card is the authoritative platform token — not the auth service's access_token.
         // The auth service token ($result['access_token']) is a passport (identity JWT);
         // we mint a platform card so the client is immediately authorised without a
@@ -250,7 +250,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      * Mint a platform card token immediately after provisioning.
      *
      * This gives the client a usable card without requiring a separate exchange call.
-     * Per TENANCY-IDENTITY-MODEL §4.2: "provision-tenant grants owner and mints the same
+     * Per framework-spec.md §6: "provision-tenant grants owner and mints the same
      * card that exchange would mint."
      *
      * Returns null if the signing key is not configured (e.g. during unit tests),

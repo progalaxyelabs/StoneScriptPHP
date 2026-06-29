@@ -17,7 +17,7 @@ use StoneScriptPHP\Auth\TokenExchangeException;
  * chosen tenant for a **card token** (platform JWT carrying identity_id, tenant_id,
  * and a single active role_id). Implements §4 of the Tenancy & Identity Model.
  *
- * ## Passport / Card model (TENANCY-IDENTITY-MODEL §1-§4)
+ * ## Passport / Card model (framework-spec.md §6)
  *
  * - **Passport** = identity JWT issued by the auth service. Tenant-less. Proves *who
  *   you are* across all platforms.
@@ -44,7 +44,7 @@ use StoneScriptPHP\Auth\TokenExchangeException;
  *
  * ## Switching tenant or role
  * Re-call this endpoint with the new tenant_id / role_id — that is the canonical
- * "switch" operation (TENANCY-IDENTITY-MODEL §4.5, §4.6).
+ * "switch" operation (framework-spec.md §6 — Switching Tenant or Role).
  *
  * @package StoneScriptPHP\Auth\ExternalAuth\Routes
  */

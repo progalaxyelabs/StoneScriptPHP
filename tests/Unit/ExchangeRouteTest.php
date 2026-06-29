@@ -12,7 +12,7 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\ExchangeRoute;
 use StoneScriptPHP\Auth\TokenExchangeException;
 
 /**
- * Unit tests for ExchangeRoute — passport/card tenancy model (TENANCY-IDENTITY-MODEL §4).
+ * Unit tests for ExchangeRoute — passport/card tenancy model (framework-spec.md §6).
  *
  * ## What the card model exchange does
  *

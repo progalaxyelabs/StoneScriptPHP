@@ -640,7 +640,7 @@ class Router
             // Honor the handler's declared validation_rules() at the edge. Without
             // this, declared required-field rules were dead code under the new
             // router: missing/invalid input reached the handler (and SQL functions)
-            // as NULL, surfacing as a 500 instead of a clean 400. (#3055)
+            // as NULL, surfacing as a 500 instead of a clean 400.
             $validationRules = $handler->validation_rules();
             if (!empty($validationRules)) {
                 $validator = new Validator($allInput, $validationRules);
