@@ -68,7 +68,7 @@ class Migrations
     }
 
     /**
-     * Scan filesystem for .pssql files and parse them
+     * Scan filesystem for .pgsql files and parse them (.pssql also accepted for backward compat)
      * TODO: User will provide enhanced parsing algorithm
      */
     private function getCodeDefinitions(): array
@@ -81,7 +81,11 @@ class Migrations
         // Scan tables
         $tablesPath = ROOT_PATH . 'src/App/Database/postgresql/tables/';
         if (is_dir($tablesPath)) {
-            $files = glob($tablesPath . '*.pssql');
+            $files = array_merge(
+                glob($tablesPath . '*.pgsql') ?: [],
+                glob($tablesPath . '*.pssql') ?: []
+            );
+            sort($files);
             foreach ($files as $file) {
                 $tableName = $this->parseTableName($file);
                 if ($tableName) {
@@ -93,7 +97,11 @@ class Migrations
         // Scan functions
         $functionsPath = ROOT_PATH . 'src/App/Database/postgresql/functions/';
         if (is_dir($functionsPath)) {
-            $files = glob($functionsPath . '*.pssql');
+            $files = array_merge(
+                glob($functionsPath . '*.pgsql') ?: [],
+                glob($functionsPath . '*.pssql') ?: []
+            );
+            sort($files);
             foreach ($files as $file) {
                 $functionName = $this->parseFunctionName($file);
                 if ($functionName) {
