@@ -116,11 +116,12 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
             return null;
         }
 
-        // Strip "Bearer " prefix — buildAuthHeader() adds it back when making outbound requests
-        if (str_starts_with($headerValue, 'Bearer ')) {
-            return substr($headerValue, 7);
-        }
+        // Strip "Bearer " prefix — buildAuthHeader() adds it back when making outbound
+        // requests. Case-insensitive + whitespace-tolerant to match the normalization
+        // added to AuthServiceClient::buildAuthHeader() (v5.5.3) — keeps both ends of
+        // the "inbound header -> outbound header" round trip consistent.
+        $stripped = preg_replace('/^\s*Bearer\s+/i', '', $headerValue);
 
-        return $headerValue;
+        return $stripped ?? $headerValue;
     }
 }

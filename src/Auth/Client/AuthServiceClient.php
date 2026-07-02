@@ -242,18 +242,45 @@ abstract class AuthServiceClient
     }
 
     /**
-     * Build authorization header from JWT token
+     * Build authorization header from a JWT token.
      *
-     * @param string|null $token JWT token
-     * @return array Authorization header array
+     * Idempotent with respect to the "Bearer " prefix: accepts either a bare
+     * token (the normal case — e.g. what BaseExternalAuthRoute::getBearerToken()
+     * returns) or a full raw header value that already carries "Bearer "
+     * (e.g. `$_SERVER['HTTP_AUTHORIZATION']`, which platform tenants_resolver/
+     * roles_resolver closures commonly forward verbatim to methods like
+     * getMemberships()). Either shape produces exactly one "Authorization:
+     * Bearer <token>" header.
+     *
+     * Without this normalization, forwarding a raw header value here doubles
+     * the prefix ("Authorization: Bearer Bearer <token>"). The auth service's
+     * bearer-parsing only strips a single "Bearer " prefix, so the resulting
+     * "token" it tries to verify is itself "Bearer <token>" — invalid JWT
+     * shape, verification fails, auth service returns 401, and callers that
+     * catch the resulting AuthServiceException (e.g. a tenants_resolver
+     * swallowing errors as an empty list) surface it as an unrelated-looking
+     * downstream error (confirmed: medstoreapp exchange 403
+     * tenant_access_denied for a verifiably correct membership, 2026-07-02 —
+     * same root cause was copy-pasted into 5 more platforms' tenants_resolver
+     * closures, all fixed for free by this framework-level normalization).
+     *
+     * @param string|null $token Bare JWT token OR a raw "Bearer <token>" header value
+     * @return array Authorization header array, e.g. ['Authorization: Bearer <token>']
      */
     protected function buildAuthHeader(?string $token): array
     {
-        if ($token === null) {
+        if ($token === null || $token === '') {
             return [];
         }
 
-        return ['Authorization: Bearer ' . $token];
+        $bareToken = preg_replace('/^\s*Bearer\s+/i', '', $token);
+        if ($bareToken === null) {
+            // preg_replace only returns null on a regex engine error (e.g. backtrack
+            // limit) — fall back to the original value rather than losing the token.
+            $bareToken = $token;
+        }
+
+        return ['Authorization: Bearer ' . $bareToken];
     }
 
     /**

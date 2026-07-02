@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.3] - 2026-07-02
+
+### Fixed
+
+- **`AuthServiceClient::buildAuthHeader()` double-"Bearer " prefix bug**: this
+  protected method (used by every `AuthServiceClient`/`ExternalAuthServiceClient`
+  method that forwards a bearer token, e.g. `getMemberships()`) always
+  unconditionally prepended `"Bearer "` to the token it was given, assuming
+  callers only ever pass a *bare* token. In practice, several platforms'
+  `tenants_resolver` closures (medstoreapp, btechrecruiter, instituteapp,
+  restrantapp, logisticsapp, aasaanwork) read `$_SERVER['HTTP_AUTHORIZATION']`
+  directly — which already carries the `"Bearer "` prefix as sent by the
+  client — and forwarded that raw header value straight into
+  `getMemberships()`. The result was `Authorization: Bearer Bearer <token>` on
+  the outbound call to the auth service; the auth service's bearer-parsing
+  only strips a single `"Bearer "` prefix, so the "token" it tries to verify
+  is itself `"Bearer <token>"` — an invalid JWT shape — verification fails,
+  and the auth service returns 401. Every affected `tenants_resolver` caught
+  that as a generic error and returned an empty tenants list, which
+  `ExchangeRoute` then reported as a misleading `403 tenant_access_denied` —
+  even for an identity with a verifiably correct, active tenant membership
+  row in the database (medstoreapp portal live-bug triage, 2026-07-02).
+  `buildAuthHeader()` now strips any pre-existing `"Bearer "` prefix
+  (case-insensitive, tolerant of extra whitespace) before adding it back, so
+  it produces exactly one correct header regardless of whether the caller
+  passes a bare token or a raw header value that already has the prefix. This
+  is a single framework-level fix — every affected platform is corrected on
+  the next `composer update`, no platform-code changes needed. Added
+  `AuthServiceClientBuildAuthHeaderTest` (7 tests) covering the bare-token,
+  raw-header, case-insensitivity, whitespace-tolerance, null/empty, and
+  non-prefix-substring cases.
+
 ## [5.5.2] - 2026-07-02
 
 ### Fixed
