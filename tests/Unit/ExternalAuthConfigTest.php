@@ -17,25 +17,28 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
  */
 class ExternalAuthConfigTest extends TestCase
 {
+    /**
+     * Env vars this test process-wide putenv()'d because they were empty on
+     * entry. Tracked so tearDown() can putenv()-unset exactly what setUp()
+     * set — never a var that was already present in the environment before
+     * this test ran. Without this, putenv() leaks for the rest of the
+     * single-process PHPUnit run (no process isolation) and silently flips
+     * env-gated skip guards in unrelated tests (e.g. DatabaseTest,
+     * MigrationsTest) that run later alphabetically.
+     */
+    private array $envVarsSetByThisTest = [];
+
     protected function setUp(): void
     {
         // ExternalAuthConfig calls Env::get_instance() which requires DB_GATEWAY_URL
         // and DB_GATEWAY_PLATFORM. Set placeholders so unit tests don't fail on
         // infrastructure checks unrelated to ExternalAuthConfig prefix logic.
-        if (empty(getenv('DB_GATEWAY_URL'))) {
-            putenv('DB_GATEWAY_URL=http://localhost:9000');
-        }
-        if (empty(getenv('DB_GATEWAY_PLATFORM'))) {
-            putenv('DB_GATEWAY_PLATFORM=test-platform');
-        }
-        if (empty(getenv('AUTH_SERVICE_URL'))) {
-            putenv('AUTH_SERVICE_URL=http://localhost:3139');
-        }
+        $this->setEnvIfEmpty('DB_GATEWAY_URL', 'http://localhost:9000');
+        $this->setEnvIfEmpty('DB_GATEWAY_PLATFORM', 'test-platform');
+        $this->setEnvIfEmpty('AUTH_SERVICE_URL', 'http://localhost:3139');
         // AUTH_ISSUER is now required for ExternalAuth (v4.6.1 fail-fast).
         // Tests that don't pass auth_issuer explicitly must set AUTH_ISSUER in env.
-        if (empty(getenv('AUTH_ISSUER'))) {
-            putenv('AUTH_ISSUER=http://localhost:3139');
-        }
+        $this->setEnvIfEmpty('AUTH_ISSUER', 'http://localhost:3139');
         // Reset Env singleton between tests to pick up the env vars above.
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
@@ -50,6 +53,26 @@ class ExternalAuthConfigTest extends TestCase
         $prop = $ref->getProperty('_instance');
         $prop->setAccessible(true);
         $prop->setValue(null, null);
+
+        // Undo only the putenv() calls this test made — restores the
+        // process env to how it was before setUp() ran.
+        foreach ($this->envVarsSetByThisTest as $name) {
+            putenv($name);
+            unset($_ENV[$name]);
+        }
+        $this->envVarsSetByThisTest = [];
+    }
+
+    /**
+     * putenv() a placeholder only if $name is currently empty/unset, and
+     * remember it so tearDown() can undo exactly this test's leakage.
+     */
+    private function setEnvIfEmpty(string $name, string $value): void
+    {
+        if (empty(getenv($name))) {
+            putenv("{$name}={$value}");
+            $this->envVarsSetByThisTest[] = $name;
+        }
     }
 
     // ── Default prefix ──────────────────────────────────────────────────────

@@ -97,13 +97,19 @@ class GenerateEnvSchemaTest extends TestCase
     public function test_matches_real_env_required_vars(): void
     {
         // Congruence with the real Env's own constructor validation: exactly
-        // DB_GATEWAY_URL + DB_GATEWAY_PLATFORM are required.
+        // DB_GATEWAY_URL + DB_GATEWAY_PLATFORM + DB_GATEWAY_SCHEMA_NAME are
+        // required (no default, non-nullable). DB_GATEWAY_SCHEMA_NAME became
+        // required in the v5.2.0 gateway-v4-routing change (commit 4edadad,
+        // "explicit schema names, tenant routing via DB_GATEWAY_TENANT_SCHEMA_NAME")
+        // — Database::initConnection() throws 'DB_GATEWAY_SCHEMA_NAME is required'
+        // when it's empty (src/Database.php). DB_GATEWAY_TENANT_SCHEMA_NAME stays
+        // optional (?string, only needed for multi-tenant platforms).
         if (!class_exists('StoneScriptPHP\\Env')) {
             $this->markTestSkipped('StoneScriptPHP\\Env not autoloadable in this context');
         }
         $schema = \buildSchemaFromReflection(new \ReflectionClass('StoneScriptPHP\\Env'));
         $required = array_keys(array_filter($schema, fn($c) => $c['required']));
         sort($required);
-        $this->assertSame(['DB_GATEWAY_PLATFORM', 'DB_GATEWAY_URL'], $required);
+        $this->assertSame(['DB_GATEWAY_PLATFORM', 'DB_GATEWAY_SCHEMA_NAME', 'DB_GATEWAY_URL'], $required);
     }
 }

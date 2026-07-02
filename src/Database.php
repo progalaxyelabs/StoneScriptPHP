@@ -166,56 +166,6 @@ class Database
         );
     }
 
-    /**
-     * Execute a raw SQL query and return status string.
-     * Only available in direct connection mode.
-     *
-     * @param string $sql The SQL query to execute
-     * @return string The result status or data
-     * @throws Exception If in gateway mode
-     */
-    public static function query($sql): string
-    {
-        $directConnection = self::get_instance()->getDirectConnection();
-        $connection = $directConnection->getConnection();
-
-        $result = pg_query($connection, $sql);
-        if ($result === false) {
-            $message = pg_last_error($connection);
-            log_debug($message);
-            return $message;
-        }
-
-        // $status = pg_result_status($result, PGSQL_STATUS_STRING);
-        $status = pg_result_status($result);
-        switch ($status) {
-            case PGSQL_EMPTY_QUERY:
-                return 'Empty Query';
-            case PGSQL_COMMAND_OK:
-                return 'Ok';
-            case PGSQL_TUPLES_OK:
-                $rows = pg_fetch_all($result);
-                return var_export($rows, true);
-            case PGSQL_COPY_OUT:
-                return 'Copy OUT';
-            case PGSQL_COPY_IN:
-                return 'Copy IN';
-            case PGSQL_BAD_RESPONSE:
-                $message =  pg_last_error($connection);
-                return 'Bad Response: ' . $message;
-            case PGSQL_NONFATAL_ERROR:
-                $message =  pg_last_error($connection);
-                return 'Non Fatal Error:'  . $message;
-            case PGSQL_FATAL_ERROR:
-                $message =  pg_last_error($connection);
-                return 'Fatal Error: ' . $message;
-            default:
-                $message =  pg_last_error($connection);
-                return 'Unknown result status ' . $message;
-        }
-    }
-
-
     public static function result_as_object(string $function_name, array $rows, string $class)
     {
         if (empty($rows)) {
@@ -336,30 +286,4 @@ class Database
         return $instance;
     }
 
-    /**
-     * Copy data from an array to a table using COPY FROM.
-     * Only available in direct connection mode.
-     *
-     * @param array $rows The rows to copy
-     * @param string $tablename The target table name
-     * @param string $delimiter The field delimiter
-     * @return bool True on success, false on failure
-     * @throws Exception If in gateway mode
-     */
-    public static function copy_from(array $rows, string $tablename, string $delimiter): bool
-    {
-        $directConnection = self::get_instance()->getDirectConnection();
-        return $directConnection->copyFrom($rows, $tablename, $delimiter);
-    }
-
-    /**
-     * Get the underlying connection object.
-     * Useful for advanced operations or testing.
-     *
-     * @return ConnectionInterface
-     */
-    public static function getConnection(): ConnectionInterface
-    {
-        return self::get_instance()->getConnectionInstance();
-    }
 }

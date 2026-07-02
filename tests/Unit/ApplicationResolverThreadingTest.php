@@ -26,17 +26,21 @@ use StoneScriptPHP\Env;
  */
 class ApplicationResolverThreadingTest extends TestCase
 {
+    /**
+     * Env vars this test process-wide putenv()'d because they were empty on
+     * entry. Tracked so tearDown() can putenv()-unset exactly what setUp()
+     * set. Without this, putenv() leaks for the rest of the single-process
+     * PHPUnit run (no process isolation) and silently flips env-gated skip
+     * guards in unrelated tests (e.g. DatabaseTest, MigrationsTest) that run
+     * later alphabetically.
+     */
+    private array $envVarsSetByThisTest = [];
+
     protected function setUp(): void
     {
-        if (empty(getenv('DB_GATEWAY_URL'))) {
-            putenv('DB_GATEWAY_URL=http://localhost:9000');
-        }
-        if (empty(getenv('DB_GATEWAY_PLATFORM'))) {
-            putenv('DB_GATEWAY_PLATFORM=test-platform');
-        }
-        if (empty(getenv('AUTH_SERVICE_URL'))) {
-            putenv('AUTH_SERVICE_URL=http://localhost:3139');
-        }
+        $this->setEnvIfEmpty('DB_GATEWAY_URL', 'http://localhost:9000');
+        $this->setEnvIfEmpty('DB_GATEWAY_PLATFORM', 'test-platform');
+        $this->setEnvIfEmpty('AUTH_SERVICE_URL', 'http://localhost:3139');
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
         $prop->setAccessible(true);
@@ -44,6 +48,34 @@ class ApplicationResolverThreadingTest extends TestCase
 
         $_SERVER['REQUEST_METHOD'] = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $_SERVER['REQUEST_URI']    = $_SERVER['REQUEST_URI']    ?? '/';
+    }
+
+    protected function tearDown(): void
+    {
+        $ref = new \ReflectionClass(Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        // Undo only the putenv() calls this test made — restores the
+        // process env to how it was before setUp() ran.
+        foreach ($this->envVarsSetByThisTest as $name) {
+            putenv($name);
+            unset($_ENV[$name]);
+        }
+        $this->envVarsSetByThisTest = [];
+    }
+
+    /**
+     * putenv() a placeholder only if $name is currently empty/unset, and
+     * remember it so tearDown() can undo exactly this test's leakage.
+     */
+    private function setEnvIfEmpty(string $name, string $value): void
+    {
+        if (empty(getenv($name))) {
+            putenv("{$name}={$value}");
+            $this->envVarsSetByThisTest[] = $name;
+        }
     }
 
     /**

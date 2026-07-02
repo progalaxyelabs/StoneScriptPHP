@@ -26,16 +26,22 @@ class JwtHandlerFlatClaimsTest extends TestCase
     private string $testPublicKey;
     private Env $env;
 
+    /**
+     * Env vars this test process-wide putenv()'d because they were empty on
+     * entry. Tracked so tearDown() can putenv()-unset exactly what setUp()
+     * set. Without this, putenv() leaks for the rest of the single-process
+     * PHPUnit run (no process isolation) and silently flips env-gated skip
+     * guards in unrelated tests (e.g. DatabaseTest, MigrationsTest) that run
+     * later alphabetically.
+     */
+    private array $envVarsSetByThisTest = [];
+
     protected function setUp(): void
     {
         // Env::get_instance() validates DB_GATEWAY_URL and DB_GATEWAY_PLATFORM.
         // Set placeholders so unit tests don't fail on missing gateway config.
-        if (empty(getenv('DB_GATEWAY_URL'))) {
-            putenv('DB_GATEWAY_URL=http://localhost:9000');
-        }
-        if (empty(getenv('DB_GATEWAY_PLATFORM'))) {
-            putenv('DB_GATEWAY_PLATFORM=test-platform');
-        }
+        $this->setEnvIfEmpty('DB_GATEWAY_URL', 'http://localhost:9000');
+        $this->setEnvIfEmpty('DB_GATEWAY_PLATFORM', 'test-platform');
 
         $this->env = Env::get_instance();
 
@@ -77,6 +83,26 @@ class JwtHandlerFlatClaimsTest extends TestCase
         @unlink($this->testPrivateKey);
         @unlink($this->testPublicKey);
         @rmdir($this->testKeysDir);
+
+        // Undo only the putenv() calls this test made — restores the
+        // process env to how it was before setUp() ran.
+        foreach ($this->envVarsSetByThisTest as $name) {
+            putenv($name);
+            unset($_ENV[$name]);
+        }
+        $this->envVarsSetByThisTest = [];
+    }
+
+    /**
+     * putenv() a placeholder only if $name is currently empty/unset, and
+     * remember it so tearDown() can undo exactly this test's leakage.
+     */
+    private function setEnvIfEmpty(string $name, string $value): void
+    {
+        if (empty(getenv($name))) {
+            putenv("{$name}={$value}");
+            $this->envVarsSetByThisTest[] = $name;
+        }
     }
 
     // ─── RsaJwtHandler tests ─────────────────────────────────────────────────

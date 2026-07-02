@@ -63,7 +63,13 @@ function res_not_ok($message, int $httpStatusCode = 400) {
 }
 
 function res_error($message, int $httpStatusCode = 500) {
-    $method_and_url = $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'];
+    // res_error() is called from global exception/error handlers (error_handler.php)
+    // and route handlers, not exclusively within a populated HTTP request context.
+    // A CLI-invoked code path (migrations, queue workers, `php stone` commands, or a
+    // fatal error firing before the SAPI has populated $_SERVER) legitimately has no
+    // REQUEST_METHOD/REQUEST_URI — mirrors the same '?? CLI' / '?? empty' fallback
+    // bootstrap.php already uses for this exact log-line shape.
+    $method_and_url = ($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' . ($_SERVER['REQUEST_URI'] ?? '');
     log_error('res_error: ' . $method_and_url . ' - ' . $message);
     return new ApiResponse('error', $message, null, $httpStatusCode);
 }

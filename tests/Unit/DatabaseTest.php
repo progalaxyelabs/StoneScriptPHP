@@ -349,44 +349,6 @@ class DatabaseTest extends TestCase
     }
 
     /**
-     * Test that copy_from returns boolean
-     */
-    public function test_copy_from_returns_boolean(): void
-    {
-        // Integration test: copy_from() uses a direct PostgreSQL connection
-        // (not the gateway), unavailable in a gateway-only unit context.
-        if (!getenv('DB_GATEWAY_URL')) {
-            $this->markTestSkipped('Requires a direct DB connection — integration test.');
-        }
-
-        $rows = ['row1', 'row2'];
-        $tablename = 'test_table';
-        $delimiter = ',';
-
-        $result = \StoneScriptPHP\Database::copy_from($rows, $tablename, $delimiter);
-
-        $this->assertIsBool($result);
-    }
-
-    /**
-     * Test that query returns string result
-     */
-    public function test_query_returns_string(): void
-    {
-        // Integration test: query() uses a direct PostgreSQL connection
-        // (not the gateway), unavailable in a gateway-only unit context.
-        if (!getenv('DB_GATEWAY_URL')) {
-            $this->markTestSkipped('Requires a direct DB connection — integration test.');
-        }
-
-        $sql = 'SELECT version()';
-
-        $result = \StoneScriptPHP\Database::query($sql);
-
-        $this->assertIsString($result);
-    }
-
-    /**
      * Test that internal_query throws in v3 gateway-only mode (behavior pinned).
      * Direct SQL was removed in v3 — use PostgreSQL functions via the gateway.
      */

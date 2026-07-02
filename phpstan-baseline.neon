@@ -169,70 +169,10 @@ parameters:
 			path: src/Database.php
 
 		-
-			message: '#^Call to an undefined method StoneScriptPHP\\Database\:\:getConnectionInstance\(\)\.$#'
-			identifier: method.notFound
-			count: 1
-			path: src/Database.php
-
-		-
-			message: '#^Call to an undefined method StoneScriptPHP\\Database\:\:getDirectConnection\(\)\.$#'
-			identifier: method.notFound
-			count: 2
-			path: src/Database.php
-
-		-
 			message: '#^Invalid type string to throw\.$#'
 			identifier: throw.notThrowable
 			count: 1
 			path: src/Database.php
-
-		-
-			message: '#^Method StoneScriptPHP\\Database\:\:getConnection\(\) has invalid return type StoneScriptPHP\\ConnectionInterface\.$#'
-			identifier: class.notFound
-			count: 2
-			path: src/Database.php
-
-		-
-			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_APPNAME\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Database/DirectConnection.php
-
-		-
-			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_DBNAME\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Database/DirectConnection.php
-
-		-
-			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_HOST\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Database/DirectConnection.php
-
-		-
-			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_PASSWORD\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Database/DirectConnection.php
-
-		-
-			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_PORT\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Database/DirectConnection.php
-
-		-
-			message: '#^Access to an undefined property StoneScriptPHP\\Env\:\:\$DATABASE_USER\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Database/DirectConnection.php
-
-		-
-			message: '#^Variable \$result might not be defined\.$#'
-			identifier: variable.undefined
-			count: 1
-			path: src/Database/DirectConnection.php
 
 		-
 			message: '#^Method StoneScriptPHP\\Env\:\:get_instance\(\) should return static\(StoneScriptPHP\\Env\) but returns StoneScriptPHP\\Env\.$#'

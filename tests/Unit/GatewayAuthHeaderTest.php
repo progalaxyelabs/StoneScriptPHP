@@ -5,14 +5,23 @@ namespace Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Gateway admin-auth header tests.
+ * Gateway auth header tests.
  *
- * The gateway places POST /v2/migrate and /v2/migrate-all behind
- * admin_auth_middleware (shared admin bearer + IP allowlist). The migrate
- * CLI helpers must present `Authorization: Bearer <token>` when an admin token is
- * configured, and MUST omit it when none is set (back-compat for local/ungated
- * gateways). gatewayJsonHeaders() is the single source of that header logic, used
- * by stepCreateDatabase, stepMigrateDatabase and stepMigrateAllDatabases.
+ * gatewayJsonHeaders() is the single source of Bearer-header logic shared by
+ * stepCreateDatabase, stepMigrateDatabase and stepMigrateAllDatabases — it must
+ * present `Authorization: Bearer <token>` when a token is passed in, and MUST
+ * omit it when none is set (back-compat for local/ungated gateways).
+ *
+ * As of gateway v4.1.0+ (v5.0.1 CLI refactor, commit 567050c), POST /v2/migrate,
+ * POST /v2/migrate-all and POST /admin/database/create require a per-platform
+ * bearer token (DB_GATEWAY_PLATFORM_TOKEN / `platformToken`), NOT the shared
+ * admin token — passing the admin token to these endpoints now returns HTTP 403.
+ * The platform token itself is provisioned via POST /admin/platform-token, which
+ * DOES require the admin token (see resolveGatewayPlatformToken() /
+ * stepProvisionPlatformToken() in cli/helpers/gateway-common.php) — so the admin
+ * credential remains the trust root, scoped down to a platform-specific token for
+ * these specific operations. This is a deliberate least-privilege narrowing that
+ * tracks the gateway's own contract, not an app-side privilege downgrade.
  */
 class GatewayAuthHeaderTest extends TestCase
 {
@@ -68,16 +77,23 @@ class GatewayAuthHeaderTest extends TestCase
         $this->assertContains('Content-Length: ' . strlen($payload), $headers);
     }
 
-    public function test_migrate_step_signatures_accept_admin_token(): void
+    public function test_migrate_step_signatures_accept_platform_token(): void
     {
-        // Guard against accidental signature drift: the admin token param must exist
-        // and be nullable on both migrate step functions (the seam this task closes).
+        // Guard against accidental signature drift: the *platform* token param must
+        // exist and be nullable on both migrate step functions. Renamed from
+        // 'adminToken' in the v5.0.1 gateway-cli refactor (commit 567050c) — gateway
+        // v4.1.0+ requires a per-platform bearer token for POST /v2/migrate and
+        // /v2/migrate-all (the admin token now gets HTTP 403 on these endpoints).
+        // This is an intentional rename tracking the gateway's contract, not a
+        // privilege downgrade: the platform token is itself provisioned via the
+        // admin token (see resolveGatewayPlatformToken()), so admin-level trust is
+        // still the root — it's just scoped down before hitting these endpoints.
         $migrate = new \ReflectionFunction('stepMigrateDatabase');
-        $this->assertSame('adminToken', $migrate->getParameters()[4]->getName());
+        $this->assertSame('platformToken', $migrate->getParameters()[4]->getName());
         $this->assertTrue($migrate->getParameters()[4]->allowsNull());
 
         $migrateAll = new \ReflectionFunction('stepMigrateAllDatabases');
-        $this->assertSame('adminToken', $migrateAll->getParameters()[3]->getName());
+        $this->assertSame('platformToken', $migrateAll->getParameters()[3]->getName());
         $this->assertTrue($migrateAll->getParameters()[3]->allowsNull());
     }
 

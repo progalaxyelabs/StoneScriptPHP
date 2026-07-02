@@ -24,10 +24,15 @@ class MigrationsTest extends TestCase
      * unit run; they execute in an integration env where a real DB is configured.
      *
      * NB: we gate on DATABASE_HOST (the param pg_connect actually needs), NOT
-     * DB_GATEWAY_URL — a sibling test (ExternalAuthConfigTest) putenv's a fake
-     * DB_GATEWAY_URL that leaks across this single-process run, so it is not a
-     * reliable signal here. Matches the markTestSkipped convention used by
-     * DatabaseTest / ExternalAuthConfigTest / JwtHandlerFlatClaimsTest.
+     * DB_GATEWAY_URL. DATABASE_HOST is the correct signal for this class
+     * regardless — Migrations uses a direct pg_connect(), not the gateway.
+     * (Historically DB_GATEWAY_URL was also an unreliable signal here because
+     * several sibling tests putenv()'d a fake DB_GATEWAY_URL without restoring
+     * it in tearDown(), leaking across this single-process PHPUnit run. That
+     * leak is now fixed at the source — see tearDown()/setEnvIfEmpty() in
+     * ExternalAuthConfigTest, ExchangeRouteTest, JwtHandlerFlatClaimsTest,
+     * ApplicationResolverThreadingTest, HybridCardJwtHandlerTest — but DATABASE_HOST
+     * remains the right gate for this specific class either way.)
      */
     protected function setUp(): void
     {

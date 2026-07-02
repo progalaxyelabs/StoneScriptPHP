@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.4] - 2026-07-02
+
+### Fixed
+
+- **Test-suite hygiene: resolved all 5 pre-existing `Unit` test failures/errors/warnings
+  instead of deferring them again.** Three agents earlier today waved these off as
+  "pre-existing baseline, no regression from my change." Investigated and fixed each:
+
+  1. **`DatabaseTest::test_copy_from_returns_boolean` / `test_query_returns_string`
+     (errors)**: `Database::query()`, `Database::copy_from()`, and `Database::getConnection()`
+     called a private `getDirectConnection()`/`getConnectionInstance()` factory method
+     that was deleted from `Database` in the Jan 2026 v2.4.2 gateway-only-mode migration
+     (commit `62f4128`) — that migration correctly converted `internal_query()` to
+     always-throw but missed these three siblings, leaving them permanently broken
+     (`Call to undefined method`). Confirmed dead via: (a) `phpstan-baseline.neon` already
+     had these exact "undefined method" errors baselined/suppressed rather than fixed,
+     (b) zero production callers anywhere in the codebase, (c) the one caller,
+     `cli/dba.php`, is itself an orphaned script never wired into the `stone` CLI
+     dispatcher. Deleted the three dead `Database` methods, the now-fully-orphaned
+     `src/Database/DirectConnection.php` + `src/Database/ConnectionInterface.php`
+     (implementations of the v2 direct-connection mode with zero remaining callers),
+     `cli/dba.php`, the two corresponding dead tests, and the matching stale
+     `phpstan-baseline.neon` entries.
+
+     **Also fixed the underlying root cause**, not just the two named tests: a sibling
+     error, `DatabaseTest::test_fn_accepts_array_parameters`, was intermittently failing
+     because five other test classes (`ExternalAuthConfigTest`, `ExchangeRouteTest`,
+     `JwtHandlerFlatClaimsTest`, `ApplicationResolverThreadingTest`,
+     `HybridCardJwtHandlerTest`) `putenv('DB_GATEWAY_URL=...')` in `setUp()` without ever
+     unsetting it in `tearDown()` — since PHPUnit runs the whole suite in one process,
+     this leaked `DB_GATEWAY_URL` forward into every later test, silently flipping
+     `if (!getenv('DB_GATEWAY_URL'))` skip-guards regardless of what the invoking shell's
+     env actually had. `MigrationsTest.php` had already documented this leak as a known
+     workaround (gating on `DATABASE_HOST` instead) rather than fixing it. Added
+     tracked, symmetric `setEnvIfEmpty()`/`tearDown()` cleanup to all five leaking test
+     classes so `putenv()` calls are always undone. Verified deterministic behavior with
+     `DB_GATEWAY_URL` both unset (test skips) and explicitly set (test attempts a real
+     gateway call and fails on connection-refused, as a genuine opt-in integration test
+     should — not on leaked state).
+
+  2. **`GatewayAuthHeaderTest::test_migrate_step_signatures_accept_admin_token` (failure)**:
+     investigated as a potential security regression per the task's explicit instruction
+     to determine privilege-downgrade vs. legitimate rename before touching anything.
+     Traced `stepMigrateDatabase`/`stepMigrateAllDatabases` (`cli/helpers/gateway-common.php`)
+     and their `resolveGatewayPlatformToken()`/`stepProvisionPlatformToken()` call chain:
+     this is a **legitimate, intentional rename**, not a downgrade. Commit `567050c`
+     ("v5.0.1 — platform token support for gateway v4.1.0+") shows the *admin* token was
+     already returning HTTP 403 against gateway v4.1.0+ for `POST /v2/migrate` and
+     `/v2/migrate-all` — the gateway's own contract changed to require a per-platform
+     bearer token for these specific endpoints. Critically, the platform token is itself
+     only provisionable via `POST /admin/platform-token`, which requires the admin token
+     — so the admin credential remains the trust root; `platformToken` is a properly
+     least-privilege-scoped credential for this operation, not a bypass. Renamed the test
+     to `test_migrate_step_signatures_accept_platform_token`, updated its assertions and
+     comments to check for `'platformToken'`, and corrected the class-level docblock
+     (which still incorrectly described these endpoints as behind `admin_auth_middleware`).
+     No production code change for this one — the code was already correct; only the
+     stale test/docs needed to catch up.
+
+  3. **`GenerateEnvSchemaTest::test_matches_real_env_required_vars` (failure)**: confirmed
+     `DB_GATEWAY_SCHEMA_NAME` (declared `public string $DB_GATEWAY_SCHEMA_NAME;` — no
+     default, non-nullable, in `src/Env.php`) is genuinely required — `Database::initConnection()`
+     throws `'DB_GATEWAY_SCHEMA_NAME is required'` when empty, and it's exactly the
+     3rd no-default/non-nullable string property alongside `DB_GATEWAY_URL` and
+     `DB_GATEWAY_PLATFORM` (verified by enumerating every `public` property in `Env.php`).
+     This is real drift from the v5.2.0 gateway-v4-routing change (commit `4edadad`) that
+     the test's expected array was never updated for. Updated the expectation.
+
+  4. **`RouterTest::test_router_returns_500_when_route_handler_throws_exception` (warnings)**:
+     `res_error()` (`src/helpers.php`) read `$_SERVER['REQUEST_METHOD']`/`['REQUEST_URI']`
+     unconditionally. `res_error()` is called from global exception/error handlers
+     (`error_handler.php`) and route handlers alike, not exclusively within a populated
+     HTTP request — a CLI-invoked code path (migrations, queue workers, `php stone`
+     commands, or a fatal error firing before the SAPI populates `$_SERVER`) legitimately
+     has neither key set. `src/bootstrap.php` already established the correct defensive
+     pattern for this exact log-line shape (`($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' .
+     ($_SERVER['REQUEST_URI'] ?? '')`); `res_error()` now matches it. This is a genuine
+     production robustness fix, not just a test-warning silencer.
+
+  Full `Unit` suite: 420 tests (3 errors, 2 failures, 2 warnings) → 418 tests (2 dead
+  tests deleted), 0 errors, 0 failures, 0 warnings, same 4 pre-existing PHPUnit
+  deprecations as before (verified unrelated via `git stash` A/B comparison). Full suite
+  (`Unit` + `Feature`): 424 tests, 0 errors/failures/warnings. `phpstan analyse` unaffected
+  aside from the now-accurate baseline shrink (7 pre-existing unrelated errors confirmed
+  present before this change too, via the same `git stash` comparison — not introduced
+  here, out of scope for this fix).
+
 ## [5.5.3] - 2026-07-02
 
 ### Fixed
