@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.2] - 2026-07-02
+
+### Fixed
+
+- **Generated client double-slash URL bug**: `MinimalHttp` in the generated `http.ts`
+  (`php stone generate client`) built request URLs via raw string concatenation
+  (`this.baseUrl + path`). Fleet convention writes `environment.apiServer.host` with
+  a trailing slash, and call-site paths (typed generated methods, and hand-written
+  `ApiService.get('/products', …)` escape-hatch wrappers) are written with a leading
+  slash — the concat produced `https://api.example.com//products`. PHP's
+  `RouteMatcher`/`Router::matchRoute()` do an exact string match on the path and do
+  not normalize repeated slashes, so the request 404s ("Not found") instead of
+  reaching the intended route (CorsMiddleware is global and still runs on the 404
+  path, so this is a pure routing miss, not a CORS-specific failure — see
+  `specialcomputers` investigation notes for a case where a *separate*, unrelated
+  `ALLOWED_ORIGINS` misconfiguration was the actual cause of a CORS-missing-header
+  symptom on the same request). Added `MinimalHttp.joinUrl(base, path)`, a private
+  static helper that strips trailing slashes from the base and leading slashes from
+  the path before joining with exactly one `/` — correct for every combination of
+  trailing/leading slash on either side. Applied to both the main request URL and
+  the default same-origin refresh-token URL. Mirrors the trim-then-join pattern
+  already used in `ngx-stonescriptphp-client` (`environment.apiServer.host.replace(/\/$/, '')`).
+  Added `ClientGeneratorV4Test::test_generated_http_ts_normalizes_url_join_for_all_slash_combinations`,
+  which extracts the emitted `joinUrl` method body and executes it under Node for
+  4 slash-combination cases, plus asserts the raw concat is gone from emitted source.
+
 ## [5.5.1] - 2026-06-29
 
 ### Changed

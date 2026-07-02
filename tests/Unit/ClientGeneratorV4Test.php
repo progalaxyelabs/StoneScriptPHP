@@ -1479,6 +1479,96 @@ class ClientGeneratorV4Test extends TestCase
         }
     }
 
+    /**
+     * Regression test for the double-slash URL bug: `environment.apiServer.host`
+     * is written with a trailing slash fleet-wide (CLIENT-SDK-SPEC convention),
+     * and call-site paths (both typed generated methods and hand-written
+     * `ApiService.get('/products', …)` escape-hatch wrappers) are written with a
+     * leading slash. A raw `this.baseUrl + path` concat produces
+     * `https://api.example.com//products` — PHP's exact-match route matcher does
+     * not normalize the double slash, so the request 404s and (depending on
+     * deployment) never reaches CORS-header-bearing middleware cleanly from the
+     * browser's perspective. Fixed by MinimalHttp.joinUrl() in verbatimHttpTs().
+     *
+     * Asserts BOTH: (1) the emitted source uses the helper, not a raw concat,
+     * and (2) the helper's actual runtime behavior is correct for every
+     * trailing/leading-slash combination — executed via Node, not just grepped.
+     */
+    public function test_generated_http_ts_normalizes_url_join_for_all_slash_combinations(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+
+            $httpTs = file_get_contents($outputDir . '/portal/src/http.ts');
+            $this->assertNotFalse($httpTs);
+
+            // (1) Source-level: helper used, raw unnormalized concat gone.
+            $this->assertStringContainsString('joinUrl(', $httpTs,
+                'generated http.ts must join baseUrl + path via a normalizing helper');
+            $this->assertStringNotContainsString('this.baseUrl + path', $httpTs,
+                'generated http.ts must not raw-concat baseUrl and path (produces double slashes)');
+            $this->assertStringNotContainsString('this.baseUrl + this.refreshEndpoint', $httpTs,
+                'generated http.ts must not raw-concat baseUrl and refreshEndpoint (same double-slash bug)');
+
+            // (2) Behavior-level: extract the joinUrl method body and execute it
+            // under Node for all four host/path slash combinations.
+            $this->assertMatchesRegularExpression(
+                '/private static joinUrl\(base: string, path: string\): string \{.*?\n  \}/s',
+                $httpTs,
+                'expected a joinUrl(base, path) static helper method in generated http.ts'
+            );
+            preg_match(
+                '/private static joinUrl\(base: string, path: string\): string \{(.*?)\n  \}/s',
+                $httpTs,
+                $m
+            );
+            $joinUrlBody = $m[1];
+
+            $nodeScript = <<<JS
+function joinUrl(base, path) {
+{$joinUrlBody}
+}
+const cases = [
+  ['https://api.example.com/', '/products', 'https://api.example.com/products'],
+  ['https://api.example.com',  '/products', 'https://api.example.com/products'],
+  ['https://api.example.com/', 'products',  'https://api.example.com/products'],
+  ['https://api.example.com',  'products',  'https://api.example.com/products'],
+  ['https://api.example.com//', '//products', 'https://api.example.com/products'],
+];
+let failures = [];
+for (const [base, path, expected] of cases) {
+  const actual = joinUrl(base, path);
+  if (actual !== expected) {
+    failures.push(`joinUrl(\${JSON.stringify(base)}, \${JSON.stringify(path)}) = \${JSON.stringify(actual)}, expected \${JSON.stringify(expected)}`);
+  }
+}
+if (failures.length) {
+  console.error(failures.join('\\n'));
+  process.exit(1);
+}
+console.log('OK');
+JS;
+
+            $scriptFile = tempnam(sys_get_temp_dir(), 'ssp-joinurl-') . '.js';
+            file_put_contents($scriptFile, $nodeScript);
+
+            $nodeOutput = [];
+            $nodeExit   = 0;
+            exec('node ' . escapeshellarg($scriptFile) . ' 2>&1', $nodeOutput, $nodeExit);
+            @unlink($scriptFile);
+
+            $this->assertEquals(
+                0,
+                $nodeExit,
+                "joinUrl() produced an incorrect URL for at least one slash combination:\n" . implode("\n", $nodeOutput)
+            );
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
     // =========================================================================
     // Fixture helpers
     // =========================================================================

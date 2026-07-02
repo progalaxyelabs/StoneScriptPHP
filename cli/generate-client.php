@@ -594,6 +594,26 @@ export class MinimalHttp {
     return this.request<T>('DELETE', path, body);
   }
 
+  /**
+   * Join a base URL and a path into a single, correctly-separated URL.
+   *
+   * `environment.apiServer.host` is written with a trailing slash across the
+   * fleet (CLIENT-SDK-SPEC convention) and call-site paths are written with a
+   * leading slash (both typed generated methods and hand-written escape-hatch
+   * callers like `ApiService.get('/products', …)`). A raw `base + path`
+   * concat therefore produces a double slash (`https://api.example.com//products`)
+   * whenever both sides carry their slash, which PHP's exact-match route
+   * matcher does not normalize — the request 404s upstream of CORS handling.
+   * This normalizes exactly one separator regardless of which side (if any)
+   * already has one, so every combination — trailing/no-trailing base x
+   * leading/no-leading path — yields a single slash.
+   */
+  private static joinUrl(base: string, path: string): string {
+    const trimmedBase = base.replace(/\/+$/, '');
+    const trimmedPath = path.replace(/^\/+/, '');
+    return `${trimmedBase}/${trimmedPath}`;
+  }
+
   private async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
     path: string,
@@ -601,7 +621,7 @@ export class MinimalHttp {
     params?: HttpParams,
     isRetry = false,
   ): Promise<T> {
-    const url = new URL(this.baseUrl + path);
+    const url = new URL(MinimalHttp.joinUrl(this.baseUrl, path));
     if (params) {
       for (const [k, v] of Object.entries(params)) {
         if (v !== undefined && v !== null) {
@@ -675,7 +695,7 @@ export class MinimalHttp {
 
     let res: Response;
     try {
-      res = await fetch(this.baseUrl + this.refreshEndpoint, {
+      res = await fetch(MinimalHttp.joinUrl(this.baseUrl, this.refreshEndpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refresh }),
