@@ -6,6 +6,7 @@ namespace StoneScriptPHP\Auth\ExternalAuth\Routes;
 
 use StoneScriptPHP\IRouteHandler;
 use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Auth\BearerToken;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
 use StoneScriptPHP\Auth\Client\AuthServiceException;
@@ -116,12 +117,12 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
             return null;
         }
 
-        // Strip "Bearer " prefix — buildAuthHeader() adds it back when making outbound
-        // requests. Case-insensitive + whitespace-tolerant to match the normalization
-        // added to AuthServiceClient::buildAuthHeader() (v5.5.3) — keeps both ends of
-        // the "inbound header -> outbound header" round trip consistent.
-        $stripped = preg_replace('/^\s*Bearer\s+/i', '', $headerValue);
-
-        return $stripped ?? $headerValue;
+        // Strip "Bearer " prefix via the canonical BearerToken utility (v5.5.5) —
+        // buildAuthHeader() adds it back when making outbound requests. Using the
+        // same shared utility here and in AuthServiceClient::buildAuthHeader() keeps
+        // both ends of the "inbound header -> outbound header" round trip consistent
+        // by construction, instead of two independently-maintained copies of the
+        // same regex.
+        return BearerToken::strip($headerValue);
     }
 }

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.5] - 2026-07-03
+
+### Changed
+
+- **Consolidated Bearer-prefix stripping into one canonical, public utility:
+  `StoneScriptPHP\Auth\BearerToken::strip()`.** The double-`"Bearer "` fix
+  shipped in v5.5.3 (`AuthServiceClient::buildAuthHeader()` normalizing
+  before re-prepending) already made the bug structurally impossible for any
+  caller of `getMemberships()`/similar SDK methods. But the strip logic
+  itself still existed as two independently-maintained copies of the same
+  regex — one inside `AuthServiceClient::buildAuthHeader()` (outbound) and
+  one inside `BaseExternalAuthRoute::getBearerToken()` (inbound) — and
+  anything running OUTSIDE a route class (e.g. a platform's
+  `config/auth.php` `tenants_resolver` closure, which reads
+  `$_SERVER['HTTP_AUTHORIZATION']` directly and has no access to
+  `BaseExternalAuthRoute`) had no framework utility to call. aasaanwork hit
+  exactly that gap and hand-rolled a local `App\Lib\BearerToken::strip()`
+  as a same-day fast fix (2026-07-03). Both existing call sites now delegate
+  to the new `StoneScriptPHP\Auth\BearerToken::strip()` (public, static,
+  idempotent, null/empty-safe, case-insensitive, whitespace-tolerant) —
+  single source of truth, and platform code (route classes, config
+  closures, anywhere) can call it directly instead of duplicating the
+  regex. aasaanwork's local copy has been deleted; its `tenants_resolver`
+  now calls the framework utility. Added `BearerTokenTest` (8 tests). Full
+  suite: 432 tests, 0 failures/errors (same skip/incomplete/deprecation
+  baseline as v5.5.4), zero regressions.
+
 ## [5.5.4] - 2026-07-02
 
 ### Fixed

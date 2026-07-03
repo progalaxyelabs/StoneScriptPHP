@@ -2,6 +2,8 @@
 
 namespace StoneScriptPHP\Auth\Client;
 
+use StoneScriptPHP\Auth\BearerToken;
+
 /**
  * Base HTTP client for ProGalaxy Auth Service
  *
@@ -264,6 +266,12 @@ abstract class AuthServiceClient
      * same root cause was copy-pasted into 5 more platforms' tenants_resolver
      * closures, all fixed for free by this framework-level normalization).
      *
+     * Normalization is delegated to {@see BearerToken::strip()} — the single
+     * canonical utility for this operation (v5.5.5), also used by
+     * {@see \StoneScriptPHP\Auth\ExternalAuth\Routes\BaseExternalAuthRoute::getBearerToken()}
+     * and available for direct use by non-route callers (platform config
+     * closures, etc.) that need the same normalization.
+     *
      * @param string|null $token Bare JWT token OR a raw "Bearer <token>" header value
      * @return array Authorization header array, e.g. ['Authorization: Bearer <token>']
      */
@@ -273,14 +281,7 @@ abstract class AuthServiceClient
             return [];
         }
 
-        $bareToken = preg_replace('/^\s*Bearer\s+/i', '', $token);
-        if ($bareToken === null) {
-            // preg_replace only returns null on a regex engine error (e.g. backtrack
-            // limit) — fall back to the original value rather than losing the token.
-            $bareToken = $token;
-        }
-
-        return ['Authorization: Bearer ' . $bareToken];
+        return ['Authorization: Bearer ' . BearerToken::strip($token)];
     }
 
     /**
