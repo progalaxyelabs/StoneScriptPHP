@@ -21,10 +21,11 @@ namespace StoneScriptPHP\Auth;
  * `config/auth.php` `tenants_resolver` closure, which reads
  * `$_SERVER['HTTP_AUTHORIZATION']` directly and has no access to
  * `BaseExternalAuthRoute` — had no framework utility to call and was forced
- * to hand-roll a THIRD copy. aasaanwork did exactly that
- * (`App\Lib\BearerToken::strip()`, added 2026-07-03 to fix a double-"Bearer "
- * exchange-403) before this class existed. That platform copy is now deleted
- * — `$tenantsResolver` calls this framework utility directly, and
+ * to hand-roll a THIRD copy. At least one downstream platform did exactly
+ * that (a local `App\Lib\BearerToken::strip()` added as a same-day fast fix
+ * for a double-"Bearer " exchange-403) before this class existed. That
+ * platform-local copy is now deleted — its `$tenantsResolver` calls this
+ * framework utility directly, and
  * `ExternalAuthServiceClient::getMemberships()` itself is *also* immune to
  * the double-prefix bug on its own (v5.5.3, `buildAuthHeader()` normalizes
  * unconditionally) — this class exists purely to give non-route callers a

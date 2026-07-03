@@ -261,9 +261,9 @@ abstract class AuthServiceClient
      * shape, verification fails, auth service returns 401, and callers that
      * catch the resulting AuthServiceException (e.g. a tenants_resolver
      * swallowing errors as an empty list) surface it as an unrelated-looking
-     * downstream error (confirmed: medstoreapp exchange 403
-     * tenant_access_denied for a verifiably correct membership, 2026-07-02 —
-     * same root cause was copy-pasted into 5 more platforms' tenants_resolver
+     * downstream error (confirmed in production: an exchange returning 403
+     * tenant_access_denied for a verifiably correct membership — the same
+     * root cause was copy-pasted into several platforms' tenants_resolver
      * closures, all fixed for free by this framework-level normalization).
      *
      * Normalization is delegated to {@see BearerToken::strip()} — the single

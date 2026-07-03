@@ -43,8 +43,8 @@
  *     from the API project's composer.json used AS-IS (no hardcoded npm org scope
  *     prefix like `@stonescript/` is added or stripped). Replaces the prior
  *     `@stonescript/api-client-{service}` convention.
- *   - Example: composer name `medstoreapp-api`, service `portal`
- *     → package name `medstoreapp-api-portal-client`
+ *   - Example: composer name `exampleapp-api`, service `portal`
+ *     → package name `exampleapp-api-portal-client`
  *   - The `--service=` filter remains for single-package generation.
  *
  * v4.3 (typed returns, CLIENT-SDK-SPEC §10): a route may declare a response DTO via
@@ -221,9 +221,9 @@ if ($composerName === null) {
  *   admin  service → {composer-name}-admin-client
  *
  * Rules:
- *   - When {composer-name} has NO slash (e.g. 'medstoreapp-api'):
+ *   - When {composer-name} has NO slash (e.g. 'exampleapp-api'):
  *       → unscoped npm name: `{composer-name}-{service}-client`
- *       → example: 'medstoreapp-api', service 'portal' → 'medstoreapp-api-portal-client'
+ *       → example: 'exampleapp-api', service 'portal' → 'exampleapp-api-portal-client'
  *
  *   - When {composer-name} has a vendor prefix (e.g. 'progalaxyelabs/progalaxy-api'):
  *       → scoped npm name: `@{vendor}/{pkg}-{service}-client`
@@ -237,7 +237,7 @@ if ($composerName === null) {
  * No hardcoded org scope (no @stonescript/, no @progalaxyelabs/) is added beyond
  * what the composer name itself provides.
  *
- * @param string $composerName  Value of `name` from composer.json (e.g. 'medstoreapp-api'
+ * @param string $composerName  Value of `name` from composer.json (e.g. 'exampleapp-api'
  *                              or 'progalaxyelabs/progalaxy-api')
  * @param string $serviceName   The service being generated (e.g. 'portal', 'admin', 'www')
  * @return string               Derived npm package name
@@ -254,7 +254,7 @@ function derivePackageName(string $composerName, string $serviceName): string
         return '@' . $vendor . '/' . $pkg . '-' . $serviceName . '-client';
     }
 
-    // No vendor prefix (e.g. 'medstoreapp-api') → unscoped 'medstoreapp-api-{service}-client'
+    // No vendor prefix (e.g. 'exampleapp-api') → unscoped 'exampleapp-api-{service}-client'
     return $composerName . '-' . $serviceName . '-client';
 }
 
@@ -1518,7 +1518,7 @@ TS;
  *
  * @param string $serviceName   e.g. 'portal', 'admin'
  * @param string $packageName   Derived npm package name (generate-api-client-spec.md §"Package Naming"):
- *                              {composer-name}-{serviceName}-client (e.g. 'medstoreapp-api-portal-client')
+ *                              {composer-name}-{serviceName}-client (e.g. 'exampleapp-api-portal-client')
  */
 function generatePackageJson(string $serviceName, string $packageName): string
 {

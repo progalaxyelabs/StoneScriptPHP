@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.6] - 2026-07-03
+
+### Changed
+
+- De-brand: swept the whole source tree for leaked private-platform names
+  that had crept back into CHANGELOG entries and doc comments in v5.5.2
+  through v5.5.5 (a regression of the v5.5.1 de-brand pass). Genericized
+  references in `CHANGELOG.md`, `cli/generate-client.php`,
+  `src/Auth/BearerToken.php`, `src/Auth/Client/AuthServiceClient.php`, and
+  `tests/Unit/AuthServiceClientBuildAuthHeaderTest.php` — narrative
+  substance (what broke, which class/method, root cause) is preserved;
+  private platform names and internal triage dates are replaced with
+  neutral phrasing ("a downstream platform", "several platforms'
+  tenants_resolver closures") or the existing `exampleapp-api` example
+  convention. No code behavior changed. Verified via full-tree grep for
+  each known private platform name (zero hits outside `progalaxyelabs/`
+  vendor identifiers) and a full test run (432 tests, 0 failures/errors).
+
 ## [5.5.5] - 2026-07-03
 
 ### Changed
@@ -22,15 +40,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anything running OUTSIDE a route class (e.g. a platform's
   `config/auth.php` `tenants_resolver` closure, which reads
   `$_SERVER['HTTP_AUTHORIZATION']` directly and has no access to
-  `BaseExternalAuthRoute`) had no framework utility to call. aasaanwork hit
-  exactly that gap and hand-rolled a local `App\Lib\BearerToken::strip()`
-  as a same-day fast fix (2026-07-03). Both existing call sites now delegate
-  to the new `StoneScriptPHP\Auth\BearerToken::strip()` (public, static,
-  idempotent, null/empty-safe, case-insensitive, whitespace-tolerant) —
-  single source of truth, and platform code (route classes, config
-  closures, anywhere) can call it directly instead of duplicating the
-  regex. aasaanwork's local copy has been deleted; its `tenants_resolver`
-  now calls the framework utility. Added `BearerTokenTest` (8 tests). Full
+  `BaseExternalAuthRoute`) had no framework utility to call. At least one
+  downstream platform hit exactly that gap and hand-rolled a local
+  `App\Lib\BearerToken::strip()` as a same-day fast fix. Both existing call
+  sites now delegate to the new `StoneScriptPHP\Auth\BearerToken::strip()`
+  (public, static, idempotent, null/empty-safe, case-insensitive,
+  whitespace-tolerant) — single source of truth, and platform code (route
+  classes, config closures, anywhere) can call it directly instead of
+  duplicating the regex. That platform-local copy has since been deleted;
+  its `tenants_resolver` now calls the framework utility. Added
+  `BearerTokenTest` (8 tests). Full
   suite: 432 tests, 0 failures/errors (same skip/incomplete/deprecation
   baseline as v5.5.4), zero regressions.
 
@@ -129,9 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protected method (used by every `AuthServiceClient`/`ExternalAuthServiceClient`
   method that forwards a bearer token, e.g. `getMemberships()`) always
   unconditionally prepended `"Bearer "` to the token it was given, assuming
-  callers only ever pass a *bare* token. In practice, several platforms'
-  `tenants_resolver` closures (medstoreapp, btechrecruiter, instituteapp,
-  restrantapp, logisticsapp, aasaanwork) read `$_SERVER['HTTP_AUTHORIZATION']`
+  callers only ever pass a *bare* token. In practice, several downstream
+  platforms' `tenants_resolver` closures read `$_SERVER['HTTP_AUTHORIZATION']`
   directly — which already carries the `"Bearer "` prefix as sent by the
   client — and forwarded that raw header value straight into
   `getMemberships()`. The result was `Authorization: Bearer Bearer <token>` on
@@ -142,7 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that as a generic error and returned an empty tenants list, which
   `ExchangeRoute` then reported as a misleading `403 tenant_access_denied` —
   even for an identity with a verifiably correct, active tenant membership
-  row in the database (medstoreapp portal live-bug triage, 2026-07-02).
+  row in the database (caught during live production bug triage).
   `buildAuthHeader()` now strips any pre-existing `"Bearer "` prefix
   (case-insensitive, tolerant of extra whitespace) before adding it back, so
   it produces exactly one correct header regardless of whether the caller
@@ -166,10 +184,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RouteMatcher`/`Router::matchRoute()` do an exact string match on the path and do
   not normalize repeated slashes, so the request 404s ("Not found") instead of
   reaching the intended route (CorsMiddleware is global and still runs on the 404
-  path, so this is a pure routing miss, not a CORS-specific failure — see
-  `specialcomputers` investigation notes for a case where a *separate*, unrelated
-  `ALLOWED_ORIGINS` misconfiguration was the actual cause of a CORS-missing-header
-  symptom on the same request). Added `MinimalHttp.joinUrl(base, path)`, a private
+  path, so this is a pure routing miss, not a CORS-specific failure — a separate
+  downstream investigation into a similar-looking CORS-missing-header symptom
+  found an unrelated `ALLOWED_ORIGINS` misconfiguration as the actual cause on
+  that request). Added `MinimalHttp.joinUrl(base, path)`, a private
   static helper that strips trailing slashes from the base and leading slashes from
   the path before joining with exactly one `/` — correct for every combination of
   trailing/leading slash on either side. Applied to both the main request URL and
@@ -186,7 +204,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - De-brand: replaced all private `TENANCY-IDENTITY-MODEL` doc citations with public
   `framework-spec.md §6` references throughout src/ and tests/.
 - De-brand: genericized private platform names used as examples/fixtures in src/ and
-  tests/ (`logisticsapp.in` → `exampleapp.in`, platform codes → `exampleapp`/`sampleapp`).
+  tests/ (private platform domains → `exampleapp.in`, platform codes → `exampleapp`/`sampleapp`).
 - De-brand: removed internal task numbers from code comments and test doc blocks.
 - De-brand: genericized private auth-server name in `StoreAccessMiddleware` comment.
 - Spec: genericized private platform examples in `generate-api-client-spec.md` and

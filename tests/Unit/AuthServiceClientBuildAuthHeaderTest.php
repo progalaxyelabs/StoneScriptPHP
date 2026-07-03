@@ -18,8 +18,7 @@ use StoneScriptPHP\Auth\Client\AuthServiceClient;
  * pass a *bare* token — matching BaseExternalAuthRoute::getBearerToken(),
  * which strips the "Bearer " prefix before handing the raw token onward.
  *
- * In practice, several platforms' tenants_resolver closures (medstoreapp,
- * btechrecruiter, instituteapp, restrantapp, logisticsapp, aasaanwork) read
+ * In practice, several downstream platforms' tenants_resolver closures read
  * $_SERVER['HTTP_AUTHORIZATION'] directly — which already carries the
  * "Bearer " prefix as sent by the client — and forwarded that raw value
  * straight into getMemberships(). buildAuthHeader() then re-prepended
@@ -32,8 +31,8 @@ use StoneScriptPHP\Auth\Client\AuthServiceClient;
  * does, treating any failure as "no tenants") silently returned an empty
  * tenants list. Downstream, ExchangeRoute then reported this as
  * 403 tenant_access_denied — for an identity that verifiably DOES have an
- * active, correct membership row in the database (medstoreapp portal live
- * bug, 2026-07-02 triage).
+ * active, correct membership row in the database (a live production bug
+ * caught during triage).
  *
  * ## The fix
  *
