@@ -925,11 +925,11 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     // =========================================================================
-    // v4.7 — T3 tenant-prefix hard-error guard (aasaanwork-platform incident, 2026-07-03)
+    // v4.7 — T3 tenant-prefix hard-error guard (production incident on a downstream platform)
     // =========================================================================
 
     /**
-     * Regression test for the aasaanwork-platform production incident: a platform
+     * Regression test for a real production incident: a downstream platform
      * whose real tenancy is T2 (JWT-tenant — tenant_id resolved server-side from the
      * token, never in the URL) had its routes.php declared WITHOUT any
      * /{service}/tenant/{tenantId} prefix. Regenerating the client with the T3
@@ -955,7 +955,7 @@ class ClientGeneratorV4Test extends TestCase
             $this->assertNotEquals(0, $exitCode,
                 'Generator must abort (non-zero exit) when T3 mode is used against routes that ' .
                 'lack the /{service}/tenant/{tenantId} prefix — writing a client here silently ' .
-                'ships a doubled-prefix 404ing URL (the aasaanwork-platform incident).');
+                'ships a doubled-prefix 404ing URL (the production incident this guard was added for).');
 
             $this->assertFileDoesNotExist($outputDir . '/portal/src/client.ts',
                 'No client.ts should be written when the T3 tenant-prefix guard rejects the routes.');
@@ -1018,7 +1018,7 @@ class ClientGeneratorV4Test extends TestCase
     /**
      * Returns path to a temporary fixture routes.php shaped like a T2 (JWT-tenant)
      * platform: portal routes declared FLAT, with no /tenant/{tenantId} URL segment
-     * anywhere — mirrors aasaanwork-platform's actual routes.php.
+     * anywhere — mirrors the affected platform's actual routes.php from the incident.
      */
     private function fixtureRoutesFlatNoTenantPrefix(): string
     {

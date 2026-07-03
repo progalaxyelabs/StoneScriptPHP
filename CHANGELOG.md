@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.8] - 2026-07-03
+
+### Changed
+
+- De-brand: the v5.5.7 T3 tenant-prefix hard-error guard (`cli/generate-client.php`,
+  `tests/Unit/ClientGeneratorV4Test.php`) re-introduced a private downstream
+  platform's name into doc comments, an error message, and a test regression
+  comment/assertion message — a regression of the v5.5.6 de-brand pass.
+  Genericized every occurrence to neutral phrasing ("a downstream JWT-tenancy
+  (T2) platform", "a consuming platform's production portal", "the production
+  incident this guard was added for") while keeping the technical narrative
+  (root cause, fix, regression-test intent) fully intact. No generator logic
+  or test assertions changed — only comments and message strings. Verified
+  via full-tree grep for each known private platform name (zero hits outside
+  `progalaxyelabs/` vendor identifiers) and a full test run (435 tests, 0
+  failures/errors).
+
 ## [5.5.6] - 2026-07-03
 
 ### Changed

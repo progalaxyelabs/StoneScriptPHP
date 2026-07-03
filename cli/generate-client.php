@@ -6,7 +6,7 @@
  * Generates per-service TypeScript client packages from PHP routes.
  * Implements CLIENT-SDK-SPEC §0 Amendments A1–A6 (approved 2026-06-14).
  *
- * v4.7 (T3 tenant-prefix guard — aasaanwork-platform incident, 2026-07-03):
+ * v4.7 (T3 tenant-prefix guard — production incident on a downstream platform):
  *   - Added assertT3RoutesCarryTenantPrefix(), called once per T3-tenant-scoped
  *     service before URL templates are built.
  *   - Root cause: T3 mode strips a literal `/{service}/tenant/{tenantId}` prefix
@@ -18,7 +18,7 @@
  *     path, producing a doubled-service-segment URL
  *     (`/portal/tenant/{id}/portal/projects`) that 404s on every call. The
  *     generator exited 0 and wrote a client that looked entirely plausible —
- *     this shipped straight to aasaanwork-platform's production portal.
+ *     this shipped straight to a consuming platform's production portal.
  *   - Fix: before building URL templates for a T3-tenant-scoped service, every
  *     route's path is checked against the exact prefix pattern the template
  *     builder strips. Any route missing it aborts generation with a hard error
@@ -389,7 +389,7 @@ ERR
 }
 
 /**
- * v4.7 hard-error guard (aasaanwork-platform incident, 2026-07-03).
+ * v4.7 hard-error guard (production incident on a downstream T2 platform).
  *
  * T3 (URL-tenant) mode builds every tenant-scoped business-method URL by
  * STRIPPING the exact `/{service}/tenant/{tenantId}` prefix off the route path
@@ -403,9 +403,10 @@ ERR
  * `/portal/tenant/{id}/portal/projects`. That is a doubled-service-segment URL
  * that 404s on every call. The generator previously exited 0 and wrote a
  * client that looked entirely plausible — this was a SILENT failure mode that
- * shipped straight to production (aasaanwork's portal dashboard/projects list
- * 404'd for every tenant-scoped call after a routine client regeneration
- * omitted the --tenancy flag and picked up the T3 default).
+ * shipped straight to production on a downstream T2 (JWT-tenant) platform
+ * (its portal dashboard/projects list 404'd for every tenant-scoped call
+ * after a routine client regeneration omitted the --tenancy flag and picked
+ * up the T3 default).
  *
  * Fails loudly instead of writing a broken client: if ANY route in a
  * T3-tenant-scoped service lacks the expected prefix, abort generation with
@@ -439,8 +440,8 @@ $list
 
 T3 mode builds every tenant-scoped method URL by stripping that exact prefix and prepending the
 runtime tenant accessor (this.t). A route missing the prefix produces a DOUBLED, 404ing URL at
-runtime (this.t + the unstripped path) — this is the aasaanwork-platform production incident of
-2026-07-03: GET /portal/tenant/{id}/portal/projects instead of GET /portal/projects.
+runtime (this.t + the unstripped path) — this is the production incident that motivated this guard:
+GET /portal/tenant/{id}/portal/projects instead of GET /portal/projects.
 
 If tenant_id is resolved server-side from the JWT (not the URL) for this platform, regenerate with
 --tenancy=T2 instead (JWT-tenant — no URL tenant segment, tenant comes from the token):
