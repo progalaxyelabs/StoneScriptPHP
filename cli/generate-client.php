@@ -1,10 +1,29 @@
 <?php
 
 /**
- * API Client Generator — v4.6
+ * API Client Generator — v4.7
  *
  * Generates per-service TypeScript client packages from PHP routes.
  * Implements CLIENT-SDK-SPEC §0 Amendments A1–A6 (approved 2026-06-14).
+ *
+ * v4.7 (T3 tenant-prefix guard — aasaanwork-platform incident, 2026-07-03):
+ *   - Added assertT3RoutesCarryTenantPrefix(), called once per T3-tenant-scoped
+ *     service before URL templates are built.
+ *   - Root cause: T3 mode strips a literal `/{service}/tenant/{tenantId}` prefix
+ *     off each route path and replaces it with the runtime `${this.t}` accessor.
+ *     When a platform's routes.php has NO such prefix (its real tenancy is T2 —
+ *     JWT-tenant, tenant resolved server-side from the token) but the generator
+ *     is invoked without `--tenancy=T2` and silently defaults to T3, the strip
+ *     is a no-op: the emitted template becomes `${this.t}` + the UNSTRIPPED
+ *     path, producing a doubled-service-segment URL
+ *     (`/portal/tenant/{id}/portal/projects`) that 404s on every call. The
+ *     generator exited 0 and wrote a client that looked entirely plausible —
+ *     this shipped straight to aasaanwork-platform's production portal.
+ *   - Fix: before building URL templates for a T3-tenant-scoped service, every
+ *     route's path is checked against the exact prefix pattern the template
+ *     builder strips. Any route missing it aborts generation with a hard error
+ *     listing the offending routes and pointing at `--tenancy=T2`. No more
+ *     silent malformed-URL clients.
  *
  * v4.6 (orphan cross-product cleanup):
  *   - Added removeOrphanNestedPackages() that runs at the start of every generation.
@@ -119,7 +138,7 @@ $argv = $_SERVER['argv'];
 // Help check first — before positional parsing
 if (array_intersect(['--help', '-h', 'help'], $argv)) {
     echo <<<HELP
-API Client Generator v4.5
+API Client Generator v4.7
 =========================
 
 Generates per-service TypeScript client packages (CLIENT-SDK-SPEC §0 A1-A6).
@@ -367,6 +386,71 @@ ERR
         );
         exit(1);
     }
+}
+
+/**
+ * v4.7 hard-error guard (aasaanwork-platform incident, 2026-07-03).
+ *
+ * T3 (URL-tenant) mode builds every tenant-scoped business-method URL by
+ * STRIPPING the exact `/{service}/tenant/{tenantId}` prefix off the route path
+ * and prepending the runtime tenant accessor `${this.t}` (which itself resolves
+ * to `/{service}/tenant/{id}`). When a route's path does NOT carry that prefix
+ * — because the platform's real tenancy is T2 (JWT-tenant, tenant resolved
+ * server-side from the token, never in the URL) but the generator was invoked
+ * without `--tenancy=T2` and silently fell back to the T3 default — the strip
+ * is a no-op and the emitted template becomes `${this.t}` + the UNSTRIPPED
+ * path, e.g. `/portal/tenant/{id}` + `/portal/projects` =
+ * `/portal/tenant/{id}/portal/projects`. That is a doubled-service-segment URL
+ * that 404s on every call. The generator previously exited 0 and wrote a
+ * client that looked entirely plausible — this was a SILENT failure mode that
+ * shipped straight to production (aasaanwork's portal dashboard/projects list
+ * 404'd for every tenant-scoped call after a routine client regeneration
+ * omitted the --tenancy flag and picked up the T3 default).
+ *
+ * Fails loudly instead of writing a broken client: if ANY route in a
+ * T3-tenant-scoped service lacks the expected prefix, abort generation with
+ * every offending route listed and a direct pointer to --tenancy=T2.
+ *
+ * @param array<int,array<string,mixed>> $routes All routes for one T3-tenant-scoped service.
+ * @param string $serviceName e.g. 'portal'
+ */
+function assertT3RoutesCarryTenantPrefix(array $routes, string $serviceName): void
+{
+    $prefixPattern = '#^/' . preg_quote($serviceName, '#') . '/tenant/\{[^}]+\}#';
+
+    $offending = [];
+    foreach ($routes as $route) {
+        $path = $route['path'] ?? '';
+        if (!preg_match($prefixPattern, $path)) {
+            $offending[] = strtoupper($route['method'] ?? '?') . ' ' . ($path === '' ? '?' : $path);
+        }
+    }
+
+    if (empty($offending)) {
+        return;
+    }
+
+    $list = implode("\n", array_map(fn($r) => "    - $r", $offending));
+    fwrite(STDERR, <<<ERR
+
+[stone generate client] ERROR: --tenancy=T3 (URL-tenant) was requested for service '$serviceName',
+but the following route(s) do not carry the expected /$serviceName/tenant/{tenantId} URL prefix:
+$list
+
+T3 mode builds every tenant-scoped method URL by stripping that exact prefix and prepending the
+runtime tenant accessor (this.t). A route missing the prefix produces a DOUBLED, 404ing URL at
+runtime (this.t + the unstripped path) — this is the aasaanwork-platform production incident of
+2026-07-03: GET /portal/tenant/{id}/portal/projects instead of GET /portal/projects.
+
+If tenant_id is resolved server-side from the JWT (not the URL) for this platform, regenerate with
+--tenancy=T2 instead (JWT-tenant — no URL tenant segment, tenant comes from the token):
+
+    php stone generate client --tenancy=T2
+
+Generation aborted — no files were written for service '$serviceName'.
+ERR
+    );
+    exit(1);
 }
 
 // ============================================================================
@@ -820,6 +904,13 @@ function generateClientTs(
 ): string {
     // Determine if this service produces a tenant-scoped client
     $isTenantScoped = $tenancyMode === 'T3' && !$isAdminService;
+
+    // v4.7 hard-error guard: T3 routes MUST carry the /{service}/tenant/{tenantId}
+    // prefix the URL-template builder strips — otherwise it silently emits a
+    // doubled-prefix 404ing URL (see assertT3RoutesCarryTenantPrefix() docblock).
+    if ($isTenantScoped) {
+        assertT3RoutesCarryTenantPrefix($serviceRoutes, $serviceName);
+    }
 
     // Group routes by declared group
     $groups = [];

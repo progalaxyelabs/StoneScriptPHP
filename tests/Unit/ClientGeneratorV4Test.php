@@ -925,6 +925,120 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     // =========================================================================
+    // v4.7 — T3 tenant-prefix hard-error guard (aasaanwork-platform incident, 2026-07-03)
+    // =========================================================================
+
+    /**
+     * Regression test for the aasaanwork-platform production incident: a platform
+     * whose real tenancy is T2 (JWT-tenant — tenant_id resolved server-side from the
+     * token, never in the URL) had its routes.php declared WITHOUT any
+     * /{service}/tenant/{tenantId} prefix. Regenerating the client with the T3
+     * DEFAULT (no --tenancy flag passed) used to exit 0 and silently write a client
+     * whose business methods built `${this.t}` + the unstripped path, producing a
+     * doubled-service-segment URL (`/portal/tenant/{id}/portal/projects`) that
+     * 404'd on every call in production.
+     *
+     * Post-fix (v4.7): generation must abort with a non-zero exit code instead of
+     * writing a broken client.
+     */
+    public function test_t3_default_on_routes_without_tenant_prefix_aborts_generation(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            // No --tenancy flag → generator defaults to T3.
+            $exitCode = $this->runGenerator(
+                ['portal', '--output=' . $outputDir],
+                $this->fixtureRoutesFlatNoTenantPrefix(),
+            );
+
+            $this->assertNotEquals(0, $exitCode,
+                'Generator must abort (non-zero exit) when T3 mode is used against routes that ' .
+                'lack the /{service}/tenant/{tenantId} prefix — writing a client here silently ' .
+                'ships a doubled-prefix 404ing URL (the aasaanwork-platform incident).');
+
+            $this->assertFileDoesNotExist($outputDir . '/portal/src/client.ts',
+                'No client.ts should be written when the T3 tenant-prefix guard rejects the routes.');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * The correct fix path: the SAME flat (no tenant-prefix) routes.php generates
+     * cleanly under --tenancy=T2, producing flat URLs with no tenant segment and no
+     * setTenant()/this.t machinery at all.
+     */
+    public function test_t2_flag_on_flat_routes_generates_correct_flat_urls(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $exitCode = $this->runGenerator(
+                ['portal', '--output=' . $outputDir, '--tenancy=T2'],
+                $this->fixtureRoutesFlatNoTenantPrefix(),
+            );
+
+            $this->assertEquals(0, $exitCode, 'Generator must exit 0 for T2 mode on flat routes');
+
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+            $this->assertStringContainsString("this.http.get<T.ApiResponse>('/portal/projects', params)", $clientTs,
+                'T2 mode must emit the flat backend path verbatim — no tenant prefix, no doubling');
+            $this->assertStringNotContainsString('/portal/tenant/', $clientTs,
+                'T2 (JWT-tenant) clients must never contain a /portal/tenant/{id} URL segment');
+            $this->assertStringNotContainsString('setTenant', $clientTs,
+                'T2 clients must not expose setTenant() — tenant comes from the JWT, not caller-supplied state');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Legitimate T3 usage — routes correctly declared WITH the tenant prefix — must
+     * still generate cleanly. Guards against the new assertion being over-broad.
+     */
+    public function test_t3_with_correct_tenant_prefix_still_generates_cleanly(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $exitCode = $this->runGenerator(
+                ['portal', '--output=' . $outputDir, '--tenancy=T3'],
+                $this->fixtureRoutesFile(), // has /portal/tenant/{tenantId} prefix on every portal route
+            );
+
+            $this->assertEquals(0, $exitCode,
+                'Correctly-declared T3 routes (with the tenant prefix) must still generate cleanly');
+            $this->assertFileExists($outputDir . '/portal/src/client.ts');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    /**
+     * Returns path to a temporary fixture routes.php shaped like a T2 (JWT-tenant)
+     * platform: portal routes declared FLAT, with no /tenant/{tenantId} URL segment
+     * anywhere — mirrors aasaanwork-platform's actual routes.php.
+     */
+    private function fixtureRoutesFlatNoTenantPrefix(): string
+    {
+        $file = sys_get_temp_dir() . '/ssp-fixture-flat-no-tenant-' . uniqid() . '.php';
+
+        file_put_contents($file, <<<'PHP'
+<?php
+// Fixture: T2/JWT-tenant platform — no /tenant/{tenantId} segment anywhere.
+
+$router->group('/portal', ['service' => 'portal'], function () use ($router) {
+    $router->get('/projects',  'ListProjectsRoute',  group: 'projects', action: 'list');
+    $router->post('/projects', 'CreateProjectRoute', group: 'projects', action: 'create');
+});
+PHP
+        );
+
+        return $file;
+    }
+
+    // =========================================================================
     // v4.4.1 Bug 1 — scope arg parsed from dispatcher-adjusted $_SERVER['argv']
     // =========================================================================
 
