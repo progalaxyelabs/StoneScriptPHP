@@ -159,12 +159,24 @@ class JwtAuthMiddleware implements MiddlewareInterface
         try {
             $user = AuthenticatedUser::fromPayload($payload);
 
-            // Store user in global auth context
+            // Store user in global auth context (used by auth()/auth_id()/AuthContext
+            // consumers, e.g. GatewayTenantMiddleware, Application::logRequest()).
             AuthContext::setUser($user);
+
+            // Store raw JWT claims on the request (used by the Auth\Middleware\Require*
+            // guard family — RequireCardMiddleware, RequireTenantMiddleware,
+            // RequireRoleMiddleware, RequireIssuerMiddleware, TenantUrlMatchMiddleware —
+            // and RequestContextTrait). Without this, every guard reads an always-empty
+            // $request['jwt_claims'] and silently passes every request through, whether
+            // authenticated or not (framework-spec.md §6 §5.1 — see CHANGELOG for the
+            // fleet-wide fix). This is the single contract both middleware families
+            // must agree on; AuthContext and jwt_claims are populated from the SAME
+            // validated $payload so they can never drift apart.
+            $request['jwt_claims'] = $payload;
 
             log_debug("JWT middleware: User {$user->user_id} authenticated successfully");
 
-            // Continue to next middleware
+            // Continue to next middleware with the enriched request
             return $next($request);
 
         } catch (\InvalidArgumentException $e) {

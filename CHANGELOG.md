@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.7.0] - 2026-07-04
+
+### Fixed
+
+- **CRITICAL — guard middlewares were inert no-ops fleet-wide (task #3178).**
+  `JwtAuthMiddleware` (`src/Routing/Middleware/JwtAuthMiddleware.php`) — the
+  middleware `Application::run()` wires globally on EVERY platform — stored the
+  authenticated user only via `AuthContext::setUser()` and never populated
+  `$request['jwt_claims']`. But the entire `Auth\Middleware\*` guard family
+  (`RequireCardMiddleware`, `RequireTenantMiddleware`, `RequireRoleMiddleware`,
+  `RequireIssuerMiddleware`, `TenantUrlMatchMiddleware`) — plus
+  `RequestContextTrait` used by controllers — reads authorization state
+  EXCLUSIVELY from `$request['jwt_claims']`. Because that key was always empty,
+  every guard treated every request (authenticated or not) as an unauthenticated
+  public route and silently passed it through — card/role/tenant/issuer
+  requirements were never enforced. Confirmed live in an aasaanwork session
+  (2026-07-04): a passport-only (tenant-less) token reached a tenant-scoped
+  route handler instead of getting 403 `tenant_context_required`.
+  - **Root cause / two parallel families:** the codebase had two middleware
+    families for the same concern — `Routing\Middleware\JwtAuthMiddleware`
+    (writes to `AuthContext`, actually wired by `Application::run()`) and
+    `Auth\Middleware\*` guards + `ValidateJwtMiddleware` (read/write
+    `$request['jwt_claims']`, backed by framework-spec.md §6 and covered by
+    existing unit tests). They never talked to each other.
+  - **Fix:** `JwtAuthMiddleware::handle()` now sets
+    `$request['jwt_claims'] = $payload` from the SAME validated payload used to
+    build `AuthContext`'s `AuthenticatedUser`, immediately before calling
+    `$next()`. `AuthContext` (used by `auth()`/`GatewayTenantMiddleware`/request
+    logging) and `$request['jwt_claims']` (used by every guard) can no longer
+    drift apart — one payload, two read paths, single source of truth.
+  - **Mitigant that held throughout:** data isolation was never at risk —
+    `GatewayTenantMiddleware` reads `auth()->tenant_id` (from `AuthContext`,
+    which WAS correctly populated) and unconditionally scopes every
+    `Database::fn()` call to it. This was a request-level AUTHORIZATION gap
+    (should this request even reach the handler?), not a data-leak-through-the-
+    DB bug.
+
+- **`TenantUrlMatchMiddleware` can now be wired globally — scope-aware gap
+  closed (task #3178, framework-spec.md §5.2).** Previously this middleware
+  fail-closed with HTTP 500 `middleware_misconfigured` on ANY route that didn't
+  resolve its URL param, which meant it could only ever be wired per-route —
+  wiring it globally would 500 every flat/non-tenant route (health, webhooks,
+  admin/auth, infra). It is now **self-skipping**: it inspects the matched
+  route's PATTERN (`$request['route']['pattern']`, set by `Router::dispatch()`)
+  and passes through untouched when the pattern doesn't declare the configured
+  tenant param (e.g. `{tenantId}`) as a path segment — mirroring how
+  `StoreAccessMiddleware` already self-skips non-tenant-scoped routes by
+  pattern. A route whose pattern DOES declare the param but fails to resolve it
+  into `$request['params']` still fails closed with 500 (genuine
+  router/param-name-drift bug, unchanged).
+  - New `Application::run()` config key: `'tenant_url_match' => ['enabled' =>
+    true, 'param' => 'tenantId']` — opt-in (off by default for backward
+    compat), wires `TenantUrlMatchMiddleware` as global middleware. Safe on
+    every route because of the self-skip behaviour above.
+
+### Added
+
+- 27 new/updated framework unit tests locking down the JwtAuthMiddleware ↔
+  Require* guard contract:
+  - `tests/Unit/JwtAuthMiddlewareTest.php` (new) — proves `jwt_claims` is
+    populated from the same payload as `AuthContext`, for card tokens,
+    passport tokens, public routes, missing/invalid tokens.
+  - `tests/Unit/AuthMiddlewarePipelineIntegrationTest.php` (new) — end-to-end
+    pipeline tests composing the REAL `JwtAuthMiddleware` with
+    `RequireCardMiddleware` / `RequireTenantMiddleware` / `RequireRoleMiddleware`
+    / `TenantUrlMatchMiddleware` exactly as `Application::run()` wires them,
+    including the exact aasaanwork live-repro scenario (passport → 403, not
+    handler) and the flat-route-unaffected-by-global-middleware case.
+  - `tests/Unit/CardBoundaryMiddlewareTest.php` (updated) — existing
+    `TenantUrlMatchMiddleware` tests updated for the new pattern-based self-skip
+    check; added dedicated self-skip tests (no `{tenantId}` in pattern, absent
+    `route` key, card claims present but route still non-tenant-scoped).
+
+### Live verification (devvmlocal, 2026-07-04)
+
+Reproduced the exact aasaanwork wiring (`JwtAuthMiddleware` + `RequireCardMiddleware`
+only, real RSA-signed JWTs via `RsaJwtHandler`, served over real HTTP via PHP's
+built-in server in a `php:8.3-cli-bookworm` container) and confirmed:
+- **Pre-fix code:** passport-only token → tenant-scoped route → `HTTP 200`,
+  handler reached (the bug, reproduced live).
+- **Post-fix code, same wiring:** passport-only token → tenant-scoped route →
+  `HTTP 403 tenant_context_required`, handler never reached.
+- Valid card on its own tenant route → `HTTP 200`.
+- Valid card on a foreign tenant route (`TenantUrlMatchMiddleware` wired) →
+  `HTTP 403 tenant_mismatch`.
+- `/health` (no `{tenantId}` in pattern) → `HTTP 200`, unaffected by
+  `TenantUrlMatchMiddleware` wired globally in the same pipeline.
+- No token at all → `HTTP 401` (existing behaviour, unchanged).
+
 ## [5.6.1] - 2026-07-04
 
 ### Fixed

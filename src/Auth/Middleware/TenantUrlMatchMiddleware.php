@@ -20,7 +20,7 @@ use StoneScriptPHP\ApiResponse;
  * is rejected — it indicates the client is either confused or attempting to access
  * another tenant's data by manipulating the URL.
  *
- * ## Usage
+ * ## Usage — per-route
  *
  * Apply per-route or per-group on any route whose URL carries a tenant identifier:
  *
@@ -33,11 +33,35 @@ use StoneScriptPHP\ApiResponse;
  * (default: 'tenantId'). The framework stores matched URL params in
  * $request['params'] after routing.
  *
+ * ## Usage — GLOBAL (framework-spec.md §5.2 gap closure, since 5.7.0)
+ *
+ * This middleware is now SELF-SKIPPING: it inspects the matched route's PATTERN
+ * (`$request['route']['pattern']`, set by `Router::dispatch()`) rather than
+ * blindly requiring the URL param to be present. If the pattern does not declare
+ * `{tenantId}` (or whatever `$urlParamName` is configured as) as a path segment,
+ * the route is treated as non-tenant-scoped and passed through — no 500.
+ *
+ * This makes it safe to wire GLOBALLY via `Application::run()`:
+ *
+ *   Application::run([
+ *       ...
+ *       'tenant_url_match' => ['enabled' => true, 'param' => 'tenantId'],
+ *   ]);
+ *
+ * Flat/non-tenant routes (health, webhooks, admin auth, infra) simply don't
+ * carry `{tenantId}` in their pattern and are skipped automatically — mirroring
+ * how `StoreAccessMiddleware` self-skips non-tenant-scoped routes by pattern.
+ *
  * ## Preconditions
  *
  * - MUST run AFTER JwtAuthMiddleware / ValidateJwtMiddleware (jwt_claims required)
  * - MUST run AFTER RequireTenantMiddleware (tenant_id claim already verified present)
- * - URL parameter name MUST be registered in the route pattern (e.g. {tenantId})
+ *   when wired per-route; when wired globally it fails closed with 403
+ *   tenant_context_required for any tenant-scoped route hit with a tenant-less token,
+ *   so RequireTenantMiddleware is not strictly required upstream.
+ * - MUST run AFTER routing (needs `$request['route']['pattern']` — always true when
+ *   wired via `Router::use()` / `Application::run()`, since the pipeline only runs
+ *   post-match).
  */
 class TenantUrlMatchMiddleware implements MiddlewareInterface
 {
@@ -50,6 +74,16 @@ class TenantUrlMatchMiddleware implements MiddlewareInterface
 
     public function handle(array $request, callable $next): ?ApiResponse
     {
+        // Self-skip: only enforce on routes whose PATTERN actually declares the
+        // tenant param as a path segment (e.g. "/portal/tenant/{tenantId}/...").
+        // Routes without it (health, webhooks, admin auth, non-tenant infra) are
+        // not tenant-scoped and pass through untouched — this is what makes the
+        // middleware safe to wire globally (see class docblock).
+        $pattern = $request['route']['pattern'] ?? null;
+        if ($pattern === null || !str_contains($pattern, '{' . $this->urlParamName . '}')) {
+            return $next($request);
+        }
+
         $claims = $request['jwt_claims'] ?? [];
 
         // card.tenant_id is the authority (§5.2)
@@ -68,14 +102,16 @@ class TenantUrlMatchMiddleware implements MiddlewareInterface
         // Read the URL tenant parameter — set by the router in $request['params']
         $urlTenantId = $request['params'][$this->urlParamName] ?? null;
 
-        if ($urlTenantId === null) {
-            // Route does not carry the expected param — this middleware is misconfigured.
+        if ($urlTenantId === null || $urlTenantId === '') {
+            // The route pattern DOES declare {tenantId} (checked above) but the router
+            // failed to resolve it into $request['params'] — a genuine bug (param-name
+            // drift, routing regex mismatch, etc.), not an unrelated flat route.
             // Fail closed: reject rather than silently skip the check.
             http_response_code(500);
             return new ApiResponse(
                 'error',
-                "TenantUrlMatchMiddleware: URL parameter '{$this->urlParamName}' not found in route params. "
-                . "Ensure the route pattern includes {{$this->urlParamName}}.",
+                "TenantUrlMatchMiddleware: URL parameter '{$this->urlParamName}' not found in route params "
+                . "despite pattern '{$pattern}' declaring it. Router/param-name mismatch.",
                 ['error' => 'middleware_misconfigured'],
                 500
             );

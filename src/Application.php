@@ -22,6 +22,7 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes;
 use StoneScriptPHP\Subscriptions\SubscriptionMiddleware;
 use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
 use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
+use StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware;
 use StoneScriptPHP\RequestLogging\RequestLogger;
 
 /**
@@ -51,6 +52,9 @@ use StoneScriptPHP\RequestLogging\RequestLogger;
  *       'middleware' => [
  *           new CustomMiddleware(),
  *       ],
+ *       // Optional (§5.2 url.tenantId === card.tenant_id enforcement). Safe to
+ *       // enable globally — self-skips routes whose pattern has no {tenantId}.
+ *       'tenant_url_match' => ['enabled' => true, 'param' => 'tenantId'],
  *   ]);
  *
  * @package StoneScriptPHP
@@ -152,6 +156,17 @@ class Application
             if ($middleware instanceof MiddlewareInterface) {
                 $router->use($middleware);
             }
+        }
+
+        // §5.2 URL-echo enforcement (TENANCY-IDENTITY-MODEL §5.2): url.tenantId MUST
+        // equal card.tenant_id. Opt-in — off by default for backward compat with
+        // platforms that haven't adopted the canonical {tenantId} URL param yet.
+        // Safe to wire globally: TenantUrlMatchMiddleware self-skips any route whose
+        // matched pattern doesn't declare the configured param, so flat/non-tenant
+        // routes (health, webhooks, admin auth, infra) are never affected.
+        $tenantUrlMatchConfig = $config['tenant_url_match'] ?? [];
+        if (!empty($tenantUrlMatchConfig['enabled'])) {
+            $router->use(new TenantUrlMatchMiddleware($tenantUrlMatchConfig['param'] ?? 'tenantId'));
         }
 
         $authMode = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
