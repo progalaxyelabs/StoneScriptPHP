@@ -103,6 +103,10 @@ $commands = [
         'description' => 'Migrate main database schema via gateway',
         'file' => 'cli/gateway-migrate-main.php',
     ],
+    'gateway:migrate-vendor-main' => [
+        'description' => 'Activate opt-in framework schema staged in src/postgresql/vendor/ (never automatic — see file header)',
+        'file' => 'cli/gateway-migrate-vendor-main.php',
+    ],
     'gateway:migrate-tenant' => [
         'description' => 'Migrate ONE tenant database (--database-id required)',
         'file' => 'cli/gateway-migrate-tenant.php',
@@ -182,6 +186,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone gateway:register-main          # Register platform + create main DB\n";
     echo "  php stone gateway:register-tenant        # Register platform + upload tenant schema\n";
     echo "  php stone gateway:migrate-main                          # Migrate main database schema\n";
+    echo "  php stone gateway:migrate-vendor-main                  # Activate opt-in vendor schema (never automatic)\n";
     echo "  php stone gateway:migrate-tenant --database-id=<uuid>  # Migrate ONE tenant database\n";
     echo "  php stone gateway:migrate-all-tenants                  # Migrate ALL tenant databases\n";
     echo "  php stone gateway:provision-token                      # Provision DB_GATEWAY_PLATFORM_TOKEN\n";

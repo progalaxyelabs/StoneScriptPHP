@@ -352,9 +352,11 @@ function gatewayHttpRequest(string $method, string $url, array $headers, ?string
  * @param string $platformId
  * @param string $suffix  Archive filename suffix (e.g., 'register', 'migrate')
  * @param bool   $quiet
+ * @param string[] $mergeTargets  Additional {target}/postgresql/ dirs merged into this SAME
+ *                                archive (see buildSchemaArchive() doc). Empty by default.
  * @return array{tar_file: string, stats: array}
  */
-function buildGatewayArchive(string $target, string $platformId, string $suffix, bool $quiet): array
+function buildGatewayArchive(string $target, string $platformId, string $suffix, bool $quiet, array $mergeTargets = []): array
 {
     $postgresqlPath = ROOT_PATH . '/src/postgresql';
     $cacheDir = ROOT_PATH . '/.cache';
@@ -387,7 +389,7 @@ function buildGatewayArchive(string $target, string $platformId, string $suffix,
     }
 
     try {
-        $stats = buildSchemaArchive($postgresqlPath, $tarFile, $target, $quiet);
+        $stats = buildSchemaArchive($postgresqlPath, $tarFile, $target, $quiet, $mergeTargets);
 
         $size = round(filesize($tarFile) / 1024, 1);
         if (!$quiet) {

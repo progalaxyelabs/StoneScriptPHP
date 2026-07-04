@@ -5,12 +5,16 @@
  * Builds gateway-compatible tar.gz archives from the postgresql/ directory.
  * Supports the nested directory layout:
  *
- *   src/postgresql/{tenant,main}/postgresql/{tables,functions,views}/
+ *   src/postgresql/{tenant,main,vendor}/postgresql/{tables,functions,views}/
  *   + src/postgresql/{functions,views,...}/ (shared, deployed to all databases)
  *
+ * 'vendor' is a build artifact staged by cli/sync-vendor-schema.php (opt-in
+ * framework schema like RequestLogging) — never hand-edited, only ever
+ * consumed by the separate, non-automatic `gateway:migrate-vendor-main`.
+ *
  * The StoneScriptDB gateway expects a flat `postgresql/` structure in the archive.
- * This builder merges the target scope (tenant or main) with shared top-level
- * files into a single flat structure.
+ * This builder merges the target scope (tenant, main, or vendor) with shared
+ * top-level files into a single flat structure.
  */
 
 /**
@@ -84,14 +88,25 @@ function addFilesToArchive(PharData $phar, string $sourceDir, string $archivePre
  *
  * Requires nested layout: src/postgresql/{main,tenant}/postgresql/
  *
- * @param string $postgresqlPath  Path to src/postgresql/ directory
- * @param string $tarGzFile       Output .tar.gz file path
- * @param string $target          'tenant' or 'main'
- * @param bool   $quiet           Suppress output
+ * @param string   $postgresqlPath  Path to src/postgresql/ directory
+ * @param string   $tarGzFile       Output .tar.gz file path
+ * @param string   $target          'tenant' or 'main'
+ * @param bool     $quiet           Suppress output
+ * @param string[] $mergeTargets    Additional {target}/postgresql/ dirs to merge into the SAME
+ *                                  archive on top of $target (e.g. ['vendor'] — see
+ *                                  gateway-migrate-vendor-main.php). The gateway resolves the
+ *                                  destination DATABASE from schema_name alone
+ *                                  ({platform}_{schema_name} — stonescriptdb-gateway
+ *                                  src/pool/router.rs::database_name()), so staged vendor schema
+ *                                  MUST be merged into the same archive as 'main' to land in the
+ *                                  same database as the platform's own schema — a separate
+ *                                  schema_name would target a wholly different, nonexistent
+ *                                  database. Empty by default — no behavior change for existing
+ *                                  callers (register-main, migrate-main, tenant flows).
  * @return array{layout: string, total_files: int, tables: int, functions: int, views: int, migrations: int}
  * @throws RuntimeException If schema directory not found or archive creation fails
  */
-function buildSchemaArchive(string $postgresqlPath, string $tarGzFile, string $target, bool $quiet = false): array
+function buildSchemaArchive(string $postgresqlPath, string $tarGzFile, string $target, bool $quiet = false, array $mergeTargets = []): array
 {
     if (!validateSchemaLayout($postgresqlPath)) {
         throw new RuntimeException(
@@ -122,7 +137,7 @@ function buildSchemaArchive(string $postgresqlPath, string $tarGzFile, string $t
 
     if (!is_dir($primaryDir)) {
         $available = array_filter(
-            ['main', 'tenant'],
+            ['main', 'tenant', 'vendor'],
             fn($t) => is_dir($postgresqlPath . '/' . $t)
         );
         throw new RuntimeException(
@@ -155,11 +170,28 @@ function buildSchemaArchive(string $postgresqlPath, string $tarGzFile, string $t
         }
     }
 
-    // Count per type (primary + shared)
-    $stats['tables'] = countSchemaFiles($primaryDir, 'tables') + countSchemaFiles($postgresqlPath, 'tables');
-    $stats['functions'] = countSchemaFiles($primaryDir, 'functions') + countSchemaFiles($postgresqlPath, 'functions');
-    $stats['views'] = countSchemaFiles($primaryDir, 'views') + countSchemaFiles($postgresqlPath, 'views');
-    $stats['migrations'] = countSchemaFiles($primaryDir, 'migrations') + countSchemaFiles($postgresqlPath, 'migrations');
+    // Merge additional targets on top (e.g. ['vendor']) into this SAME archive/database.
+    $mergeDirs = [$primaryDir];
+    foreach ($mergeTargets as $mergeTarget) {
+        $mergeDir = $postgresqlPath . '/' . $mergeTarget . '/postgresql';
+        if (!is_dir($mergeDir)) {
+            continue; // nothing staged for this target — not an error, just nothing to add
+        }
+        $mergeAdded = addFilesToArchive($phar, $mergeDir, 'postgresql');
+        $stats['total_files'] += $mergeAdded;
+        if (!$quiet) {
+            echo "  Merged ({$mergeTarget}): {$mergeAdded} files\n";
+        }
+        $mergeDirs[] = $mergeDir;
+    }
+
+    // Count per type (primary + shared + any merged targets)
+    foreach (['tables', 'functions', 'views', 'migrations'] as $type) {
+        $stats[$type] = countSchemaFiles($postgresqlPath, $type);
+        foreach ($mergeDirs as $dir) {
+            $stats[$type] += countSchemaFiles($dir, $type);
+        }
+    }
 
     // Compress to gzip
     $phar->compress(Phar::GZ);

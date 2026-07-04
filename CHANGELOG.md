@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.0] - 2026-07-04
+
+### Added
+
+- **Opt-in framework schema now discoverable, never silently unadopted**
+  (`cli/sync-vendor-schema.php`, `cli/helpers/vendor-schema-sync.php`,
+  `cli/gateway-migrate-vendor-main.php`). Framework features that ship their
+  own SQL under `src/<Feature>/Schema/{tables,functions,...}/` (e.g.
+  `RequestLogging`) previously had zero discovery mechanism beyond a
+  changelog line saying "copy these files in" — fleet audit on 2026-07-04
+  found not one platform had ever done so, despite several being on a
+  framework version that includes the feature (see
+  `stonescriptphp-server`'s `IMPROVEMENT-SUGGESTIONS-2026-07.md`).
+  - `cli/sync-vendor-schema.php` stages (copies, never applies) every
+    `vendor/progalaxyelabs/stonescriptphp/src/*/Schema/*` folder it finds
+    into the platform's own `src/postgresql/vendor/postgresql/` — a build
+    artifact regenerated fresh on every run (never hand-edited, never
+    committed), so newly-available opt-in schema shows up as real files in
+    the working tree the moment the framework version changes. Intended to
+    be wired into a platform's own `composer.json`
+    `post-install-cmd`/`post-update-cmd`, alongside the existing `stone` CLI
+    copy step (`stonescriptphp-server` ships this wiring by default).
+  - `php stone gateway:migrate-vendor-main` is a new, **deliberately
+    separate** command that activates whatever's staged in
+    `src/postgresql/vendor/`. It is **never** invoked automatically by
+    `gateway:register-main`, `gateway:migrate-main`, or any deploy-manager
+    hook — StoneScriptPHP is opensource, so unreviewed contributor-authored
+    schema must never auto-execute against a real database as a side effect
+    of the routine, already-automatic main-database migration path.
+    Activating an opt-in feature stays a deliberate, reviewable act a
+    maintainer runs once. It merges the staged vendor files into the SAME
+    archive/upload as the platform's own `main` schema (never a separate
+    schema name) — the gateway resolves the target database as
+    `{platform}_{schema_name}` with no tenant uuid
+    (`stonescriptdb-gateway`'s `router.rs::database_name()`), so a distinct
+    name would target a different, nonexistent database rather than the
+    platform's actual main database that features like `RequestLogging`
+    expect to write to.
+  - `cli/helpers/schema-archive-builder.php`'s `buildSchemaArchive()` gains
+    an optional `$mergeTargets` parameter (default `[]`, no behavior change
+    for existing callers) that merges additional `{target}/postgresql/`
+    directories into the same archive as the primary target.
+
 ## [5.5.8] - 2026-07-03
 
 ### Changed
