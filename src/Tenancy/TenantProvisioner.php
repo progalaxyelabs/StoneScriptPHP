@@ -124,32 +124,21 @@ abstract class TenantProvisioner
      *
      * Idempotent — gateway returns 409 if the database already exists; treated as success.
      *
+     * Split into buildCreateDatabasePayload()/postToGateway() (mirrors the aasaanwork
+     * platform-side fix that first uncovered this bug) so the payload shape and the
+     * 409/success/failure handling are independently unit testable without a live gateway.
+     *
      * @throws \RuntimeException If the gateway returns a non-success, non-409 response
      */
     protected function createDatabase(array $data): void
     {
-        $gatewayUrl = rtrim($this->gatewayUrl, '/');
-        $payload = json_encode([
-            'platform'    => $this->platformCode,
-            'schema_name' => $this->schemaName,
-            'database_id' => $data['tenant_id'],
-        ]);
+        $payload = json_encode($this->buildCreateDatabasePayload($data));
+        [$httpCode, $response, $curlErr] = $this->postToGateway('/admin/database/create', $payload);
 
-        $ch = curl_init("$gatewayUrl/admin/database/create");
-        curl_setopt_array($ch, [
-            CURLOPT_POST          => true,
-            CURLOPT_POSTFIELDS    => $payload,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER    => array_values(array_filter([
-                'Content-Type: application/json',
-                $this->adminToken ? "Authorization: Bearer {$this->adminToken}" : null,
-            ])),
-            CURLOPT_TIMEOUT       => 30,
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        if ($response === false) {
+            log_error("TenantProvisioner::createDatabase: gateway unreachable for tenant {$data['tenant_id']}: {$curlErr}");
+            throw new \RuntimeException("Failed to reach gateway to provision tenant database: {$curlErr}");
+        }
 
         // 409 = database already exists — idempotent, continue to next step
         if ($httpCode === 409) {
@@ -163,6 +152,64 @@ abstract class TenantProvisioner
         }
 
         log_info("TenantProvisioner: Provisioned database for tenant {$data['tenant_id']} slug={$data['tenant_slug']}");
+    }
+
+    /**
+     * Build the /admin/database/create payload.
+     *
+     * IMPORTANT: `uuid` (NOT `database_id`) is the field the gateway's
+     * CreateDatabaseRequest struct (stonescriptdb-gateway src/api/database.rs)
+     * actually deserializes. It has no `database_id` field, and — until the
+     * gateway ships deny_unknown_fields — serde silently drops any unrecognized
+     * key instead of erroring. Sending `database_id` here previously left
+     * `uuid` at None on every call, so DatabaseRouter::database_name() collapsed
+     * every tenant onto the shared `{platform}_{schema_name}` base database
+     * instead of provisioning `{platform}_{schema_name}_{uuid}`. Every
+     * subsequent provisioning attempt for a different tenant then hit
+     * HTTP 409 "already exists" on that same shared DB and was treated as
+     * idempotent success — so tenants were marked db_status='active' with a
+     * real db_created_at despite having no physical per-tenant database
+     * ("ghost tenants", task #3165). See AasaanworkProvisioner (the
+     * platform-side workaround that first diagnosed this) for the full trace.
+     */
+    protected function buildCreateDatabasePayload(array $data): array
+    {
+        return [
+            'platform'    => $this->platformCode,
+            'schema_name' => $this->schemaName,
+            'uuid'        => $data['tenant_id'],
+        ];
+    }
+
+    /**
+     * Perform the gateway HTTP POST. Isolated (protected, overridable) so tests
+     * can stub the transport and assert on the outgoing payload + exercise the
+     * 409/success/failure branches in createDatabase() without a live gateway.
+     *
+     * @return array{0:int,1:string|false,2:string} [httpCode, response, curlError]
+     */
+    protected function postToGateway(string $path, string $payload): array
+    {
+        $gatewayUrl = rtrim($this->gatewayUrl, '/');
+
+        $ch = curl_init("$gatewayUrl$path");
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => array_values(array_filter([
+                'Content-Type: application/json',
+                $this->adminToken ? "Authorization: Bearer {$this->adminToken}" : null,
+            ])),
+            CURLOPT_TIMEOUT        => 30,
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr  = curl_error($ch);
+        curl_close($ch);
+
+        return [$httpCode, $response, $curlErr];
     }
 
     /**
