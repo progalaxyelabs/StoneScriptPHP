@@ -69,7 +69,16 @@ try {
     // Initialize timings array for performance tracking
     $timings = [];
 
-    // Load auth configuration
+    // Load auth configuration.
+    //
+    // NOTE (v5.7.0): this file lives at ROOT_PATH/config/auth.php — the platform's
+    // API-project root (docker/api/), NOT src/config/. A platform's real, canonical
+    // auth config is src/config/auth.php, loaded by Application::run(). This
+    // ROOT_PATH file is ONLY an optional legacy override for the gateway_url /
+    // jwks_endpoint / jwks_cache_ttl values below — kept for backward compatibility
+    // with any platform that already has one, never required. Most platforms have
+    // no such file, and $authConfig correctly stays [] for them; that is fine, because
+    // gateway_url below is sourced from Env (DB_GATEWAY_URL), not from this file.
     $authConfig = [];
     $authConfigFile = ROOT_PATH . 'config/auth.php';
     if (file_exists($authConfigFile)) {
@@ -80,17 +89,19 @@ try {
     $GLOBALS['__stonescript_services'] = [];
 
     // Register TokenValidator as singleton
-    $GLOBALS['__stonescript_services']['TokenValidator'] = function() use ($authConfig) {
+    $GLOBALS['__stonescript_services']['TokenValidator'] = function() use ($authConfig, $env) {
         static $instance = null;
         if ($instance === null) {
-            $gatewayUrl = $authConfig['gateway_url'] ?? 'http://localhost:9000';
-            $jwksEndpoint = $authConfig['jwks_endpoint'] ?? '/auth/jwks';
-            $jwksCacheTtl = $authConfig['jwks_cache_ttl'] ?? 3600;
-            $instance = new \StoneScriptDB\GatewayClient\Auth\TokenValidator(
-                $gatewayUrl,
-                $jwksEndpoint,
-                $jwksCacheTtl
-            );
+            // See stonescript_resolve_gateway_url() in helpers.php — resolves from
+            // Env::$DB_GATEWAY_URL (framework-required, already fail-loud at boot) with
+            // an optional legacy $authConfig['gateway_url'] override. No localhost default.
+            $gatewayUrl = stonescript_resolve_gateway_url($authConfig, $env);
+            // Real API: StoneScriptDB\Auth\TokenValidator(string $gatewayBaseUrl) — a
+            // single-argument constructor. jwks_endpoint/jwks_cache_ttl are no longer
+            // accepted (they belonged to a since-removed constructor signature) and are
+            // intentionally ignored here rather than passed positionally into the wrong
+            // parameters.
+            $instance = new \StoneScriptDB\Auth\TokenValidator($gatewayUrl);
         }
         return $instance;
     };

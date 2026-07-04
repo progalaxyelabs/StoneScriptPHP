@@ -412,10 +412,13 @@ class CentralizedAuth
 
     public function __construct(array $config = [])
     {
-        // Auth service URL (for legacy single-issuer mode)
-        $this->authServiceUrl = $config['auth_service_url'] ??
-            getenv('AUTH_SERVICE_URL') ??
-            'http://localhost:3139';
+        // Auth service URL (for legacy single-issuer mode). NO localhost default —
+        // an empty value here is only a problem for callers that actually reach the
+        // single-issuer JWKS/proxy paths (getJWKS(), callWithAuth()); multi-auth-mode
+        // callers that never touch those paths are unaffected. Those methods raise
+        // their own loud error when the URL is empty, rather than silently hitting
+        // http://localhost:3139.
+        $this->authServiceUrl = $config['auth_service_url'] ?? (getenv('AUTH_SERVICE_URL') ?: '');
 
         // Initialize multi-auth if configured
         if (isset($config['auth_servers']) && is_array($config['auth_servers'])) {
@@ -505,7 +508,13 @@ class CentralizedAuth
             return $this->jwksCache;
         }
 
-        // Fetch fresh JWKS
+        // Fetch fresh JWKS. Fail loud instead of silently hitting an empty/localhost URL.
+        if (trim($this->authServiceUrl) === '') {
+            throw new \RuntimeException(
+                "AUTH_SERVICE_URL is required to fetch JWKS but is not configured. "
+                . "Set the AUTH_SERVICE_URL env var or pass 'auth_service_url' in config."
+            );
+        }
         $url = $this->authServiceUrl . '/auth/jwks';
         $response = file_get_contents($url);
 
@@ -596,6 +605,12 @@ class CentralizedAuth
      */
     private function proxyAuthRequest(string $endpoint, array $data): array
     {
+        if (trim($this->authServiceUrl) === '') {
+            throw new \RuntimeException(
+                "AUTH_SERVICE_URL is required to proxy '{$endpoint}' but is not configured. "
+                . "Set the AUTH_SERVICE_URL env var or pass 'auth_service_url' in config."
+            );
+        }
         $url = $this->authServiceUrl . $endpoint;
 
         $options = [

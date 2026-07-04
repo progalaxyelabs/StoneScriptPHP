@@ -314,4 +314,62 @@ class ExternalAuthConfigTest extends TestCase
         $config = new ExternalAuthConfig([]);
         $this->assertSame('http://localhost:3139', $config->authIssuer);
     }
+
+    // ── AUTH_SERVICE_URL fail-fast (task #3176 — kill the silent localhost fallback) ──
+
+    /**
+     * AUTH_SERVICE_URL must be set explicitly (env or option). Empty env + no
+     * explicit option → RuntimeException, NOT a silent 'http://localhost:3139' default.
+     */
+    public function test_empty_auth_service_url_throws_runtime_exception(): void
+    {
+        putenv('AUTH_SERVICE_URL=');
+        unset($_ENV['AUTH_SERVICE_URL']);
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/auth_service_url/');
+
+        // auth_issuer supplied explicitly so the (already-covered) AUTH_ISSUER check
+        // doesn't fire first and mask the assertion under test.
+        new ExternalAuthConfig(['auth_issuer' => 'http://localhost:3139']);
+    }
+
+    /**
+     * When auth_service_url is provided explicitly in options, no env var is needed.
+     */
+    public function test_explicit_auth_service_url_option_overrides_env(): void
+    {
+        putenv('AUTH_SERVICE_URL=');
+        unset($_ENV['AUTH_SERVICE_URL']);
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $config = new ExternalAuthConfig([
+            'auth_service_url' => 'http://auth:3139',
+            'auth_issuer' => 'http://localhost:3139',
+        ]);
+        $this->assertSame('http://auth:3139', $config->authServiceUrl);
+    }
+
+    /**
+     * When AUTH_SERVICE_URL env is set, it is used as the auth service URL — and it
+     * is never silently replaced by 'http://localhost:3139'.
+     */
+    public function test_auth_service_url_env_is_used_when_set(): void
+    {
+        putenv('AUTH_SERVICE_URL=http://auth:3139');
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $config = new ExternalAuthConfig(['auth_issuer' => 'http://localhost:3139']);
+        $this->assertSame('http://auth:3139', $config->authServiceUrl);
+    }
 }

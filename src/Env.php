@@ -59,7 +59,14 @@ class Env
     // Authentication Mode (v2.2.0+) - Supports microservices architecture
     // Modes: 'builtin' (local RSA), 'external' (JWKS), 'hybrid' (validate external + issue own)
     public string $AUTH_MODE = 'builtin';
-    public string $AUTH_SERVICE_URL = 'http://localhost:3139';
+    // No default. AUTH_SERVICE_URL is only required in 'external'/'hybrid' AUTH_MODE
+    // (see Application::buildJwtHandler / buildAuthRouteOptions and
+    // ExternalAuthConfig::__construct, which throw a loud RuntimeException when this
+    // is empty). The old default of 'http://localhost:3139' silently pointed every
+    // platform that forgot to set this env var at loopback instead of the real auth
+    // service, and the failure only surfaced as an opaque "Failed to connect to
+    // localhost port 3139" deep in a curl call — not at boot, where it belongs.
+    public string $AUTH_SERVICE_URL = '';
 
     // Issuer for JWT 'iss' claim validation (v3.6.0+).
     // In Docker: AUTH_SERVICE_URL = http://auth-container:3139 (container URL, for JWKS fetch)

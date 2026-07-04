@@ -42,12 +42,24 @@ abstract class AuthServiceClient
      *   1. $_ENV['AUTH_SERVICE_URL']      — Docker / process environment
      *   2. getenv('AUTH_SERVICE_URL')     — fallback for FPM where $_ENV may be empty
      *   3. ROOT_PATH . 'config/auth.php'  — flat 'auth_service_url' key (legacy)
-     *   4. 'http://auth:3139'             — internal Docker service name (sane default)
      *
-     * The previous version only consulted (3) and (4), and (4) was hard-coded as
-     * 'http://localhost:3139' — which silently broke every platform whose framework
-     * config file lived under src/config/ instead of ROOT_PATH/config/ (e.g.
-     * platforms where the config file lives under src/config/ instead of ROOT_PATH/config/). Reading env first removes the trap entirely.
+     * (task #3176 — kill the silent localhost auth-URL fallback) There is
+     * deliberately NO step 4 default anymore. This method used to fall back to
+     * a hardcoded 'http://auth:3139' (previously 'http://localhost:3139') when
+     * neither the env var nor the legacy config file resolved anything — silently
+     * pointing any directly-instantiated AuthServiceClient subclass (MembershipClient,
+     * InvitationClient, or a bare ExternalAuthServiceClient built without going
+     * through ExternalAuthConfig) at a URL nobody configured. The primary framework
+     * path (ExternalAuthRoutes → ExternalAuthConfig → Application::resolveAuthServiceUrl)
+     * already fails loud on a missing AUTH_SERVICE_URL and always passes an explicit,
+     * validated URL into the constructor — so this fallback was only ever reached by
+     * callers that bypass that resolution, i.e. exactly the callers a silent default
+     * could strand on a service that isn't there. Failing loud here closes that gap
+     * instead of leaving it as a second silent path back into the same bug class.
+     *
+     * @throws \RuntimeException When no explicit URL was passed to the constructor
+     *                            and neither AUTH_SERVICE_URL nor the legacy config
+     *                            file resolves to a non-empty value.
      */
     protected function getDefaultAuthServiceUrl(): string
     {
@@ -67,7 +79,12 @@ abstract class AuthServiceClient
             }
         }
 
-        return 'http://auth:3139';
+        throw new \RuntimeException(
+            'Auth service URL is required but not configured. Pass $authServiceUrl '
+            . 'explicitly to the ' . static::class . ' constructor, set the '
+            . 'AUTH_SERVICE_URL env var, or set auth_service_url in '
+            . 'ROOT_PATH/config/auth.php. There is no default.'
+        );
     }
 
     /**

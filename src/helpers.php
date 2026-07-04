@@ -453,6 +453,42 @@ function db_pool_stats(): array
 // ===========================
 
 /**
+ * Resolve the StoneScriptDB Gateway base URL used by the TokenValidator service
+ * (task #3176 — kill the silent localhost auth-URL fallback).
+ *
+ * Precedence: explicit `$authConfig['gateway_url']` (legacy ROOT_PATH/config/auth.php
+ * override, kept for backward compatibility) > `Env::$DB_GATEWAY_URL`. DB_GATEWAY_URL
+ * is a framework-wide required secret — Env::__construct() already throws a clear
+ * exception at boot if it's missing or empty — so by the time this function runs it
+ * is guaranteed non-empty for any process that got this far. There is deliberately
+ * NO 'http://localhost:9000' fallback: the old bootstrap.php default silently pointed
+ * the gateway client at loopback for any platform without a root config/auth.php file
+ * (11 of 13 platforms), a misconfiguration that should fail loud instead.
+ *
+ * Extracted as a standalone function (rather than inlined in the bootstrap.php
+ * closure) so it is directly unit-testable without needing to re-run the
+ * once-per-process composer autoload.files bootstrap sequence.
+ *
+ * @param array<string,mixed> $authConfig Legacy ROOT_PATH/config/auth.php contents (may be [])
+ * @param Env $env Framework Env instance
+ * @throws \RuntimeException When neither source yields a non-empty URL
+ */
+function stonescript_resolve_gateway_url(array $authConfig, Env $env): string
+{
+    $gatewayUrl = $authConfig['gateway_url'] ?? $env->DB_GATEWAY_URL;
+
+    if (empty($gatewayUrl)) {
+        throw new \RuntimeException(
+            'Gateway URL is required for TokenValidator but resolved empty. '
+            . 'Set DB_GATEWAY_URL (framework-required) or gateway_url in '
+            . 'ROOT_PATH/config/auth.php. There is no localhost default.'
+        );
+    }
+
+    return $gatewayUrl;
+}
+
+/**
  * Get a singleton service from the service registry
  *
  * @param string $name Service name

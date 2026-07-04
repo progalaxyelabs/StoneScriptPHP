@@ -311,6 +311,43 @@ class Application
      * @param array $jwtConfig    JWT section of the config array (for handler injection).
      * @return JwtHandlerInterface
      */
+    /**
+     * Resolve the auth service network URL (JWKS fetch / login-register proxy target).
+     *
+     * Precedence: explicit `$authConfig['server']['url']` > non-empty `AUTH_SERVICE_URL`
+     * env var. NO localhost default — a platform running in 'external'/'hybrid' AUTH_MODE
+     * (or with store_access enabled) that hasn't configured this is a genuine
+     * misconfiguration, not something to paper over. Silently defaulting to
+     * 'http://localhost:3139' was the root cause of every platform's auth calls failing
+     * with "Failed to connect to localhost port 3139" the moment their config file
+     * layout didn't match what an older framework version expected — the failure never
+     * showed up until the very first live auth call, deep inside a curl error, instead
+     * of at boot where a misconfiguration belongs.
+     *
+     * @param array  $authConfig Auth section of the config array
+     * @param Env    $env        Framework Env instance
+     * @param string $mode       Resolved AUTH_MODE (used only for the error message)
+     * @throws \RuntimeException When neither source yields a non-empty URL
+     */
+    private static function resolveAuthServiceUrl(array $authConfig, Env $env, string $mode): string
+    {
+        $serverUrl = $authConfig['server']['url'] ?? (!empty($env->AUTH_SERVICE_URL) ? $env->AUTH_SERVICE_URL : null);
+
+        if ($serverUrl === null || trim($serverUrl) === '') {
+            throw new \RuntimeException(
+                "AUTH_SERVICE_URL is required when AUTH_MODE is '{$mode}' (or when store_access is "
+                . "enabled) but is not set or empty. Set the AUTH_SERVICE_URL env var to the auth "
+                . "service's network address (e.g. http://auth:3139 inside Docker), or pass "
+                . "auth.server.url explicitly in the config array passed to Application::run(). "
+                . "There is no default — silently falling back to localhost was the root cause of "
+                . "a fleet-wide auth outage (auth calls failing with 'Failed to connect to localhost "
+                . "port 3139')."
+            );
+        }
+
+        return $serverUrl;
+    }
+
     private static function buildJwtHandler(array $authConfig, Env $env, array $jwtConfig = []): JwtHandlerInterface
     {
         // Explicit injection: platforms can pass their own handler via config['jwt']['handler'].
@@ -326,7 +363,7 @@ class Application
         }
 
         // external or hybrid: need to validate BOTH platform-minted cards AND auth-service passports.
-        $serverUrl = $authConfig['server']['url'] ?? $env->AUTH_SERVICE_URL ?? 'http://localhost:3139';
+        $serverUrl = self::resolveAuthServiceUrl($authConfig, $env, $mode);
 
         // AUTH_ISSUER MUST be set explicitly in external/hybrid mode.
         // The old fallback to AUTH_SERVICE_URL was silently wrong in Docker: AUTH_SERVICE_URL
@@ -365,7 +402,9 @@ class Application
      */
     private static function buildAuthRouteOptions(array $authConfig, Env $env): array
     {
-        $serverUrl  = $authConfig['server']['url'] ?? $env->AUTH_SERVICE_URL ?? 'http://localhost:3139';
+        // Note: don't re-derive mode from $env->AUTH_MODE here (buildJwtHandler already
+        // did that upstream in run()) — this is only used for the exception message text.
+        $serverUrl  = self::resolveAuthServiceUrl($authConfig, $env, $authConfig['mode'] ?? 'external');
         // AUTH_ISSUER must be set — no fallback to server URL (see buildJwtHandler comment).
         // ExternalAuthConfig constructor will enforce this; passing null here lets that check fire.
         $issuer     = $authConfig['server']['issuer'] ?? (

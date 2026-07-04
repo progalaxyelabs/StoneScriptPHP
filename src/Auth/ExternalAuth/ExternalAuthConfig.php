@@ -108,7 +108,26 @@ class ExternalAuthConfig
         // Legacy default was /auth — kept as compat routes when legacyCompat=true.
         $this->prefix = rtrim($options['prefix'] ?? '/api/auth', '/');
         $this->legacyCompat = $options['legacy_compat'] ?? true;
-        $this->authServiceUrl = $options['auth_service_url'] ?? $env->AUTH_SERVICE_URL;
+
+        // NO localhost default. Callers normally go through Application::buildAuthRouteOptions(),
+        // which already fails loud on a missing AUTH_SERVICE_URL — this check is defense-in-depth
+        // for direct callers (e.g. tests, or a platform calling ExternalAuthRoutes::register()
+        // without going through Application::run()). The framework used to leave this to
+        // Env::$AUTH_SERVICE_URL's own hardcoded 'http://localhost:3139' default, which silently
+        // routed every JWKS fetch and auth proxy call at loopback for any platform whose config
+        // didn't explicitly override it.
+        $resolvedAuthServiceUrl = $options['auth_service_url'] ?? (
+            !empty($env->AUTH_SERVICE_URL) ? $env->AUTH_SERVICE_URL : null
+        );
+        if ($resolvedAuthServiceUrl === null || trim($resolvedAuthServiceUrl) === '') {
+            throw new \RuntimeException(
+                "auth_service_url is required for ExternalAuth but is not set or empty. "
+                . "Pass 'auth_service_url' in options, or set the AUTH_SERVICE_URL env var to the "
+                . "auth service's network address (e.g. http://auth:3139 inside Docker). "
+                . "There is no localhost default."
+            );
+        }
+        $this->authServiceUrl = $resolvedAuthServiceUrl;
 
         // AUTH_ISSUER MUST be set explicitly — silently falling back to AUTH_SERVICE_URL
         // was wrong in Docker: the service URL is the container-internal address used only

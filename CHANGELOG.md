@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.1] - 2026-07-04
+
+### Fixed
+
+- **Killed the silent localhost auth-URL fallback (task #3176)** — the framework
+  no longer has ANY code path that silently defaults `AUTH_SERVICE_URL` or the
+  gateway URL to `http://localhost:3139` / `http://localhost:9000`. Every
+  resolution site now either reads a real, explicitly-configured value or fails
+  loud at the point of use with a `RuntimeException` naming exactly what's
+  missing — matching the loud-failure posture the framework already used for
+  `AUTH_ISSUER` (`ExternalAuthConfig`).
+  - `Env::$AUTH_SERVICE_URL` no longer defaults to `'http://localhost:3139'`;
+    it now defaults to `''` (same pattern as `AUTH_ISSUER`), so an unconfigured
+    platform is visibly unconfigured instead of silently pointed at loopback.
+  - `Application::buildJwtHandler()` and `Application::buildAuthRouteOptions()`
+    (used for `external`/`hybrid` `AUTH_MODE` and for `store_access`) share a new
+    `Application::resolveAuthServiceUrl()` helper: explicit `auth.server.url` >
+    non-empty `AUTH_SERVICE_URL` env var > loud `RuntimeException`. No default.
+  - `ExternalAuthConfig::__construct()` applies the same check directly
+    (defense-in-depth for callers that bypass `Application::run()`).
+  - `bootstrap.php`'s `TokenValidator` service factory (`gateway_url`) now
+    resolves from `Env::$DB_GATEWAY_URL` — a framework-required secret that
+    `Env::__construct()` already fails loud on when missing — instead of
+    defaulting to `'http://localhost:9000'`. Extracted into the new, directly
+    unit-testable `stonescript_resolve_gateway_url()` (`src/helpers.php`). Also
+    fixed the factory to construct the real
+    `StoneScriptDB\Auth\TokenValidator(string $gatewayBaseUrl)` (single-arg
+    constructor) instead of a nonexistent
+    `StoneScriptDB\GatewayClient\Auth\TokenValidator` with a 3-arg signature —
+    this service had no callers anywhere in the fleet, so the mismatch was
+    latent, but it's fixed now rather than left broken for the next platform
+    that wires it up.
+  - `AuthService.php`'s legacy `CentralizedAuth` class (dead code — zero
+    callers found across the framework or any of the 13 platforms) had the
+    same `'http://localhost:3139'` default in its constructor; replaced with
+    an empty default and loud failures at first actual use (`getJWKS()` /
+    `proxyAuthRequest()`) rather than eagerly in the constructor, so
+    multi-auth-mode callers that never touch the single-issuer path are
+    unaffected.
+  - `AuthServiceClient::getDefaultAuthServiceUrl()` (the third code path named
+    in the original bug evidence) previously had already been fixed to check
+    `AUTH_SERVICE_URL` env first (env-first, prior release), but still fell
+    back to a hardcoded `'http://auth:3139'` when neither the env var nor a
+    legacy `ROOT_PATH/config/auth.php` resolved anything. That step-4 default
+    is now removed — it throws a `RuntimeException` instead. The framework's
+    primary path (`ExternalAuthRoutes` → `ExternalAuthConfig` →
+    `Application::resolveAuthServiceUrl()`) already fails loud and always
+    passes an explicit URL into the constructor, so this fallback was only
+    reachable by direct/manual instantiation of `AuthServiceClient` subclasses
+    (`MembershipClient`, `InvitationClient`) that bypass that resolution —
+    exactly the callers a silent default could strand.
+  - Root cause: only 2 of 13 platforms (medstoreapp, logisticsapp) had ever
+    added a `ROOT_PATH/config/auth.php` shim working around
+    `AuthServiceClient::getDefaultAuthServiceUrl()`'s old localhost-only
+    fallback — medstoreapp's shim quotes the confirmed production error
+    `Failed to connect to localhost port 3139`. The other 11 platforms had no
+    such shim and were relying entirely on their docker-compose files
+    explicitly setting `AUTH_SERVICE_URL`/`DB_GATEWAY_URL` — which, as of this
+    release, all 13 platforms in fact do (fleet audit of every platform's
+    `docker/docker-compose.yaml` + `docker/docker-compose.swarm.yaml` found
+    zero platforms currently resolving to localhost in practice), but nothing
+    in the framework *enforced* that until now. This closes the gap so a
+    future platform (or a CLI/cron context that doesn't inherit docker-compose
+    env) can never silently repeat the medstoreapp incident.
+  - Backward-compatible: `bootstrap.php` still honors a present
+    `ROOT_PATH/config/auth.php` file's `gateway_url` key as an override, so the
+    2 existing root shims are not required to be removed in this release —
+    they are now provably redundant (env vars already present fleet-wide) and
+    should be removed in a follow-up per-platform cleanup **once each platform's
+    committed `composer.lock` pins `progalaxyelabs/stonescriptphp >= 5.6.1`**
+    (medstoreapp and logisticsapp are both still pinned to 5.6.0 as of this
+    release — do not remove either shim until each platform adopts this
+    version, or the still-old framework in production would silently fall
+    back to localhost with nothing left to catch it).
+  - Tests: `tests/Unit/AuthServiceUrlResolutionTest.php` (new),
+    `tests/Unit/GatewayUrlResolutionTest.php` (new),
+    `tests/Unit/AuthServiceClientDefaultUrlTest.php` (new), plus additions to
+    `tests/Unit/ExternalAuthConfigTest.php`. Full suite: 461/461 passing
+    (0 failures) — verified locally (PHP 8.4.11) AND on devvmlocal inside
+    `php:8.3-cli-bookworm` (matches the production PHP-FPM base image), both
+    clean runs. Additionally proved end-to-end on devvmlocal with a script
+    simulating instituteapp-platform's real production env vars (from its
+    `docker-compose.swarm.yaml`, no root shim): resolves
+    `gateway_url=http://10.0.1.6:9000` and
+    `auth_service_url=http://progalaxyelabs-auth_auth:3139` from Env — never
+    localhost — and, with `AUTH_SERVICE_URL` unset, throws a `RuntimeException`
+    naming exactly what's missing instead of silently defaulting.
+
 ## [5.6.0] - 2026-07-04
 
 ### Added
