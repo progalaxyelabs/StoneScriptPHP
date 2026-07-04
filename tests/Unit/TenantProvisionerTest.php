@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Tenancy\TenantProvisioner;
 
 /**
- * Regression coverage for task #3165 — the ghost-tenant framework bug.
+ * Regression coverage for the ghost-tenant framework bug.
  *
  * ROOT CAUSE: TenantProvisioner::createDatabase() POSTed a JSON body with key
  * `database_id` to the gateway's POST /admin/database/create. The gateway's
@@ -21,8 +21,8 @@ use StoneScriptPHP\Tenancy\TenantProvisioner;
  * tenant collapsed onto one shared DB (or hit 409-already-exists, treated as
  * idempotent success) while being marked db_status='active' with no real
  * per-tenant database backing it ("ghost tenants"). Every multi-tenant
- * platform using the stock base class inherited this bug; aasaanwork worked
- * around it locally (AasaanworkProvisioner override) before this framework fix.
+ * platform using the stock base class inherited this bug; one platform worked
+ * around it locally (a platform-side provisioner override) before this framework fix.
  *
  * These tests pin: (1) the outgoing payload uses `uuid`, never `database_id`;
  * (2) 2xx and 409 are both treated as provisioning success; (3) any other
@@ -55,7 +55,7 @@ final class TenantProvisionerTest extends TestCase
         $this->assertArrayNotHasKey(
             'database_id',
             $payload,
-            'Regression (#3165): payload must never carry database_id — the gateway\'s ' .
+            'Regression: payload must never carry database_id — the gateway\'s ' .
             'CreateDatabaseRequest struct does not have that field and silently ' .
             'drops it, defaulting uuid to None (the ghost-tenant root cause).'
         );

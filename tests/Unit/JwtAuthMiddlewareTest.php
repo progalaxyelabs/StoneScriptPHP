@@ -14,7 +14,7 @@ use StoneScriptPHP\Routing\Middleware\JwtAuthMiddleware;
  * Tests for JwtAuthMiddleware — the framework's canonical, globally-wired JWT
  * authentication middleware (wired by Application::run() for every platform).
  *
- * ## Why this test file exists (Task #3178 — framework security fix)
+ * ## Why this test file exists (framework security fix)
  *
  * JwtAuthMiddleware historically stored the authenticated user ONLY in
  * AuthContext::setUser(), and never populated $request['jwt_claims']. Every
@@ -105,7 +105,7 @@ class JwtAuthMiddlewareTest extends TestCase
             $receivedRequest,
             'JwtAuthMiddleware MUST populate $request[\'jwt_claims\'] — this is the exact contract ' .
             'every Require* guard middleware and RequestContextTrait read from. Without it, guards ' .
-            'silently no-op (Task #3178).'
+            'silently no-op.'
         );
         $this->assertSame($payload, $receivedRequest['jwt_claims']);
     }

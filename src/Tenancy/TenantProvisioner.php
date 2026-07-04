@@ -124,7 +124,7 @@ abstract class TenantProvisioner
      *
      * Idempotent — gateway returns 409 if the database already exists; treated as success.
      *
-     * Split into buildCreateDatabasePayload()/postToGateway() (mirrors the aasaanwork
+     * Split into buildCreateDatabasePayload()/postToGateway() (mirrors the
      * platform-side fix that first uncovered this bug) so the payload shape and the
      * 409/success/failure handling are independently unit testable without a live gateway.
      *
@@ -169,7 +169,7 @@ abstract class TenantProvisioner
      * HTTP 409 "already exists" on that same shared DB and was treated as
      * idempotent success — so tenants were marked db_status='active' with a
      * real db_created_at despite having no physical per-tenant database
-     * ("ghost tenants", task #3165). See AasaanworkProvisioner (the
+     * ("ghost tenants"). See the platform-side provisioner override (the
      * platform-side workaround that first diagnosed this) for the full trace.
      */
     protected function buildCreateDatabasePayload(array $data): array

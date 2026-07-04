@@ -7,11 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.7.1] - 2026-07-04
+
+### Changed
+
+- Documentation hygiene: scrubbed internal references from the v5.6.1/v5.7.0
+  change notes and code comments. No functional change.
+
 ## [5.7.0] - 2026-07-04
 
 ### Fixed
 
-- **CRITICAL — guard middlewares were inert no-ops fleet-wide (task #3178).**
+- **CRITICAL — guard middlewares were inert no-ops fleet-wide.**
   `JwtAuthMiddleware` (`src/Routing/Middleware/JwtAuthMiddleware.php`) — the
   middleware `Application::run()` wires globally on EVERY platform — stored the
   authenticated user only via `AuthContext::setUser()` and never populated
@@ -22,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   EXCLUSIVELY from `$request['jwt_claims']`. Because that key was always empty,
   every guard treated every request (authenticated or not) as an unauthenticated
   public route and silently passed it through — card/role/tenant/issuer
-  requirements were never enforced. Confirmed live in an aasaanwork session
+  requirements were never enforced. Confirmed live in an integration session
   (2026-07-04): a passport-only (tenant-less) token reached a tenant-scoped
   route handler instead of getting 403 `tenant_context_required`.
   - **Root cause / two parallel families:** the codebase had two middleware
@@ -45,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     DB bug.
 
 - **`TenantUrlMatchMiddleware` can now be wired globally — scope-aware gap
-  closed (task #3178, framework-spec.md §5.2).** Previously this middleware
+  closed (framework-spec.md §5.2).** Previously this middleware
   fail-closed with HTTP 500 `middleware_misconfigured` on ANY route that didn't
   resolve its URL param, which meant it could only ever be wired per-route —
   wiring it globally would 500 every flat/non-tenant route (health, webhooks,
@@ -73,16 +80,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     pipeline tests composing the REAL `JwtAuthMiddleware` with
     `RequireCardMiddleware` / `RequireTenantMiddleware` / `RequireRoleMiddleware`
     / `TenantUrlMatchMiddleware` exactly as `Application::run()` wires them,
-    including the exact aasaanwork live-repro scenario (passport → 403, not
+    including the exact live-repro scenario (passport → 403, not
     handler) and the flat-route-unaffected-by-global-middleware case.
   - `tests/Unit/CardBoundaryMiddlewareTest.php` (updated) — existing
     `TenantUrlMatchMiddleware` tests updated for the new pattern-based self-skip
     check; added dedicated self-skip tests (no `{tenantId}` in pattern, absent
     `route` key, card claims present but route still non-tenant-scoped).
 
-### Live verification (devvmlocal, 2026-07-04)
+### Live verification (local dev environment, 2026-07-04)
 
-Reproduced the exact aasaanwork wiring (`JwtAuthMiddleware` + `RequireCardMiddleware`
+Reproduced the exact wiring (`JwtAuthMiddleware` + `RequireCardMiddleware`
 only, real RSA-signed JWTs via `RsaJwtHandler`, served over real HTTP via PHP's
 built-in server in a `php:8.3-cli-bookworm` container) and confirmed:
 - **Pre-fix code:** passport-only token → tenant-scoped route → `HTTP 200`,
@@ -100,7 +107,7 @@ built-in server in a `php:8.3-cli-bookworm` container) and confirmed:
 
 ### Fixed
 
-- **Killed the silent localhost auth-URL fallback (task #3176)** — the framework
+- **Killed the silent localhost auth-URL fallback** — the framework
   no longer has ANY code path that silently defaults `AUTH_SERVICE_URL` or the
   gateway URL to `http://localhost:3139` / `http://localhost:9000`. Every
   resolution site now either reads a real, explicitly-configured value or fails
@@ -129,7 +136,7 @@ built-in server in a `php:8.3-cli-bookworm` container) and confirmed:
     latent, but it's fixed now rather than left broken for the next platform
     that wires it up.
   - `AuthService.php`'s legacy `CentralizedAuth` class (dead code — zero
-    callers found across the framework or any of the 13 platforms) had the
+    callers found across the framework or any downstream platform) had the
     same `'http://localhost:3139'` default in its constructor; replaced with
     an empty default and loud failures at first actual use (`getJWKS()` /
     `proxyAuthRequest()`) rather than eagerly in the constructor, so
@@ -147,40 +154,40 @@ built-in server in a `php:8.3-cli-bookworm` container) and confirmed:
     reachable by direct/manual instantiation of `AuthServiceClient` subclasses
     (`MembershipClient`, `InvitationClient`) that bypass that resolution —
     exactly the callers a silent default could strand.
-  - Root cause: only 2 of 13 platforms (medstoreapp, logisticsapp) had ever
-    added a `ROOT_PATH/config/auth.php` shim working around
+  - Root cause: only a couple of downstream platforms had ever added a
+    `ROOT_PATH/config/auth.php` shim working around
     `AuthServiceClient::getDefaultAuthServiceUrl()`'s old localhost-only
-    fallback — medstoreapp's shim quotes the confirmed production error
-    `Failed to connect to localhost port 3139`. The other 11 platforms had no
+    fallback — one such shim quotes the confirmed production error
+    `Failed to connect to localhost port 3139`. The other platforms had no
     such shim and were relying entirely on their docker-compose files
     explicitly setting `AUTH_SERVICE_URL`/`DB_GATEWAY_URL` — which, as of this
-    release, all 13 platforms in fact do (fleet audit of every platform's
-    `docker/docker-compose.yaml` + `docker/docker-compose.swarm.yaml` found
-    zero platforms currently resolving to localhost in practice), but nothing
-    in the framework *enforced* that until now. This closes the gap so a
-    future platform (or a CLI/cron context that doesn't inherit docker-compose
-    env) can never silently repeat the medstoreapp incident.
+    release, all downstream platforms in fact do (a fleet audit of every
+    platform's `docker/docker-compose.yaml` + `docker/docker-compose.swarm.yaml`
+    found zero platforms currently resolving to localhost in practice), but
+    nothing in the framework *enforced* that until now. This closes the gap so
+    a future platform (or a CLI/cron context that doesn't inherit
+    docker-compose env) can never silently repeat that incident.
   - Backward-compatible: `bootstrap.php` still honors a present
-    `ROOT_PATH/config/auth.php` file's `gateway_url` key as an override, so the
-    2 existing root shims are not required to be removed in this release —
+    `ROOT_PATH/config/auth.php` file's `gateway_url` key as an override, so
+    existing root shims are not required to be removed in this release —
     they are now provably redundant (env vars already present fleet-wide) and
     should be removed in a follow-up per-platform cleanup **once each platform's
     committed `composer.lock` pins `progalaxyelabs/stonescriptphp >= 5.6.1`**
-    (medstoreapp and logisticsapp are both still pinned to 5.6.0 as of this
-    release — do not remove either shim until each platform adopts this
-    version, or the still-old framework in production would silently fall
-    back to localhost with nothing left to catch it).
+    (some platforms are still pinned to 5.6.0 as of this release — do not
+    remove any shim until each platform adopts this version, or the still-old
+    framework in production would silently fall back to localhost with
+    nothing left to catch it).
   - Tests: `tests/Unit/AuthServiceUrlResolutionTest.php` (new),
     `tests/Unit/GatewayUrlResolutionTest.php` (new),
     `tests/Unit/AuthServiceClientDefaultUrlTest.php` (new), plus additions to
     `tests/Unit/ExternalAuthConfigTest.php`. Full suite: 461/461 passing
-    (0 failures) — verified locally (PHP 8.4.11) AND on devvmlocal inside
-    `php:8.3-cli-bookworm` (matches the production PHP-FPM base image), both
-    clean runs. Additionally proved end-to-end on devvmlocal with a script
-    simulating instituteapp-platform's real production env vars (from its
-    `docker-compose.swarm.yaml`, no root shim): resolves
-    `gateway_url=http://10.0.1.6:9000` and
-    `auth_service_url=http://progalaxyelabs-auth_auth:3139` from Env — never
+    (0 failures) — verified locally (PHP 8.4.11) AND in a local dev environment
+    inside `php:8.3-cli-bookworm` (matches the production PHP-FPM base image),
+    both clean runs. Additionally proved end-to-end in a local dev environment
+    with a script simulating a downstream platform's real production env vars
+    (from its `docker-compose.swarm.yaml`, no root shim): resolves
+    `gateway_url=http://<internal-gateway>:9000` and
+    `auth_service_url=http://<auth-service>:3139` from Env — never
     localhost — and, with `AUTH_SERVICE_URL` unset, throws a `RuntimeException`
     naming exactly what's missing instead of silently defaulting.
 

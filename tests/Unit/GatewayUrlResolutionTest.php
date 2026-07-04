@@ -8,13 +8,13 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Env;
 
 /**
- * Task #3176 — kill the silent localhost auth-URL fallback.
+ * Kill the silent localhost auth-URL fallback.
  *
  * Before this fix, src/bootstrap.php's TokenValidator factory resolved its gateway
  * URL as `$authConfig['gateway_url'] ?? 'http://localhost:9000'`, where $authConfig
- * came from an optional ROOT_PATH/config/auth.php file that only 2 of 13 platforms
- * had. Any platform without that file silently got a TokenValidator pointed at
- * loopback instead of the real gateway. The fix extracts the resolution into the
+ * came from an optional ROOT_PATH/config/auth.php file that only a couple of
+ * downstream platforms had. Any platform without that file silently got a
+ * TokenValidator pointed at loopback instead of the real gateway. The fix extracts the resolution into the
  * standalone, testable stonescript_resolve_gateway_url() (src/helpers.php), sourced
  * from Env::$DB_GATEWAY_URL (a framework-required secret — Env::__construct() already
  * throws at boot if it's empty) instead of a hardcoded localhost default.

@@ -19,7 +19,7 @@ use StoneScriptPHP\Routing\MiddlewarePipeline;
  * Integration test: JwtAuthMiddleware → Require* guards, composed exactly as
  * Application::run() wires them for every platform.
  *
- * This is the end-to-end proof for Task #3178: before the fix, JwtAuthMiddleware
+ * This is the end-to-end proof for the fix: before the change, JwtAuthMiddleware
  * never populated $request['jwt_claims'], so every guard middleware downstream
  * (RequireCardMiddleware, RequireTenantMiddleware, RequireRoleMiddleware,
  * TenantUrlMatchMiddleware) silently no-op'd — a passport-only (tenant-less)
@@ -65,7 +65,7 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
     }
 
     /**
-     * THE live repro from the aasaanwork session (2026-07-04), reproduced and
+     * THE live repro from the integration session (2026-07-04), reproduced and
      * proven fixed: a passport-only token (no tenant_id) hitting a card-required
      * route via the exact JwtAuthMiddleware → RequireCardMiddleware chain
      * Application::run() wires must now get 403 tenant_context_required — not
@@ -92,7 +92,7 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
 
         $this->assertFalse(
             $handlerReached,
-            'BUG (Task #3178): passport-only token reached the tenant-scoped route handler instead of being 403\'d'
+            'BUG: passport-only token reached the tenant-scoped route handler instead of being 403\'d'
         );
         $this->assertSame('error', $response->status);
         $this->assertSame(403, $response->httpStatusCode);

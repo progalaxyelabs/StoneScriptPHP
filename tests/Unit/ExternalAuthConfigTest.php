@@ -211,7 +211,7 @@ class ExternalAuthConfigTest extends TestCase
         $this->assertArrayNotHasKey('/api/auth/login', $routes['POST']);
     }
 
-    // ── Token exchange config (task #2877) ──────────────────────────────────
+    // ── Token exchange config ────────────────────────────────────────────────
 
     public function test_exchange_enabled_by_default(): void
     {
@@ -315,7 +315,7 @@ class ExternalAuthConfigTest extends TestCase
         $this->assertSame('http://localhost:3139', $config->authIssuer);
     }
 
-    // ── AUTH_SERVICE_URL fail-fast (task #3176 — kill the silent localhost fallback) ──
+    // ── AUTH_SERVICE_URL fail-fast (kill the silent localhost fallback) ──
 
     /**
      * AUTH_SERVICE_URL must be set explicitly (env or option). Empty env + no

@@ -78,7 +78,7 @@ class CardBoundaryMiddlewareTest extends TestCase
 
     // ── TenantUrlMatchMiddleware (§5.2) ───────────────────────────────────────
     //
-    // NOTE (Task #3178): TenantUrlMatchMiddleware now self-skips based on the
+    // NOTE: TenantUrlMatchMiddleware now self-skips based on the
     // MATCHED ROUTE PATTERN ($request['route']['pattern']) rather than blindly
     // requiring the URL param — this is what makes it safe to wire globally via
     // Application::run()'s 'tenant_url_match' config without 500ing flat routes
@@ -186,7 +186,7 @@ class CardBoundaryMiddlewareTest extends TestCase
         $this->assertSame('tenant_context_required', $response->data['error']);
     }
 
-    // ── Self-skip: safe to wire globally (Task #3178 scope-aware gap closure) ──
+    // ── Self-skip: safe to wire globally (scope-aware gap closure) ──
 
     /**
      * A route whose pattern carries NO {tenantId} segment (e.g. /health,

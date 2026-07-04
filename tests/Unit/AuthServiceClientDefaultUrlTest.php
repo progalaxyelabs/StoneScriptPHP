@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Auth\Client\AuthServiceClient;
 
 /**
- * Task #3176 — kill the silent localhost auth-URL fallback.
+ * Kill the silent localhost auth-URL fallback.
  *
  * AuthServiceClient::getDefaultAuthServiceUrl() is the third code path named in
  * the original bug evidence (alongside bootstrap.php's TokenValidator factory and

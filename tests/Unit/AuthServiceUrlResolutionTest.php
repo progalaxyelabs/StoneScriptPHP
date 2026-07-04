@@ -10,14 +10,14 @@ use StoneScriptPHP\Application;
 use StoneScriptPHP\Env;
 
 /**
- * Task #3176 — kill the silent localhost auth-URL fallback.
+ * Kill the silent localhost auth-URL fallback.
  *
  * Before this fix, Env::$AUTH_SERVICE_URL defaulted to 'http://localhost:3139' and
  * Application::buildJwtHandler() / buildAuthRouteOptions() read it via
  * `$env->AUTH_SERVICE_URL ?? 'http://localhost:3139'` — a chain that NEVER fails,
  * because Env's typed property is a non-nullable string with its own hardcoded
  * localhost default. A platform that forgot to set the AUTH_SERVICE_URL env var
- * (11 of 13 platforms have no ROOT_PATH/config/auth.php shim) would silently boot
+ * (many platforms have no ROOT_PATH/config/auth.php shim) would silently boot
  * with the auth service pointed at loopback, and every login/register/JWKS call
  * failed deep inside a curl error ("Failed to connect to localhost port 3139")
  * instead of at boot where a misconfiguration belongs.

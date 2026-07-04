@@ -43,7 +43,7 @@ abstract class AuthServiceClient
      *   2. getenv('AUTH_SERVICE_URL')     — fallback for FPM where $_ENV may be empty
      *   3. ROOT_PATH . 'config/auth.php'  — flat 'auth_service_url' key (legacy)
      *
-     * (task #3176 — kill the silent localhost auth-URL fallback) There is
+     * (Kill the silent localhost auth-URL fallback.) There is
      * deliberately NO step 4 default anymore. This method used to fall back to
      * a hardcoded 'http://auth:3139' (previously 'http://localhost:3139') when
      * neither the env var nor the legacy config file resolved anything — silently

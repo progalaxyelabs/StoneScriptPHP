@@ -454,7 +454,7 @@ function db_pool_stats(): array
 
 /**
  * Resolve the StoneScriptDB Gateway base URL used by the TokenValidator service
- * (task #3176 — kill the silent localhost auth-URL fallback).
+ * (kill the silent localhost auth-URL fallback).
  *
  * Precedence: explicit `$authConfig['gateway_url']` (legacy ROOT_PATH/config/auth.php
  * override, kept for backward compatibility) > `Env::$DB_GATEWAY_URL`. DB_GATEWAY_URL
@@ -463,7 +463,7 @@ function db_pool_stats(): array
  * is guaranteed non-empty for any process that got this far. There is deliberately
  * NO 'http://localhost:9000' fallback: the old bootstrap.php default silently pointed
  * the gateway client at loopback for any platform without a root config/auth.php file
- * (11 of 13 platforms), a misconfiguration that should fail loud instead.
+ * (most downstream platforms), a misconfiguration that should fail loud instead.
  *
  * Extracted as a standalone function (rather than inlined in the bootstrap.php
  * closure) so it is directly unit-testable without needing to re-run the
