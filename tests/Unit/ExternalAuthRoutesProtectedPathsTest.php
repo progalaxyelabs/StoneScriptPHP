@@ -12,8 +12,8 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes;
  * for RequireCardMiddleware's tenant-agnostic (tier-2) exemption list.
  *
  * Added 2026-07-05 alongside the RequireCardMiddleware fix (see its class docblock
- * and TENANCY-IDENTITY-MODEL.md §4). This was previously untested code; per house
- * rule, modifying it means owning its test coverage from here on.
+ * and framework-spec.md §5.5). This was previously untested code; per house rule,
+ * modifying it means owning its test coverage from here on.
  *
  * @covers \StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes::protectedPaths
  */
@@ -64,7 +64,7 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
     /**
      * With default options (canonical prefix /api/auth, legacy_compat true by
      * default, provision_tenant explicitly enabled), the exact tier-2 route set
-     * used to fix the 2026-07-05 aasaanwork incident must be present.
+     * used to fix the 2026-07-05 fleet incident (RequireCardMiddleware) must be present.
      */
     public function test_default_options_return_the_full_tier2_route_set(): void
     {

@@ -43,8 +43,8 @@ use StoneScriptPHP\ApiResponse;
  * was latent on a platform whose `JwtAuthMiddleware` didn't reliably populate
  * `jwt_claims` (a separate, since-fixed bug that accidentally masked it), and broke every
  * new user's first "create organization" call the moment that masking bug was fixed.
- * See `TENANCY-IDENTITY-MODEL.md` §4 root-cause note and the aasaanwork incident report
- * for the full chain. `$tenantAgnosticPaths` closes the gap.
+ * See `framework-spec.md §5.5` and this file's CHANGELOG entry (v5.8.0) for the full
+ * chain. `$tenantAgnosticPaths` closes the gap.
  *
  * ## Usage — RECOMMENDED (since the fix above): `Application::run()` config key
  *

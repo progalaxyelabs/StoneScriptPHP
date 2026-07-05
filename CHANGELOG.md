@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`RequireCardMiddleware` had zero path awareness — real fleet incident
-  (aasaanwork, 2026-07-05).** Wired globally (the previously-documented usage),
+  (2026-07-05).** Wired globally (the previously-documented usage),
   it 403'd ANY authenticated-but-tenant-less request, with no way to distinguish
   a genuinely tenant-scoped business route from `ExternalAuthRoutes`' own tier-2
   routes (`provision-tenant`, `select-tenant`, `change-password`,
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `AUTH-SPEC.md §5.5` compliance test: `POST /api/auth/exchange` was already
+- `framework-spec.md §5.5` compliance test: `POST /api/auth/exchange` was already
   correct (no shared state, no revoke-on-exchange), but untested — a client may
   hold multiple concurrently-valid cards across different tenants (one per
   browser tab) with no server-side coordination required. Locked in with a

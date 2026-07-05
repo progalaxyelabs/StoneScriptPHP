@@ -172,8 +172,8 @@ class RequireCardMiddlewareTest extends TestCase
     // Regression coverage for the real fleet incident: RequireCardMiddleware, wired
     // globally with an empty exemption list, 403'd ExternalAuthRoutes' own tier-2
     // routes (provision-tenant, select-tenant, etc.) the moment JwtAuthMiddleware
-    // started reliably populating jwt_claims for them. See TENANCY-IDENTITY-MODEL.md
-    // §4 and the class docblock for the full chain.
+    // started reliably populating jwt_claims for them. See framework-spec.md §5.5
+    // and the class docblock for the full chain.
 
     /**
      * A passport on a path that IS in the exemption list must pass through —

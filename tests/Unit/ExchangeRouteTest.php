@@ -374,20 +374,20 @@ class ExchangeRouteTest extends TestCase
         $this->assertSame('t-9', $received['tenant_id'], 'tenant_id merged from body into resolver claims');
     }
 
-    // ── §5.5 (AUTH-SPEC): re-exchange for a different tenant does not revoke ──
-    // ── or affect any previously-issued card — 2026-07-05 multi-tab support ──
+    // ── §5.5 (framework-spec.md): re-exchange for a different tenant does not ──
+    // ── revoke or affect any previously-issued card — multi-tab support ──────
 
     /**
      * Two sequential exchanges for two DIFFERENT tenants, same identity, must each
      * independently succeed with their own correct card — simulating what happens
-     * when a consultancy owner has two browser tabs open on two different tenants
-     * (TENANCY-IDENTITY-MODEL §4). Nothing about minting the second card may
-     * reference, invalidate, or depend on the first call having happened.
+     * when a user has two browser tabs open on two different tenants (framework-
+     * spec.md §5.5). Nothing about minting the second card may reference,
+     * invalidate, or depend on the first call having happened.
      *
-     * This locks in AUTH-SPEC §5.5: "POST /api/auth/exchange MUST NOT revoke or
-     * invalidate any previously-issued card for a different tenant_id when minting
-     * a new one." process() has no shared mutable state and no revocation call at
-     * all — this test would fail if either were ever introduced.
+     * This locks in framework-spec.md §5.5: "exchange never revokes or invalidates
+     * a previously-issued card for a different tenant_id when minting a new one."
+     * process() has no shared mutable state and no revocation call at all — this
+     * test would fail if either were ever introduced.
      */
     public function test_exchanging_a_second_tenant_does_not_affect_the_first_cards_result(): void
     {

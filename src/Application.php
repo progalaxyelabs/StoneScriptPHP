@@ -185,7 +185,7 @@ class Application
             }
         }
 
-        // §5.1 tenant-context enforcement (TENANCY-IDENTITY-MODEL §5.1): a tenant-less
+        // §5.1 tenant-context enforcement (framework-spec.md §5.1): a tenant-less
         // token cannot authorize a tenant-scoped route. Opt-in — off by default for
         // backward compat with platforms that still wire RequireCardMiddleware manually
         // (or a custom equivalent) via 'middleware' above.
@@ -205,7 +205,7 @@ class Application
             ));
         }
 
-        // §5.2 URL-echo enforcement (TENANCY-IDENTITY-MODEL §5.2): url.tenantId MUST
+        // §5.2 URL-echo enforcement (framework-spec.md §5.2): url.tenantId MUST
         // equal card.tenant_id. Opt-in — off by default for backward compat with
         // platforms that haven't adopted the canonical {tenantId} URL param yet.
         // Safe to wire globally: TenantUrlMatchMiddleware self-skips any route whose
