@@ -374,6 +374,82 @@ class ExchangeRouteTest extends TestCase
         $this->assertSame('t-9', $received['tenant_id'], 'tenant_id merged from body into resolver claims');
     }
 
+    // ── §5.5 (AUTH-SPEC): re-exchange for a different tenant does not revoke ──
+    // ── or affect any previously-issued card — 2026-07-05 multi-tab support ──
+
+    /**
+     * Two sequential exchanges for two DIFFERENT tenants, same identity, must each
+     * independently succeed with their own correct card — simulating what happens
+     * when a consultancy owner has two browser tabs open on two different tenants
+     * (TENANCY-IDENTITY-MODEL §4). Nothing about minting the second card may
+     * reference, invalidate, or depend on the first call having happened.
+     *
+     * This locks in AUTH-SPEC §5.5: "POST /api/auth/exchange MUST NOT revoke or
+     * invalidate any previously-issued card for a different tenant_id when minting
+     * a new one." process() has no shared mutable state and no revocation call at
+     * all — this test would fail if either were ever introduced.
+     */
+    public function test_exchanging_a_second_tenant_does_not_affect_the_first_cards_result(): void
+    {
+        $allTenants = [
+            ['id' => 't-software-dev', 'name' => 'Acme Dev Shop'],
+            ['id' => 't-marketing',    'name' => 'Bright Marketing'],
+        ];
+
+        // Tab 1 — exchange into the software-dev tenant.
+        $tab1 = new TestableExchangeRoute(
+            $this->makeClient(),
+            [],
+            $this->makeConfig(),
+            rolesResolver:   fn(array $claims) => ['owner'],
+            tenantsResolver: fn(array $claims) => $allTenants
+        );
+        $tab1->stubToken  = 'passport.jwt';        // same identity's passport in both tabs
+        $tab1->stubClaims = ['sub' => 'ceo-identity'];
+        $tab1->stubCard   = 'card.software-dev.signed';
+        $tab1->tenant_id  = 't-software-dev';
+
+        $tab1Response = $tab1->process();
+
+        // Tab 2 — separate ApiClient/session, exchange into the marketing tenant,
+        // using a completely independent route instance (mirrors two real tabs
+        // never sharing any in-process state).
+        $tab2 = new TestableExchangeRoute(
+            $this->makeClient(),
+            [],
+            $this->makeConfig(),
+            rolesResolver:   fn(array $claims) => ['owner'],
+            tenantsResolver: fn(array $claims) => $allTenants
+        );
+        $tab2->stubToken  = 'passport.jwt';         // same identity's passport
+        $tab2->stubClaims = ['sub' => 'ceo-identity'];
+        $tab2->stubCard   = 'card.marketing.signed';
+        $tab2->tenant_id  = 't-marketing';
+
+        $tab2Response = $tab2->process();
+
+        // Both exchanges succeeded independently.
+        $this->assertSame('ok', $tab1Response->status);
+        $this->assertSame('ok', $tab2Response->status);
+
+        // Each got its OWN distinct card, for its OWN tenant.
+        $this->assertSame('card.software-dev.signed', $tab1Response->data['access_token']);
+        $this->assertSame('t-software-dev', $tab1Response->data['active_tenant']['id']);
+
+        $this->assertSame('card.marketing.signed', $tab2Response->data['access_token']);
+        $this->assertSame('t-marketing', $tab2Response->data['active_tenant']['id']);
+
+        // Re-reading tab 1's response object after tab 2's exchange ran proves tab 1's
+        // result was never mutated by the second call — the strongest assertion
+        // available at this seam (there is no server-side revocation list to query
+        // directly from a unit test; ExchangeRoute simply never touches one).
+        $this->assertSame(
+            'card.software-dev.signed',
+            $tab1Response->data['access_token'],
+            "Tab 1's card must be unchanged after tab 2 exchanged a different tenant"
+        );
+    }
+
     // ── available_tenants: multiple tenants list ──────────────────────────────
 
     public function test_available_tenants_list_returned_for_multi_tenant_identity(): void

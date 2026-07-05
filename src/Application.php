@@ -23,6 +23,7 @@ use StoneScriptPHP\Subscriptions\SubscriptionMiddleware;
 use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
 use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
 use StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware;
+use StoneScriptPHP\Auth\Middleware\RequireCardMiddleware;
 use StoneScriptPHP\RequestLogging\RequestLogger;
 
 /**
@@ -55,6 +56,15 @@ use StoneScriptPHP\RequestLogging\RequestLogger;
  *       // Optional (§5.2 url.tenantId === card.tenant_id enforcement). Safe to
  *       // enable globally — self-skips routes whose pattern has no {tenantId}.
  *       'tenant_url_match' => ['enabled' => true, 'param' => 'tenantId'],
+ *       // Optional (S5.1 tenant-less token cannot authorize a tenant-scoped route).
+ *       // Safe to enable globally -- auto-exempts ExternalAuthRoutes' own tier-2
+ *       // routes (provision-tenant, select-tenant, change-password, invite-member,
+ *       // memberships, me) so a valid passport is never wrongly rejected on them.
+ *       // Prefer this over manually constructing `new RequireCardMiddleware()` in
+ *       // 'middleware' -- the manual form has no exemption list and WILL 403 every
+ *       // one of those routes the moment JwtAuthMiddleware populates jwt_claims for
+ *       // them (see class docblock -- this was a real fleet incident, 2026-07-05).
+ *       'require_card' => ['enabled' => true],
  *   ]);
  *
  * @package StoneScriptPHP
@@ -96,6 +106,24 @@ class Application
         $jwtConfig          = $config['jwt'] ?? [];
         $customMiddleware   = $config['middleware'] ?? [];
         $storeAccessConfig  = $config['store_access'] ?? [];
+        $requireCardConfig  = $config['require_card'] ?? [];
+        $authMode           = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
+
+        // Computed once, lazily, and reused everywhere it's needed (store_access,
+        // require_card exemption list, ExternalAuthRoutes::register itself) so there
+        // is exactly one derivation of these options, not several that could drift.
+        // MUST stay lazy, not unconditional: buildAuthRouteOptions() throws when
+        // AUTH_SERVICE_URL is unset (via resolveAuthServiceUrl), which is the normal,
+        // valid state for T1 / pure-builtin platforms that never touch external auth
+        // at all — calling it unconditionally would break every one of them.
+        $authRouteOptions = null;
+        $needsAuthRouteOptions = !empty($storeAccessConfig['enabled'])
+            || !empty($requireCardConfig['enabled'])
+            || $authMode === 'external'
+            || $authMode === 'hybrid';
+        if ($needsAuthRouteOptions) {
+            $authRouteOptions = self::buildAuthRouteOptions($authConfig, $env);
+        }
 
         // Subscription wiring is gated on BOTH presence AND the 'enabled' flag
         // (mirrors the store_access gate below). See self::isSubscriptionEnabled().
@@ -137,7 +165,6 @@ class Application
         if (!empty($storeAccessConfig['enabled'])) {
             // Merge auth service URL + platform code from auth config so the
             // caller doesn't have to repeat them in store_access config.
-            $authRouteOptions = self::buildAuthRouteOptions($authConfig, $env);
             $resolvedStoreAccessConfig = array_merge([
                 'auth_service_url' => $authRouteOptions['auth_service_url'],
                 'platform_code'    => $authRouteOptions['platform_code'],
@@ -158,18 +185,37 @@ class Application
             }
         }
 
+        // §5.1 tenant-context enforcement (TENANCY-IDENTITY-MODEL §5.1): a tenant-less
+        // token cannot authorize a tenant-scoped route. Opt-in — off by default for
+        // backward compat with platforms that still wire RequireCardMiddleware manually
+        // (or a custom equivalent) via 'middleware' above.
+        //
+        // REGRESSION THIS FIXES (2026-07-05, real fleet incident): RequireCardMiddleware,
+        // used bare (`new RequireCardMiddleware()`, the previously-documented usage), has
+        // zero path awareness — it 403s ANY authenticated-but-tenantless request, which
+        // includes ExternalAuthRoutes' own tier-2 routes (provision-tenant, select-tenant,
+        // change-password, invite-member, memberships, me — routes that intentionally take
+        // a passport, never a card). Wiring it globally via THIS config key auto-derives the
+        // exemption list from ExternalAuthRoutes::protectedPaths($authRouteOptions) — the
+        // same config that defines those routes — so the list can never drift out of sync
+        // with what's actually registered, and a platform never has to hand-maintain it.
+        if (!empty($requireCardConfig['enabled'])) {
+            $router->use(new RequireCardMiddleware(
+                ExternalAuthRoutes::protectedPaths($authRouteOptions)
+            ));
+        }
+
         // §5.2 URL-echo enforcement (TENANCY-IDENTITY-MODEL §5.2): url.tenantId MUST
         // equal card.tenant_id. Opt-in — off by default for backward compat with
         // platforms that haven't adopted the canonical {tenantId} URL param yet.
         // Safe to wire globally: TenantUrlMatchMiddleware self-skips any route whose
         // matched pattern doesn't declare the configured param, so flat/non-tenant
         // routes (health, webhooks, admin auth, infra) are never affected.
+        // Runs AFTER require_card: confirm a card exists before checking its tenant claim.
         $tenantUrlMatchConfig = $config['tenant_url_match'] ?? [];
         if (!empty($tenantUrlMatchConfig['enabled'])) {
             $router->use(new TenantUrlMatchMiddleware($tenantUrlMatchConfig['param'] ?? 'tenantId'));
         }
-
-        $authMode = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
 
         // Register built-in refresh/logout routes when not using external-only auth
         if ($authMode !== 'external') {
@@ -181,7 +227,6 @@ class Application
 
         // Register external auth proxy routes for external/hybrid modes
         if ($authMode === 'external' || $authMode === 'hybrid') {
-            $authRouteOptions = self::buildAuthRouteOptions($authConfig, $env);
             ExternalAuthRoutes::register($router, $authRouteOptions);
         }
 

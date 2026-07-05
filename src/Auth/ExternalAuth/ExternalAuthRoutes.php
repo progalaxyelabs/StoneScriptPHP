@@ -336,7 +336,19 @@ class ExternalAuthRoutes
     }
 
     /**
-     * Get protected paths (auth required) based on options
+     * Get protected paths — tier-2, identity-required-but-tenant-agnostic routes
+     * (auth required, but a passport suffices; no card/tenant_id needed).
+     *
+     * Used by `RequireCardMiddleware`'s exemption list (see its class docblock and
+     * `Application::run()`'s `require_card` config key) so those routes are never
+     * wrongly rejected for lacking a `tenant_id` — they were never supposed to need
+     * one. This is the single source of truth for that list; do not hand-maintain
+     * a duplicate anywhere.
+     *
+     * Mirrors `publicPaths()`'s legacy_compat handling (2026-07-05 fix — this method
+     * previously only returned the canonical-prefix paths, so a platform still on the
+     * default `legacy_compat: true` would 403 requests to the legacy `/auth/*` prefix
+     * even after wiring the exemption correctly for `/api/auth/*`).
      *
      * @param array $options Same options passed to register()
      * @return array List of protected path strings
@@ -344,7 +356,25 @@ class ExternalAuthRoutes
     public static function protectedPaths(array $options = []): array
     {
         $config = new ExternalAuthConfig($options);
-        $prefix = $config->prefix;
+
+        $paths = self::computeProtectedPaths($config->prefix, $config);
+
+        if ($config->legacyCompat && $config->prefix !== self::LEGACY_PREFIX) {
+            $paths = array_merge($paths, self::computeProtectedPaths(self::LEGACY_PREFIX, $config));
+        }
+
+        return $paths;
+    }
+
+    /**
+     * Compute protected (tier-2) path strings for a given prefix.
+     *
+     * @param string $prefix URL prefix
+     * @param ExternalAuthConfig $config Parsed config
+     * @return array List of protected path strings under this prefix
+     */
+    private static function computeProtectedPaths(string $prefix, ExternalAuthConfig $config): array
+    {
         $paths = [];
 
         if ($config->isEnabled('select_tenant')) {

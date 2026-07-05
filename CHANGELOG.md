@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.8.0] - 2026-07-05
+
+### Fixed
+
+- **`RequireCardMiddleware` had zero path awareness — real fleet incident
+  (aasaanwork, 2026-07-05).** Wired globally (the previously-documented usage),
+  it 403'd ANY authenticated-but-tenant-less request, with no way to distinguish
+  a genuinely tenant-scoped business route from `ExternalAuthRoutes`' own tier-2
+  routes (`provision-tenant`, `select-tenant`, `change-password`,
+  `invite-member`, `memberships`, `me`) — routes that intentionally accept a
+  passport and were never supposed to require a card. This was latent since the
+  card model shipped; it was masked by the pre-5.7.0 `JwtAuthMiddleware` bug
+  (see 5.7.0 entry below) until that bug was fixed, at which point every new
+  user's first "create organization" call started 403-ing fleet-wide on any
+  platform with a tier-2 route enabled.
+  - **Fix:** `RequireCardMiddleware`'s constructor now accepts an optional
+    `$tenantAgnosticPaths` list, checked against the matched route pattern
+    before rejecting a tenant-less token. Backward compatible — default is an
+    empty list, reproducing the old strict (buggy) behavior exactly for any
+    existing bare `new RequireCardMiddleware()` call site.
+  - **New recommended usage:** `Application::run(['require_card' => ['enabled'
+    => true]])` auto-derives the exemption list from
+    `ExternalAuthRoutes::protectedPaths($authRouteOptions)` — the same config
+    that defines those routes, so the list can never hand-drift out of sync.
+    Mirrors the existing `tenant_url_match` config key's self-skip pattern.
+
+- **`ExternalAuthRoutes::protectedPaths()` ignored `legacy_compat`.** Since
+  `legacy_compat` defaults to `true`, a platform on the default config would
+  get the new `require_card` exemption correctly applied to
+  `/api/auth/provision-tenant` but NOT to the legacy `/auth/provision-tenant`
+  duplicate — silently 403-ing any client still calling the legacy prefix. Now
+  mirrors `publicPaths()`'s existing (correct) legacy-prefix handling.
+
+### Added
+
+- `AUTH-SPEC.md §5.5` compliance test: `POST /api/auth/exchange` was already
+  correct (no shared state, no revoke-on-exchange), but untested — a client may
+  hold multiple concurrently-valid cards across different tenants (one per
+  browser tab) with no server-side coordination required. Locked in with a
+  regression test simulating two tabs exchanging into different tenants
+  sequentially.
+
 ## [5.7.1] - 2026-07-04
 
 ### Changed

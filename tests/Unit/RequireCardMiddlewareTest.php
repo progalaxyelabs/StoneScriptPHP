@@ -167,6 +167,108 @@ class RequireCardMiddlewareTest extends TestCase
         );
     }
 
+    // ── Tenant-agnostic (tier-2) path exemption — 2026-07-05 regression fix ──────
+    //
+    // Regression coverage for the real fleet incident: RequireCardMiddleware, wired
+    // globally with an empty exemption list, 403'd ExternalAuthRoutes' own tier-2
+    // routes (provision-tenant, select-tenant, etc.) the moment JwtAuthMiddleware
+    // started reliably populating jwt_claims for them. See TENANCY-IDENTITY-MODEL.md
+    // §4 and the class docblock for the full chain.
+
+    /**
+     * A passport on a path that IS in the exemption list must pass through —
+     * this is the whole point of the fix (e.g. POST /api/auth/provision-tenant).
+     */
+    public function test_passport_on_exempt_tenant_agnostic_path_passes_through(): void
+    {
+        $middleware = new RequireCardMiddleware(['/api/auth/provision-tenant', '/api/auth/me']);
+
+        $request = [
+            'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],  // passport, no tenant_id
+            'route' => ['pattern' => '/api/auth/provision-tenant'],
+        ];
+
+        $passedThrough = false;
+        $next = function ($req) use (&$passedThrough) {
+            $passedThrough = true;
+            return null;
+        };
+
+        $middleware->handle($request, $next);
+
+        $this->assertTrue(
+            $passedThrough,
+            'A passport on an exempt tenant-agnostic path must pass through, not 403'
+        );
+    }
+
+    /**
+     * A passport on a path that is NOT in the exemption list must still 403 —
+     * the exemption must be precise, not a blanket bypass. Guards against a lazy
+     * fix that accidentally re-opens the exact hole RequireTenantMiddleware exists
+     * to close.
+     */
+    public function test_passport_on_non_exempt_path_still_returns_403(): void
+    {
+        $middleware = new RequireCardMiddleware(['/api/auth/provision-tenant']);
+
+        $request = [
+            'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],
+            'route' => ['pattern' => '/portal/tenant/{tenantId}/dashboard'],
+        ];
+
+        $response = $middleware->handle($request, fn($r) => null);
+
+        $this->assertInstanceOf(ApiResponse::class, $response);
+        $this->assertSame(403, $response->httpStatusCode);
+        $this->assertSame('tenant_context_required', $response->data['error']);
+    }
+
+    /**
+     * A passport with no 'route'/'pattern' key at all (should not normally happen —
+     * this middleware always runs post-routing — but defensive) must still 403,
+     * never silently pass through for lack of information to check against.
+     */
+    public function test_passport_with_no_route_pattern_still_returns_403(): void
+    {
+        $middleware = new RequireCardMiddleware(['/api/auth/provision-tenant']);
+
+        $request = [
+            'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],
+            // no 'route' key at all
+        ];
+
+        $response = $middleware->handle($request, fn($r) => null);
+
+        $this->assertInstanceOf(ApiResponse::class, $response);
+        $this->assertSame(403, $response->httpStatusCode);
+    }
+
+    /**
+     * Default construction (no argument) must reproduce the pre-fix, fully-strict
+     * behavior — an empty exemption list means nothing is exempted, preserving
+     * backward compatibility for any existing manual `new RequireCardMiddleware()`
+     * call sites until they're migrated to pass the real list.
+     */
+    public function test_default_construction_has_empty_exemption_list(): void
+    {
+        $middleware = new RequireCardMiddleware();  // no args — legacy call shape
+
+        $request = [
+            'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],
+            'route' => ['pattern' => '/api/auth/provision-tenant'],
+        ];
+
+        $response = $middleware->handle($request, fn($r) => null);
+
+        $this->assertInstanceOf(
+            ApiResponse::class,
+            $response,
+            'Default (no-arg) construction must NOT exempt anything — matches documented legacy behavior'
+        );
+        $this->assertSame(403, $response->httpStatusCode);
+    }
+
     // ── Next callable receives the request unchanged ─────────────────────────────
 
     /**

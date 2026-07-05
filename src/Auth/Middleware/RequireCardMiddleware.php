@@ -20,25 +20,50 @@ use StoneScriptPHP\ApiResponse;
  * Wiring `RequireTenantMiddleware` globally would self-block exchange. Platforms worked
  * around this by NOT wiring any global tenant check, leaving business routes unprotected.
  *
- * `RequireCardMiddleware` fixes this by distinguishing two states:
+ * `RequireCardMiddleware` fixes this by distinguishing three states:
  *
  *   - **No `jwt_claims` in request** → public route (JwtAuthMiddleware excluded this path
  *     via `publicPaths()`). Pass through — the route is responsible for its own auth.
  *
- *   - **`jwt_claims` present, no `tenant_id`** → authenticated identity (passport) on a
- *     tenant-scoped route → reject 403 (framework-spec.md §6 §5.1).
+ *   - **`jwt_claims` present, no `tenant_id`, path is a known tenant-agnostic route**
+ *     (§`$tenantAgnosticPaths` below) → intentional: this route takes a passport, never
+ *     a card. Pass through.
+ *
+ *   - **`jwt_claims` present, no `tenant_id`, path is anything else** → authenticated
+ *     identity (passport) on a tenant-scoped route → reject 403 (framework-spec.md §6 §5.1).
  *
  *   - **`jwt_claims` present, `tenant_id` set** → valid card → pass through.
  *
- * ## Usage (framework-spec.md §6 §5.1, multi-tenant platforms)
+ * ## REGRESSION this fixes (real fleet incident, 2026-07-05)
  *
- * Add to the `middleware` array in `Application::run()` config, AFTER `JwtAuthMiddleware`
- * and `GatewayTenantMiddleware`:
+ * Before the third bullet existed, this middleware had ZERO path awareness — it 403'd
+ * ANY authenticated-but-tenantless request, including `ExternalAuthRoutes`' own tier-2
+ * routes (`provision-tenant`, `select-tenant`, `change-password`, `invite-member`,
+ * `memberships`, `me` — routes that intentionally take a passport, never a card). This
+ * was latent on a platform whose `JwtAuthMiddleware` didn't reliably populate
+ * `jwt_claims` (a separate, since-fixed bug that accidentally masked it), and broke every
+ * new user's first "create organization" call the moment that masking bug was fixed.
+ * See `TENANCY-IDENTITY-MODEL.md` §4 root-cause note and the aasaanwork incident report
+ * for the full chain. `$tenantAgnosticPaths` closes the gap.
+ *
+ * ## Usage — RECOMMENDED (since the fix above): `Application::run()` config key
+ *
+ * `Application::run(['require_card' => ['enabled' => true], ...])` wires this middleware
+ * itself, automatically passing `ExternalAuthRoutes::protectedPaths($authRouteOptions)` as
+ * `$tenantAgnosticPaths` — the exemption list is derived from the SAME config that defines
+ * those routes, so it can never drift out of sync. Prefer this over manual construction.
+ *
+ * ## Usage — manual construction (legacy; MUST pass the exemption list yourself)
  *
  *   Application::run([
  *       'auth' => [...],
- *       'middleware' => [new RequireCardMiddleware()],
+ *       'middleware' => [new RequireCardMiddleware(
+ *           StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes::protectedPaths($authOptions)
+ *       )],
  *   ]);
+ *
+ * Constructing this with NO arguments (`new RequireCardMiddleware()`) reproduces the
+ * 2026-07-05 regression on any platform that has ANY tier-2 route enabled — do not do this.
  *
  * **T1 platforms (no tenant concept):** Do NOT add this middleware. Passports are valid
  * for all routes on T1 platforms; there is no card model.
@@ -46,8 +71,9 @@ use StoneScriptPHP\ApiResponse;
  * ## Relationship to RequireTenantMiddleware
  *
  * `RequireCardMiddleware` is a superset: the same §5.1 logic PLUS the public-route
- * pass-through. Use it as the global middleware; use `RequireTenantMiddleware` directly
- * only when you need strict per-route enforcement where all callers are authenticated.
+ * pass-through PLUS the tenant-agnostic-route pass-through. Use it as the global
+ * middleware; use `RequireTenantMiddleware` directly only when you need strict per-route
+ * enforcement where all callers are authenticated.
  *
  * @package StoneScriptPHP\Auth\Middleware
  * @since   5.4.0
@@ -55,12 +81,25 @@ use StoneScriptPHP\ApiResponse;
 class RequireCardMiddleware implements MiddlewareInterface
 {
     /**
+     * @param array $tenantAgnosticPaths Exact route-pattern strings (matched against
+     *   `$request['route']['pattern']`) that are allowed to pass an authenticated
+     *   passport (no `tenant_id`) through without rejection. Normally the output of
+     *   `ExternalAuthRoutes::protectedPaths($authRouteOptions)` — see class docblock.
+     *   Defaults to empty for backward compatibility with existing manual construction;
+     *   an empty list reproduces the pre-fix (2026-07-05) behavior, so pass the real list.
+     */
+    public function __construct(private readonly array $tenantAgnosticPaths = [])
+    {
+    }
+
+    /**
      * Handle the request.
      *
-     * Three outcomes:
+     * Four outcomes:
      *   1. No `jwt_claims` → public route → pass through.
-     *   2. Claims present, no `tenant_id` → 403 tenant_context_required.
-     *   3. Claims present, `tenant_id` set → pass through.
+     *   2. Claims present, no `tenant_id`, path in $tenantAgnosticPaths → pass through.
+     *   3. Claims present, no `tenant_id`, path NOT in $tenantAgnosticPaths → 403.
+     *   4. Claims present, `tenant_id` set → pass through.
      */
     public function handle(array $request, callable $next): ?ApiResponse
     {
@@ -75,8 +114,15 @@ class RequireCardMiddleware implements MiddlewareInterface
 
         // framework-spec.md §6 §5.1 — a tenant-less token CANNOT authorize a
         // tenant-scoped route. This catches passports accidentally sent to business
-        // routes (identity is authenticated, but the token type is wrong).
+        // routes (identity is authenticated, but the token type is wrong) — UNLESS the
+        // matched route is a known tenant-agnostic (tier-2) route, which intentionally
+        // takes a passport and was never supposed to require a card in the first place.
         if (empty($claims['tenant_id'])) {
+            $pattern = $request['route']['pattern'] ?? null;
+            if ($pattern !== null && in_array($pattern, $this->tenantAgnosticPaths, true)) {
+                return $next($request);
+            }
+
             http_response_code(403);
             return new ApiResponse(
                 'error',
