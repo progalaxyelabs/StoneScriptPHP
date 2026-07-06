@@ -818,40 +818,51 @@ function verbatimTokensTs(): string
     return <<<'TS'
 // src/tokens.ts — emitted verbatim by php stone generate client (CLIENT-SDK-SPEC §6)
 // DO NOT EDIT MANUALLY.
-
+//
+// 2026-07-06 storage redesign: this TokenStore is used ONLY for calling THIS
+// platform's own business API (never the shared auth server) — it always
+// wants the API (card) token, the same one AuthService (ngx-stonescriptphp-client)
+// stores under `ssp_api_access_token` in sessionStorage. Deliberately
+// sessionStorage, NOT localStorage: the card is tenant+role-scoped and must be
+// per-tab. A user in N tenants can hold N tabs, each acting as a different
+// tenant (the "Gmail account-switcher" model) — a shared localStorage key
+// would mean any tab that exchanged into a new tenant silently overwrote
+// every other tab's active session (found 2026-07-06 building a "Switch Org"
+// UI that opens a tenant picker in a new tab of the same origin).
+//
 // Key names are owned by AUTH-SPEC §token-contract. Do not rename.
-const ACCESS_KEY  = 'ssp_access_token';
-const REFRESH_KEY = 'ssp_refresh_token';
+const ACCESS_KEY  = 'ssp_api_access_token';
+const REFRESH_KEY = 'ssp_api_refresh_token';
 
 export class TokenStore {
   get(): string | null {
-    return typeof localStorage !== 'undefined'
-      ? localStorage.getItem(ACCESS_KEY)
+    return typeof sessionStorage !== 'undefined'
+      ? sessionStorage.getItem(ACCESS_KEY)
       : null;
   }
 
   set(token: string): void {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(ACCESS_KEY, token);
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(ACCESS_KEY, token);
     }
   }
 
   getRefresh(): string | null {
-    return typeof localStorage !== 'undefined'
-      ? localStorage.getItem(REFRESH_KEY)
+    return typeof sessionStorage !== 'undefined'
+      ? sessionStorage.getItem(REFRESH_KEY)
       : null;
   }
 
   setRefresh(token: string): void {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(REFRESH_KEY, token);
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(REFRESH_KEY, token);
     }
   }
 
   clear(): void {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem(ACCESS_KEY);
-      localStorage.removeItem(REFRESH_KEY);
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(ACCESS_KEY);
+      sessionStorage.removeItem(REFRESH_KEY);
     }
   }
 
