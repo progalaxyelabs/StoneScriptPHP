@@ -19,6 +19,7 @@ use StoneScriptPHP\Auth\MultiAuthJwtAdapter;
 use StoneScriptPHP\Auth\AuthRoutes;
 use StoneScriptPHP\Auth\AuthContext;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes;
+use StoneScriptPHP\Auth\BuiltinOAuth\GoogleOAuthRoutes;
 use StoneScriptPHP\Subscriptions\SubscriptionMiddleware;
 use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
 use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
@@ -230,6 +231,14 @@ class Application
             ExternalAuthRoutes::register($router, $authRouteOptions);
         }
 
+        // Builtin Google OAuth popup flow — standalone platforms with no central
+        // auth service (AUTH_MODE=builtin) opt in via auth.oauth.google.enabled.
+        // See Auth\BuiltinOAuth\GoogleOAuthRoutes for what this registers and why.
+        $googleOAuthConfig = $authConfig['oauth']['google'] ?? [];
+        if ($authMode === 'builtin' && !empty($googleOAuthConfig['enabled'])) {
+            GoogleOAuthRoutes::register($router, $googleOAuthConfig);
+        }
+
         // Register subscription routes if subscription config is present
         if ($subscriptionEnabled) {
             SubscriptionRoutes::register($router, array_merge(
@@ -249,8 +258,19 @@ class Application
             http_response_code($response->httpStatusCode);
         }
 
-        header('Content-Type: application/json');
-        echo $response->toJson();
+        // RedirectResponse / HtmlResponse are ApiResponse subclasses (see their
+        // docblocks) so they reach here unchanged by Router/IRouteHandler — only
+        // the final output step needs to know about them, everything upstream
+        // still sees a plain ApiResponse.
+        if ($response instanceof RedirectResponse) {
+            header('Location: ' . $response->location);
+        } elseif ($response instanceof HtmlResponse) {
+            header('Content-Type: text/html; charset=utf-8');
+            echo $response->html;
+        } else {
+            header('Content-Type: application/json');
+            echo $response->toJson();
+        }
 
         // Log request to STDERR for Docker/Swarm
         self::logRequest();

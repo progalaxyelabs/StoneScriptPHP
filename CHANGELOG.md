@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.10.0] - 2026-07-07
+
+### Added
+
+- **Builtin (standalone) Google OAuth popup flow — no central auth service
+  required.** Until now, `AUTH_MODE=builtin` platforms had no first-class way
+  to offer "Sign in with Google" via `ngx-stonescriptphp-client`'s stock
+  `StoneScriptPHPAuth.loginWithProvider('google')`, which expects a real
+  `GET {host}/oauth/google` redirect-to-Google-and-back popup flow — that
+  contract previously existed only as a proxy to a central auth service
+  (`Auth\ExternalAuth\OAuthInitiateRoute`/`OAuthCallbackRoute`, gated to
+  `external`/`hybrid` mode), forcing standalone platforms to hand-roll a
+  client-side GSI-credential workaround instead.
+  - New `Auth\BuiltinOAuth\GoogleOAuthRoutes::register()` registers
+    `GET {prefix}/oauth/google` (redirects to Google's consent screen, with a
+    stateless signed-JWT CSRF `state` — no Redis/session store needed) and
+    `GET {prefix}/oauth/google/callback` (exchanges the code, verifies the ID
+    token via the same checks as the existing `auth:google` scaffold
+    template, resolves the local user via an app-supplied
+    `GoogleOAuthUserResolver`, mints this platform's own JWT, and renders the
+    postMessage-bridge HTML page the frontend library already listens for).
+  - Wired into `Application::run()`: set `AUTH_MODE=builtin` and pass
+    `auth.oauth.google.enabled = true` plus `client_id`/`client_secret`/
+    `redirect_uri`/`user_resolver` under `auth.oauth.google`.
+  - New `RedirectResponse`/`HtmlResponse` (both `ApiResponse` subclasses, so
+    `IRouteHandler`/`Router` are unaffected — zero breaking changes) let a
+    route handler emit a 302 redirect or raw HTML instead of the usual JSON
+    body; `Application::run()`'s output step special-cases both.
+  - `google/apiclient` moved from `suggest`-only to also being a
+    `require-dev` dependency (for this feature's own test coverage) — still
+    optional for consuming apps that don't enable Google OAuth.
+
 ## [5.8.0] - 2026-07-05
 
 ### Fixed
