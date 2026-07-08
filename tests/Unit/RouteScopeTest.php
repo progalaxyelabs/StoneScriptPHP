@@ -146,6 +146,59 @@ class RouteScopeTest extends TestCase
         $this->assertEquals('admin', $byPath['/admin/users']['service']);
     }
 
+    public function test_route_entry_is_public_default_false(): void
+    {
+        $entry = new RouteEntry(handler: 'App\\Routes\\HomeRoute');
+        $this->assertFalse($entry->isPublic);
+    }
+
+    public function test_route_entry_is_public_explicit_true(): void
+    {
+        $entry = new RouteEntry(handler: 'App\\Routes\\HomeRoute', isPublic: true);
+        $this->assertTrue($entry->isPublic);
+    }
+
+    public function test_normalize_route_config_reads_is_public_key(): void
+    {
+        $entry = Router::normalizeRouteConfig(['handler' => 'App\\Routes\\HomeRoute', 'is_public' => true]);
+        $this->assertTrue($entry->isPublic);
+    }
+
+    public function test_normalize_route_config_is_public_defaults_false_when_absent(): void
+    {
+        $entry = Router::normalizeRouteConfig(['handler' => 'App\\Routes\\HomeRoute']);
+        $this->assertFalse($entry->isPublic);
+    }
+
+    /**
+     * Regression test (2026-07-08): Format 2 (flat format) previously had NO way
+     * to mark an individual route public — loadRoutes() hardcoded isPublic=false
+     * for every flat-format route regardless of intent, forcing routes that must
+     * work without a pre-existing valid access token (e.g. a token-refresh
+     * endpoint validated by its OWN body-supplied refresh token) to incorrectly
+     * require one via JwtAuthMiddleware first — an unsatisfiable requirement for
+     * their actual purpose. Found live: progalaxy's POST /user/refresh-access.
+     */
+    public function test_load_routes_flat_format_respects_per_route_is_public(): void
+    {
+        $router = new Router();
+        $router->loadRoutes([
+            'POST' => [
+                '/user/refresh-access' => ['handler' => 'App\\Routes\\RefreshRoute', 'is_public' => true],
+                '/projects/add' => ['handler' => 'App\\Routes\\AddProjectRoute'],
+            ],
+        ]);
+
+        $meta = $router->getRouteMeta();
+        $byPath = [];
+        foreach ($meta as $m) {
+            $byPath[$m['path']] = $m;
+        }
+
+        $this->assertTrue($byPath['/user/refresh-access']['is_public'], 'Explicitly marked public route must be public');
+        $this->assertFalse($byPath['/projects/add']['is_public'], 'Route without is_public key must default to protected (backward compat)');
+    }
+
     public function test_load_routes_public_protected_format_with_service(): void
     {
         $router = new Router();

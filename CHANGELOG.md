@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.10.1] - 2026-07-08
+
+### Fixed
+
+- **Router::loadRoutes() Format 2 (flat format) had no way to mark an
+  individual route public.** `loadRoutes()` hardcoded `isPublic=false` for
+  every flat-format route regardless of intent, so routes that must work
+  without a pre-existing valid access token (e.g. a token-refresh endpoint
+  validated by its own body-supplied refresh token) were incorrectly gated
+  by `JwtAuthMiddleware` requiring one first — an unsatisfiable requirement
+  for their actual purpose. Found live: progalaxy's `POST /user/refresh-access`
+  returned 401 "Missing authentication token" instead of ever reaching the
+  handler's own refresh-token validation.
+  - `RouteEntry` gained an `isPublic` field (default `false`, backward
+    compatible). Flat-format route config arrays can now set
+    `'is_public' => true` per route, same effect as Format 1's `public`
+    section. `normalizeRouteConfig()` reads it; `loadRoutes()`'s flat-format
+    branch now passes it through instead of a hardcoded `false`.
+
 ## [5.10.0] - 2026-07-07
 
 ### Added

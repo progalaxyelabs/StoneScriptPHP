@@ -83,6 +83,15 @@ class RouteEntry
          * it returns a single DTO object — `Promise<Dto>`. Ignored when `response` is null.
          */
         public readonly bool $collection = false,
+
+        /**
+         * When true, the route is registered public (no JWT required) — same effect
+         * as declaring it under routes.php's 'public' section in Format 1. Only
+         * meaningful in Format 2 (flat format), where every route previously had no
+         * way to opt out of the default protected registration (loadRoutes() always
+         * passed isPublic=false for flat-format routes, with no per-route override).
+         */
+        public readonly bool $isPublic = false,
     ) {
     }
 

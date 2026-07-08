@@ -324,6 +324,7 @@ class Router
             param:     $config['param']     ?? null,
             response:  $config['response']   ?? null,
             collection: $config['collection'] ?? false,
+            isPublic:  $config['is_public']  ?? false,
         );
     }
 
@@ -376,7 +377,7 @@ class Router
                 $method = strtoupper($method);
                 foreach ($routes as $path => $config) {
                     $entry = self::normalizeRouteConfig($config);
-                    $this->addRoute($method, $path, $entry->handler, [], false, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
+                    $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
                 }
             }
         }
