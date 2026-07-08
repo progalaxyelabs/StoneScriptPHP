@@ -441,14 +441,21 @@ class Router
     }
 
     /**
-     * Process the incoming request
+     * Process the incoming request.
      *
+     * @param IncomingRequest|null $incoming When provided, method/path/headers/
+     *   query/body/cookies are read from this object instead of PHP
+     *   superglobals — the seam that makes route-level testing possible
+     *   (TESTABILITY-SPEC.md T1-1). When null (the default — every current
+     *   production call site), behavior is unchanged: reads
+     *   $_SERVER/$_GET/$_POST/php://input/getallheaders()/$_COOKIE exactly as
+     *   before.
      * @return ApiResponse
      */
-    public function dispatch(): ApiResponse
+    public function dispatch(?IncomingRequest $incoming = null): ApiResponse
     {
-        $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-        $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+        $method = strtoupper($incoming?->method ?? ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        $path = $incoming?->path ?? parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 
         // Pre-match route BEFORE running middleware so middleware (e.g. JwtAuthMiddleware)
         // can inspect the route's is_public flag without needing a separate excludedPaths list.
@@ -458,9 +465,10 @@ class Router
         $request = [
             'method'  => $method,
             'path'    => $path,
-            'input'   => $this->getInput(),
+            'input'   => $incoming !== null ? $this->resolveIncomingInput($incoming, $method) : $this->getInput(),
             'params'  => $match['params'] ?? [],
-            'headers' => $this->getHeaders(),
+            'headers' => $incoming?->headers ?? $this->getHeaders(),
+            'cookies' => $incoming?->cookies ?? $_COOKIE,
             // null when route not found — middleware passes through, closure returns 404
             'route'   => $match ? [
                 'pattern'       => $match['pattern'],
@@ -701,6 +709,29 @@ class Router
             log_debug('Exception in handler: ' . $e->getMessage());
             return $this->error500($e->getMessage());
         }
+    }
+
+    /**
+     * Resolve the 'input' array for an injected IncomingRequest, mirroring
+     * getInput()'s per-method branching (query for GET-like methods, body for
+     * mutating methods) but sourced from the object instead of superglobals.
+     *
+     * @param IncomingRequest $incoming
+     * @param string $method Already-uppercased method (from dispatch())
+     * @return array
+     */
+    private function resolveIncomingInput(IncomingRequest $incoming, string $method): array
+    {
+        if (in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
+            return $incoming->body ?? [];
+        }
+
+        // GET, DELETE, and anything else fall back to query params — matching
+        // getInput()'s "everything not POST/PUT/PATCH that isn't GET returns
+        // []" behavior would be a silent regression for injected GET-like
+        // requests, so we deliberately serve query params for any non-body
+        // method rather than mimicking that fallback-to-empty branch.
+        return $incoming->query;
     }
 
     /**

@@ -54,13 +54,19 @@ class CookieHelper
     }
 
     /**
-     * Get refresh token from httpOnly cookie
+     * Get refresh token from httpOnly cookie.
      *
+     * @param array|null $cookies Optional cookie map to read from instead of
+     *   $_COOKIE — the seam that lets this be unit tested (and, via a route's
+     *   request context 'cookies' key, tested end-to-end) without a live
+     *   HTTP request. See TESTABILITY-SPEC.md T1-1. Defaults to $_COOKIE for
+     *   full backward compatibility with existing call sites.
      * @return string|null The refresh token, or null if not found
      */
-    public static function getRefreshToken(): ?string
+    public static function getRefreshToken(?array $cookies = null): ?string
     {
-        return $_COOKIE[self::REFRESH_TOKEN_COOKIE] ?? null;
+        $cookies ??= $_COOKIE;
+        return $cookies[self::REFRESH_TOKEN_COOKIE] ?? null;
     }
 
     /**
@@ -118,13 +124,16 @@ class CookieHelper
     }
 
     /**
-     * Get CSRF token from cookie
+     * Get CSRF token from cookie.
      *
+     * @param array|null $cookies Optional cookie map to read from instead of
+     *   $_COOKIE — see getRefreshToken() docblock / TESTABILITY-SPEC.md T1-1.
      * @return string|null The CSRF token, or null if not found
      */
-    public static function getCsrfToken(): ?string
+    public static function getCsrfToken(?array $cookies = null): ?string
     {
-        return $_COOKIE[self::CSRF_TOKEN_COOKIE] ?? null;
+        $cookies ??= $_COOKIE;
+        return $cookies[self::CSRF_TOKEN_COOKIE] ?? null;
     }
 
     /**
