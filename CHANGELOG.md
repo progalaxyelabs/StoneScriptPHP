@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.12.0] - 2026-07-08
+
+### Added
+
+- **`Database::fake()` / `Database::isFaked()` / `Database::clearFakeMode()`**
+  — a business-logic test can now stub `Database::fn()`'s responses without a
+  live gateway/Postgres. Previously `Database` was a private-constructor
+  singleton with zero injection seam; the framework's own
+  `tests/Unit/DatabaseTest.php::test_fn_accepts_array_parameters()` proved
+  this by skipping itself unless a live gateway was configured. See
+  `TESTABILITY-SPEC.md` requirement T2-1.
+  - `Database::fake(array $responses)` — `function_name => array $rows |
+    \Closure(array $params): array`. Calls merge (re-registering the same
+    function name overwrites just that key); a `\Closure` can maintain its
+    own counter for sequential/varying responses, or `throw` a
+    `GatewayException` to simulate a gateway error — it receives the exact
+    same translation `_fn()` already applies to real errors
+    (`connection_failed` → `TenantDatabaseUnavailableException`, everything
+    else → wrapped `Exception`), no parallel error-handling path to keep in
+    sync.
+  - Calling `Database::fn()` for a function not registered while faked
+    throws immediately with a clear message, rather than silently falling
+    through to a real gateway call or returning an empty result.
+  - `Database::isConnected()` returns `true` while faked;
+    `Database::getGatewayClient()` throws a clear, distinct error while
+    faked (it has no fake-mode equivalent — it's for tenant routing against
+    a live connection).
+  - `Database::clearFakeMode()` clears the fake registry only — it does not
+    touch the real singleton/`GatewayClient`, because fake mode never
+    populates it in the first place (the fake branch in `_fn()` short-circuits
+    before the real client is ever constructed). Must be called in
+    `tearDown()`, same discipline as `Auth\AuthContext::clear()`.
+  - Zero behavior change for existing code: `Database::fn()` with no
+    `Database::fake()` call behaves exactly as before (confirmed by a
+    regression test asserting the real `DB_GATEWAY_URL`-missing config error
+    still surfaces, not a fake-mode error).
+
+## [5.11.0] - 2026-07-08
+
+### Added
+
+- **`Routing\Router::dispatch()` accepts an optional `IncomingRequest`**
+  (`StoneScriptPHP\Routing\IncomingRequest`), letting a test drive the full
+  middleware pipeline + handler dispatch (method matching, header-driven
+  middleware, request body shape) without touching PHP superglobals or
+  `php://input`, and without a live HTTP server. `dispatch(null)` — every
+  current production call site (`Application::run()`) — is unaffected;
+  behavior is identical to before this change. See `TESTABILITY-SPEC.md`
+  requirement T1-1.
+  - New `Routing\IncomingRequest` value object: `method`, `path`, `headers`,
+    `query`, `body`, `cookies`.
+  - The request context array threaded through the middleware pipeline gained
+    a `'cookies'` key (previously absent), sourced from the injected request
+    or `$_COOKIE` by default.
+  - `Auth\CookieHelper::getRefreshToken()` / `getCsrfToken()` now accept an
+    optional cookie map parameter (default `null` → `$_COOKIE`, fully
+    backward compatible with all existing call sites), so cookie-based auth
+    flows (refresh-token cookie, CSRF double-submit) can be unit tested
+    without mutating the real superglobal.
+  - Not included in this change: automatically wiring the request context's
+    `'cookies'` key into route handlers that call `CookieHelper` internally
+    (`RefreshRoute`, `LogoutRoute`, `CsrfHelper`) — those still default to
+    `$_COOKIE` today. Tracked as follow-up work under T1-1/T1-2.
+
 ## [5.10.1] - 2026-07-08
 
 ### Fixed

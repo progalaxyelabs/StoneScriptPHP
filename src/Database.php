@@ -19,6 +19,16 @@ class Database
 
     private ?GatewayClient $client = null;
 
+    /**
+     * Fake-mode response registry. Null = live gateway mode (default,
+     * production behavior, untouched). Non-null = Database::fake() is
+     * active; Database::fn() resolves from this map instead of calling a
+     * real gateway. See TESTABILITY-SPEC.md T2-1.
+     *
+     * @var array<string, array|\Closure>|null
+     */
+    private static ?array $fakeResponses = null;
+
     private function __construct()
     {
         // Constructor no longer eagerly connects
@@ -86,6 +96,13 @@ class Database
      */
     public static function isConnected(): bool
     {
+        if (self::$fakeResponses !== null) {
+            // Nothing real to be "connected" to, but the fake is set up and
+            // ready to serve Database::fn() calls — that's the meaningful
+            // sense of "connected" for callers checking this in fake mode.
+            return true;
+        }
+
         $instance = self::get_instance();
         $instance->initConnection();
         return $instance->client !== null && $instance->client->isConnected();
@@ -95,11 +112,85 @@ class Database
      * Get the gateway client for advanced operations.
      *
      * @return GatewayClient
+     * @throws Exception If Database::fake() is active — there is no real
+     *   client in fake mode. This method is for tenant-routing against a
+     *   live gateway connection (see GatewayTenantMiddleware); it is not
+     *   usable with fake mode.
      */
     public static function getGatewayClient(): GatewayClient
     {
+        if (self::$fakeResponses !== null) {
+            throw new Exception(
+                'Database::getGatewayClient() is not usable while Database::fake() is active — ' .
+                'there is no real GatewayClient in fake mode. This method returns the live gateway ' .
+                'client for tenant routing (GatewayTenantMiddleware); it has no fake-mode equivalent.'
+            );
+        }
+
         $instance = self::get_instance();
         return $instance->getClient();
+    }
+
+    /**
+     * Enter fake mode: subsequent Database::fn() calls resolve from this
+     * registry instead of calling a real gateway. Calls merge with any
+     * previously registered responses (re-registering the same function
+     * name overwrites just that key) — safe to call more than once per test
+     * to layer base fixtures + test-specific overrides.
+     *
+     * Each value is either:
+     *   - array    — canned rows, returned as-is on every call.
+     *   - \Closure — (array $params): array, invoked fresh on every call.
+     *                Use this for sequential/varying responses (maintain
+     *                your own counter via `use (&$counter)`) or to simulate
+     *                a gateway error by throwing a GatewayException — it
+     *                gets the exact same translation _fn() already applies
+     *                to real gateway errors (connection_failed →
+     *                TenantDatabaseUnavailableException, everything else →
+     *                wrapped Exception).
+     *
+     * Must be paired with Database::clearFakeMode() in tearDown() — fake
+     * mode is process-global state, same discipline as AuthContext::clear().
+     *
+     * @param array<string, array|\Closure> $responses
+     * @throws Exception If a registered value is neither an array nor a Closure.
+     */
+    public static function fake(array $responses): void
+    {
+        foreach ($responses as $functionName => $response) {
+            if (!is_array($response) && !($response instanceof \Closure)) {
+                throw new Exception(
+                    "Database::fake(): response for function '$functionName' must be an array of rows " .
+                    'or a Closure (array $params): array, got ' . get_debug_type($response)
+                );
+            }
+        }
+
+        self::$fakeResponses ??= [];
+        foreach ($responses as $functionName => $response) {
+            self::$fakeResponses[$functionName] = $response;
+        }
+    }
+
+    /**
+     * Whether Database::fake() is currently active.
+     *
+     * @return bool
+     */
+    public static function isFaked(): bool
+    {
+        return self::$fakeResponses !== null;
+    }
+
+    /**
+     * Turn off fake mode. Clears the fake response registry only — does not
+     * touch the real singleton/GatewayClient (fake mode never populates it;
+     * see _fn()), so there is nothing else to reset here. Call this in
+     * tearDown() after using Database::fake().
+     */
+    public static function clearFakeMode(): void
+    {
+        self::$fakeResponses = null;
     }
 
     private static function get_instance(): Database
@@ -130,6 +221,15 @@ class Database
     private static function _fn(string $function_name, array $params): array
     {
         try {
+            // Fake mode check lives INSIDE this try block deliberately: a fake
+            // Closure that throws a GatewayException (to simulate a business-rule
+            // failure or a dropped tenant DB) gets the exact same translation
+            // below that a real gateway error would — no parallel error-handling
+            // path to keep in sync. See TESTABILITY-SPEC.md T2-1.
+            if (self::$fakeResponses !== null) {
+                return self::resolveFakeResponse($function_name, $params);
+            }
+
             $client = self::get_instance()->getClient();
             return $client->callFunction($function_name, $params);
         } catch (GatewayException $e) {
@@ -147,6 +247,30 @@ class Database
 
             throw new Exception("Database function call failed: " . $e->getMessage(), $e->getCode(), $e);
         }
+    }
+
+    /**
+     * Resolve a Database::fn() call against the fake response registry.
+     * Only called when Database::isFaked() is true.
+     *
+     * @throws Exception If no fake response is registered for $function_name —
+     *   deliberately loud rather than silently falling through to a real
+     *   gateway call or returning an empty result, so a test author is never
+     *   left wondering whether an unstubbed call quietly hit the network.
+     */
+    private static function resolveFakeResponse(string $function_name, array $params): array
+    {
+        if (!array_key_exists($function_name, self::$fakeResponses)) {
+            throw new Exception(
+                "Database::fake() is active but no fake response is registered for function " .
+                "'$function_name'. Register one via Database::fake(['$function_name' => [...]]) " .
+                'or call Database::clearFakeMode() to return to live-gateway mode.'
+            );
+        }
+
+        $response = self::$fakeResponses[$function_name];
+
+        return $response instanceof \Closure ? $response($params) : $response;
     }
 
     /**
