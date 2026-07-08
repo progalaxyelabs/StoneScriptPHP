@@ -158,52 +158,44 @@ All responses MUST be `Content-Type: application/json`. The framework sets this 
 
 ### Route Registration
 
-Routes are defined in `src/config/routes.php`:
+**One format, as of v6.0.0** (see `ROUTING-CONSOLIDATION-PLAN.md`) — a flat array keyed by HTTP method, defined in `src/config/routes.php`. This is the only format `Routing\Router::loadRoutes()` accepts, and the only one any real platform in the fleet has ever used.
+
+A route's value is either:
+- a bare handler class reference (`HealthRoute::class`) — service defaults to `'shared'`, protected by default (JWT required), no `group`
+- an array carrying v4.0 client-generation metadata:
 
 ```php
 return [
     'GET' => [
-        '/health' => HealthRoute::class,
-        '/users' => GetUsersRoute::class,
-        '/users/{id}' => GetUserByIdRoute::class,
+        '/health'      => HealthRoute::class,   // bare form: service 'shared', protected, no group
+        '/users'       => ['handler' => GetUsersRoute::class,   'service' => 'portal', 'group' => 'users', 'action' => 'list'],
+        '/users/{id}'  => ['handler' => GetUserByIdRoute::class, 'service' => 'portal', 'group' => 'users', 'action' => 'get'],
+        '/admin/users' => ['handler' => AdminGetUsersRoute::class, 'service' => 'admin', 'group' => 'users'],
     ],
     'POST' => [
-        '/users' => CreateUserRoute::class,
-        '/auth/login' => LoginRoute::class,
-    ],
-    'PUT' => [
-        '/users/{id}' => UpdateUserRoute::class,
-    ],
-    'DELETE' => [
-        '/users/{id}' => DeleteUserRoute::class,
+        '/users'       => ['handler' => CreateUserRoute::class, 'service' => 'portal', 'group' => 'users', 'action' => 'create'],
+        '/auth/login'  => ['handler' => LoginRoute::class, 'service' => 'infra', 'is_public' => true],
     ],
 ];
 ```
 
-### Scoped Routes (New Format)
+Array-form keys:
 
-For multi-scope APIs (portal, admin, shared), use the array format:
+| Key | Meaning |
+|---|---|
+| `handler` (required) | Route handler class reference |
+| `service` | Partition key for TypeScript client generation (`portal`, `admin`, ...). `infra`/`webhook` are excluded from all generated clients. Defaults to `'shared'`. |
+| `group` | Domain-concept grouping for the generated client (e.g. `inventory`, `billing`). **Required** on any includable route (any service other than `infra`/`webhook`) — the generator hard-errors without it. |
+| `action` | Explicit generated-client method name override. Defaults to being derived from the URL. |
+| `is_public` | When `true`, route is public (no JWT required). Defaults to `false` (protected). |
+| `streaming` | When `true`, route is excluded from client generation (SSE/chunked endpoints). |
+| `param` | Documentation label for the tail `{id}` path parameter (doesn't change the generated type). |
+| `response` / `collection` | Response DTO class for typed-return client generation; `collection: true` types the method as returning an array. |
 
-```php
-return [
-    'scopes' => [
-        'portal' => 'Customer-facing routes',
-        'admin' => 'Admin panel routes',
-        'shared' => 'Routes available to all scopes',
-    ],
-    'GET' => [
-        '/health' => HealthRoute::class,  // Old format: defaults to 'shared' scope
-        '/portal/dashboard' => [
-            'handler' => GetDashboardRoute::class,
-            'scope' => 'portal',
-        ],
-        '/admin/users' => [
-            'handler' => AdminGetUsersRoute::class,
-            'scope' => 'admin',
-        ],
-    ],
-];
-```
+**Removed in v6.0.0** (never used by any real platform, deleted rather than deprecated — see `ROUTING-CONSOLIDATION-PLAN.md` for the full rationale and evidence trail):
+- The `'public'`/`'protected'` sectioned format. `loadRoutes()` now rejects this shape with a clear migration error rather than silently registering unreachable routes.
+- Programmatic `$router->group()` route registration (a `routes.php` that calls Router methods instead of returning an array).
+- The `'scope'`/`'scopes'` key names shown in earlier drafts of this spec — the actual, only-ever-implemented key name is `service`, not `scope`.
 
 ### Route Handler Interface
 
@@ -713,11 +705,11 @@ StoneScriptPHP follows [Semantic Versioning](https://semver.org/):
 
 **Spec says:** Either `data` contains field errors OR `errors` is a top-level key.
 
-**Code does:** `ApiResponse::toJson()` adds `errors` at top level (line 30), but `Router.php` puts validation errors in `data` (line 110-115).
+**Code does:** `ApiResponse::toJson()` adds `errors` at top level, and `Routing\Router::executeHandler()`'s validation-failure path sets both — `errors` at top level (5th constructor arg) AND duplicates the same array into `data` when `DEBUG_MODE` is on (3rd constructor arg). Still two places, not the single top-level key the spec calls for. (Previously cited the now-deleted legacy `src/Router.php`, which had the same issue in its own, separate code path — that file was removed entirely in v6.0.0's routing consolidation; the gap persists in the current router regardless.)
 
 **Files:**
-- `src/ApiResponse.php:22-35`
-- `src/Router.php:105-116`
+- `src/ApiResponse.php`
+- `src/Routing/Router.php` (`executeHandler()`, validation-failure branch)
 
 **Recommendation:** Standardize on top-level `errors` key for field-level validation errors.
 
@@ -752,15 +744,9 @@ StoneScriptPHP follows [Semantic Versioning](https://semver.org/):
 
 ---
 
-### Gap 5: Router Doesn't Support PUT/PATCH/DELETE
+### Gap 5: Router Doesn't Support PUT/PATCH/DELETE — RESOLVED (v6.0.0)
 
-**Spec says:** All CRUD methods should be supported.
-
-**Code does:** `Router.php` only has `GetRequestParser` and `PostRequestParser`. No `PutRequestParser`, `PatchRequestParser`, or `DeleteRequestParser`.
-
-**File:** `src/Router.php:179-294` (missing cases)
-
-**Recommendation:** Add request parsers for PUT, PATCH, DELETE methods.
+This gap was exclusively about the legacy `src/Router.php` (`GetRequestParser`/`PostRequestParser`, no `Put`/`Patch`/`Delete` equivalents), which had zero real-platform usage and was deleted entirely in v6.0.0's routing consolidation (see `ROUTING-CONSOLIDATION-PLAN.md`). The current `Routing\Router` (the only router since the fleet standardized on it) was never affected by this limitation: `loadRoutes()`/`addRoute()` accept any HTTP method string generically, and `getInput()` already reads a JSON body for `POST`/`PUT`/`PATCH`. No fix needed — the gap no longer applies to any code that exists.
 
 ---
 
@@ -792,9 +778,9 @@ res_paginated($items, $page, $limit, $total, $key = 'items')
 
 ### Gap 8: IRequest/IResponse Interfaces Empty
 
-**Spec says:** `BaseRoute` uses `IRequest` and `IResponse` interfaces.
+**Spec says:** Request/response DTOs should implement a typed contract.
 
-**Code does:** Interfaces are empty stubs (single line each).
+**Code does:** Interfaces are empty stubs (single line each). Their only remaining consumer is `cli/generate-contract.php`'s DTO scaffolding — `BaseRoute` (the interfaces' original consumer, part of the CLI-generated Route/Service/Contract/DTO split) was deleted in v6.0.0's routing consolidation (see `ROUTING-CONSOLIDATION-PLAN.md`); the route generator (`cli/generate-route.php`) no longer scaffolds separate Request/Response DTO classes at all.
 
 **Files:**
 - `src/IRequest.php` (empty interface)

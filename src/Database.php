@@ -25,7 +25,13 @@ class Database
      * active; Database::fn() resolves from this map instead of calling a
      * real gateway. See TESTABILITY-SPEC.md T2-1.
      *
-     * @var array<string, array|\Closure>|null
+     * Declared `mixed` per-value, not `array|\Closure`, for the same reason
+     * documented on fake()'s docblock — fake() is the sole writer and
+     * already validates each value at registration time; keeping this
+     * annotation loose avoids static analysis treating that validation as
+     * unreachable.
+     *
+     * @var array<string, mixed>|null
      */
     private static ?array $fakeResponses = null;
 
@@ -152,7 +158,16 @@ class Database
      * Must be paired with Database::clearFakeMode() in tearDown() — fake
      * mode is process-global state, same discipline as AuthContext::clear().
      *
-     * @param array<string, array|\Closure> $responses
+     * Declared as `array<string, mixed>` rather than `array<string,
+     * array|\Closure>` deliberately: the per-value type is a documented
+     * intent, not a real, PHP-enforced constraint (only the outer `array`
+     * is a real type-hint) — a caller can still pass a string/int/null per
+     * key, which is exactly what the runtime check below exists to catch.
+     * A stricter docblock type here would make static analysis treat that
+     * check as unreachable dead code, since it would trust the docblock as
+     * a guarantee rather than the very thing being validated at runtime.
+     *
+     * @param array<string, mixed> $responses function_name => array $rows | \Closure(array $params): array
      * @throws Exception If a registered value is neither an array nor a Closure.
      */
     public static function fake(array $responses): void

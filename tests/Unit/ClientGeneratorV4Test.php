@@ -27,16 +27,22 @@ use StoneScriptPHP\Routing\Router;
 class ClientGeneratorV4Test extends TestCase
 {
     // =========================================================================
-    // Router::group() — route registration with v4.0 metadata (A2)
+    // Route registration with v4.0 metadata (A2)
+    //
+    // These tests previously used the removed Router::group() convenience
+    // (auto-prefixing + shared service across a callback). group() was
+    // deleted in v6.0.0's routing consolidation (see
+    // ROUTING-CONSOLIDATION-PLAN.md) — it had zero adoption across any real
+    // platform. The metadata fields under test here (service/group/action/
+    // streaming/param) are unaffected; routes are registered directly via
+    // get()/post() with the full path and an explicit service: argument.
     // =========================================================================
 
     public function test_group_registers_routes_with_service_metadata(): void
     {
         $router = new Router();
-        $router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-            $router->get('/items', 'ListItemsRoute', group: 'inventory');
-            $router->post('/items/create', 'CreateItemRoute', group: 'inventory');
-        });
+        $router->get('/portal/tenant/{tenantId}/items', 'ListItemsRoute', group: 'inventory', service: 'portal');
+        $router->post('/portal/tenant/{tenantId}/items/create', 'CreateItemRoute', group: 'inventory', service: 'portal');
 
         $meta = $router->getRouteMeta();
         $this->assertCount(2, $meta);
@@ -59,10 +65,8 @@ class ClientGeneratorV4Test extends TestCase
     public function test_group_sets_action_override_on_route(): void
     {
         $router = new Router();
-        $router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-            $router->get('/routes/{id}/shipments', 'GetRouteShipmentsRoute',
-                group: 'routes', action: 'shipments');
-        });
+        $router->get('/portal/tenant/{tenantId}/routes/{id}/shipments', 'GetRouteShipmentsRoute',
+            group: 'routes', action: 'shipments', service: 'portal');
 
         $meta = $router->getRouteMeta();
         $this->assertCount(1, $meta);
@@ -72,10 +76,8 @@ class ClientGeneratorV4Test extends TestCase
     public function test_group_sets_streaming_flag_on_route(): void
     {
         $router = new Router();
-        $router->group('/api', ['service' => 'api'], function () use ($router) {
-            $router->get('/workspaces/{id}/events', 'WorkspaceEventsRoute',
-                group: 'workspaces', streaming: true);
-        });
+        $router->get('/api/workspaces/{id}/events', 'WorkspaceEventsRoute',
+            group: 'workspaces', streaming: true, service: 'api');
 
         $meta = $router->getRouteMeta();
         $this->assertCount(1, $meta);
@@ -85,10 +87,8 @@ class ClientGeneratorV4Test extends TestCase
     public function test_group_sets_param_doc_label_on_route(): void
     {
         $router = new Router();
-        $router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-            $router->get('/shipments/{id}', 'GetShipmentRoute',
-                group: 'shipments', param: 'tracking_number');
-        });
+        $router->get('/portal/tenant/{tenantId}/shipments/{id}', 'GetShipmentRoute',
+            group: 'shipments', param: 'tracking_number', service: 'portal');
 
         $meta = $router->getRouteMeta();
         $this->assertCount(1, $meta);
@@ -134,9 +134,7 @@ class ClientGeneratorV4Test extends TestCase
     public function test_route_meta_response_defaults_when_absent(): void
     {
         $router = new Router();
-        $router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-            $router->get('/items', 'ListItemsRoute', group: 'inventory');
-        });
+        $router->get('/portal/tenant/{tenantId}/items', 'ListItemsRoute', group: 'inventory', service: 'portal');
 
         $r = $router->getRouteMeta()[0];
         $this->assertArrayHasKey('response', $r);
@@ -183,11 +181,9 @@ class ClientGeneratorV4Test extends TestCase
     public function test_admin_routes_have_admin_service(): void
     {
         $router = new Router();
-        $router->group('/admin', ['service' => 'admin'], function () use ($router) {
-            $router->get('/tenants', 'ListTenantsRoute', group: 'tenants');
-            $router->post('/tenants/{id}/suspend', 'SuspendTenantRoute', group: 'tenants');
-            $router->get('/analytics/overview', 'AnalyticsOverviewRoute', group: 'analytics');
-        });
+        $router->get('/admin/tenants', 'ListTenantsRoute', group: 'tenants', service: 'admin');
+        $router->post('/admin/tenants/{id}/suspend', 'SuspendTenantRoute', group: 'tenants', service: 'admin');
+        $router->get('/admin/analytics/overview', 'AnalyticsOverviewRoute', group: 'analytics', service: 'admin');
 
         $meta = $router->getRouteMeta();
         $this->assertCount(3, $meta);
@@ -204,14 +200,10 @@ class ClientGeneratorV4Test extends TestCase
     {
         $router = new Router();
 
-        $router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-            $router->get('/items', 'ListItemsRoute', group: 'inventory');
-            $router->post('/items/create', 'CreateItemRoute', group: 'inventory');
-        });
+        $router->get('/portal/tenant/{tenantId}/items', 'ListItemsRoute', group: 'inventory', service: 'portal');
+        $router->post('/portal/tenant/{tenantId}/items/create', 'CreateItemRoute', group: 'inventory', service: 'portal');
 
-        $router->group('/admin', ['service' => 'admin'], function () use ($router) {
-            $router->get('/tenants', 'ListTenantsRoute', group: 'tenants');
-        });
+        $router->get('/admin/tenants', 'ListTenantsRoute', group: 'tenants', service: 'admin');
 
         $meta = $router->getRouteMeta();
         $this->assertCount(3, $meta);
@@ -230,10 +222,8 @@ class ClientGeneratorV4Test extends TestCase
     public function test_get_route_meta_returns_all_v4_fields(): void
     {
         $router = new Router();
-        $router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-            $router->get('/items/{id}', 'GetItemRoute',
-                group: 'inventory', action: 'get', streaming: false, param: 'item_id');
-        });
+        $router->get('/portal/tenant/{tenantId}/items/{id}', 'GetItemRoute',
+            group: 'inventory', action: 'get', streaming: false, param: 'item_id', service: 'portal');
 
         $meta = $router->getRouteMeta();
         $r = $meta[0];
@@ -1028,10 +1018,14 @@ class ClientGeneratorV4Test extends TestCase
 <?php
 // Fixture: T2/JWT-tenant platform — no /tenant/{tenantId} segment anywhere.
 
-$router->group('/portal', ['service' => 'portal'], function () use ($router) {
-    $router->get('/projects',  'ListProjectsRoute',  group: 'projects', action: 'list');
-    $router->post('/projects', 'CreateProjectRoute', group: 'projects', action: 'create');
-});
+return [
+    'GET' => [
+        '/portal/projects' => ['handler' => 'ListProjectsRoute', 'service' => 'portal', 'group' => 'projects', 'action' => 'list'],
+    ],
+    'POST' => [
+        '/portal/projects' => ['handler' => 'CreateProjectRoute', 'service' => 'portal', 'group' => 'projects', 'action' => 'create'],
+    ],
+];
 PHP
         );
 
@@ -1698,14 +1692,22 @@ JS;
 <?php
 // Fixture: §10 typed-return routes
 
-$router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-    $router->get('/warehouses',      'ListWarehousesRoute', group: 'warehouses', action: 'list',
-        response: 'App\\Dto\\WarehouseDto', collection: true);
-    $router->get('/warehouses/{id}', 'GetWarehouseRoute',   group: 'warehouses', action: 'get',
-        response: 'App\\Dto\\WarehouseDto');
-    // Undeclared sibling — must fall back to ApiResponse (unknown)
-    $router->get('/trucks',          'ListTrucksRoute',     group: 'trucks',     action: 'list');
-});
+return [
+    'GET' => [
+        '/portal/tenant/{tenantId}/warehouses' => [
+            'handler' => 'ListWarehousesRoute', 'service' => 'portal', 'group' => 'warehouses', 'action' => 'list',
+            'response' => 'App\\Dto\\WarehouseDto', 'collection' => true,
+        ],
+        '/portal/tenant/{tenantId}/warehouses/{id}' => [
+            'handler' => 'GetWarehouseRoute', 'service' => 'portal', 'group' => 'warehouses', 'action' => 'get',
+            'response' => 'App\\Dto\\WarehouseDto',
+        ],
+        // Undeclared sibling — must fall back to ApiResponse (unknown)
+        '/portal/tenant/{tenantId}/trucks' => [
+            'handler' => 'ListTrucksRoute', 'service' => 'portal', 'group' => 'trucks', 'action' => 'list',
+        ],
+    ],
+];
 PHP
         );
         return $file;
@@ -1754,43 +1756,48 @@ PHP,
 <?php
 // Fixture routes.php for CLIENT-SDK-SPEC v4.0 generator tests
 
-$router->group('/portal/tenant/{tenantId}', ['service' => 'portal', 'middleware' => 'tenant-access'], function () use ($router) {
-    // inventory group
-    $router->get('/items',           'ListItemsRoute',   group: 'inventory');
-    $router->get('/items/{id}',      'GetItemRoute',     group: 'inventory');
-    $router->get('/items/search',    'SearchItemsRoute', group: 'inventory');
-    $router->post('/items/create',   'CreateItemRoute',  group: 'inventory');
-    $router->post('/items/{id}/update', 'UpdateItemRoute', group: 'inventory');
-    $router->post('/items/{id}/delete', 'DeleteItemRoute', group: 'inventory');
+return [
+    'GET' => [
+        // portal / inventory group
+        '/portal/tenant/{tenantId}/items'        => ['handler' => 'ListItemsRoute',   'service' => 'portal', 'group' => 'inventory'],
+        '/portal/tenant/{tenantId}/items/{id}'   => ['handler' => 'GetItemRoute',     'service' => 'portal', 'group' => 'inventory'],
+        '/portal/tenant/{tenantId}/items/search' => ['handler' => 'SearchItemsRoute', 'service' => 'portal', 'group' => 'inventory'],
 
-    // billing group
-    $router->get('/bills',           'ListBillsRoute',   group: 'billing');
-    $router->post('/bills/create',   'CreateBillRoute',  group: 'billing');
-    $router->get('/bills/daily-summary', 'DailySummaryRoute', group: 'billing');
+        // portal / billing group
+        '/portal/tenant/{tenantId}/bills'                => ['handler' => 'ListBillsRoute',    'service' => 'portal', 'group' => 'billing'],
+        '/portal/tenant/{tenantId}/bills/daily-summary'  => ['handler' => 'DailySummaryRoute', 'service' => 'portal', 'group' => 'billing'],
 
-    // routes group (RPC-style verbs — A4)
-    $router->get('/routes',              'ListRoutesRoute',  group: 'routes');
-    $router->post('/routes/{id}/start',  'StartRouteRoute',  group: 'routes');
-    $router->post('/routes/{id}/assign-driver', 'AssignDriverRoute', group: 'routes');
+        // portal / routes group (RPC-style verbs — A4)
+        '/portal/tenant/{tenantId}/routes' => ['handler' => 'ListRoutesRoute', 'service' => 'portal', 'group' => 'routes'],
 
-    // streaming route (A1) — excluded from client
-    $router->get('/build-events', 'BuildEventsRoute', group: 'workspaces', streaming: true);
-});
+        // streaming route (A1) — excluded from client
+        '/portal/tenant/{tenantId}/build-events' => ['handler' => 'BuildEventsRoute', 'service' => 'portal', 'group' => 'workspaces', 'streaming' => true],
 
-// Admin routes (no tenant scope — A6)
-$router->group('/admin', ['service' => 'admin', 'middleware' => 'admin-access'], function () use ($router) {
-    $router->get('/tenants',           'ListTenantsRoute',   group: 'tenants');
-    $router->get('/tenants/{id}',      'GetTenantRoute',     group: 'tenants');
-    $router->post('/tenants/{id}/suspend', 'SuspendTenantRoute', group: 'tenants');
-    $router->get('/analytics/overview', 'AnalyticsRoute',    group: 'analytics');
-});
+        // admin routes (no tenant scope — A6)
+        '/admin/tenants'             => ['handler' => 'ListTenantsRoute', 'service' => 'admin', 'group' => 'tenants'],
+        '/admin/tenants/{id}'        => ['handler' => 'GetTenantRoute',   'service' => 'admin', 'group' => 'tenants'],
+        '/admin/analytics/overview'  => ['handler' => 'AnalyticsRoute',   'service' => 'admin', 'group' => 'analytics'],
 
-// Excluded: infra (A3)
-$router->get('/health',                  'HealthRoute', service: 'infra');
-$router->get('/.well-known/jwks.json',   'JwksRoute',   service: 'infra');
+        // excluded: infra (A3)
+        '/health'                  => ['handler' => 'HealthRoute', 'service' => 'infra'],
+        '/.well-known/jwks.json'   => ['handler' => 'JwksRoute',   'service' => 'infra'],
+    ],
+    'POST' => [
+        '/portal/tenant/{tenantId}/items/create'      => ['handler' => 'CreateItemRoute', 'service' => 'portal', 'group' => 'inventory'],
+        '/portal/tenant/{tenantId}/items/{id}/update' => ['handler' => 'UpdateItemRoute', 'service' => 'portal', 'group' => 'inventory'],
+        '/portal/tenant/{tenantId}/items/{id}/delete' => ['handler' => 'DeleteItemRoute', 'service' => 'portal', 'group' => 'inventory'],
 
-// Excluded: webhook (A3)
-$router->post('/payments/webhook', 'RazorpayWebhookRoute', service: 'webhook');
+        '/portal/tenant/{tenantId}/bills/create' => ['handler' => 'CreateBillRoute', 'service' => 'portal', 'group' => 'billing'],
+
+        '/portal/tenant/{tenantId}/routes/{id}/start'          => ['handler' => 'StartRouteRoute',   'service' => 'portal', 'group' => 'routes'],
+        '/portal/tenant/{tenantId}/routes/{id}/assign-driver'  => ['handler' => 'AssignDriverRoute', 'service' => 'portal', 'group' => 'routes'],
+
+        '/admin/tenants/{id}/suspend' => ['handler' => 'SuspendTenantRoute', 'service' => 'admin', 'group' => 'tenants'],
+
+        // excluded: webhook (A3)
+        '/payments/webhook' => ['handler' => 'RazorpayWebhookRoute', 'service' => 'webhook'],
+    ],
+];
 PHP
         );
 
@@ -1809,11 +1816,13 @@ PHP
 <?php
 // Fixture: missing group on includable route — must trigger generator hard error
 
-$router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-    $router->get('/items',        'ListItemsRoute', group: 'inventory');
-    // This route has NO group: declaration — must cause hard error
-    $router->get('/bills',        'ListBillsRoute');
-});
+return [
+    'GET' => [
+        '/portal/tenant/{tenantId}/items' => ['handler' => 'ListItemsRoute', 'service' => 'portal', 'group' => 'inventory'],
+        // This route has NO group key — must cause hard error
+        '/portal/tenant/{tenantId}/bills' => ['handler' => 'ListBillsRoute', 'service' => 'portal'],
+    ],
+];
 PHP
         );
 
@@ -1844,27 +1853,31 @@ PHP
 <?php
 // Fixture: mid-path {id} parameter bug (v4.6.0 regression guard)
 
-$router->group('/portal/tenant/{tenantId}', ['service' => 'portal'], function () use ($router) {
-    // inventory group — covers tail-id, no-id, and mid-path-id shapes
-    $router->get('/items',              'ListItemsRoute',   group: 'inventory');
-    $router->get('/items/{id}',         'GetItemRoute',     group: 'inventory');
-    $router->get('/items/search',       'SearchItemsRoute', group: 'inventory');
-    $router->post('/items/create',      'CreateItemRoute',  group: 'inventory');
-    $router->post('/items/{id}/update', 'UpdateItemRoute',  group: 'inventory'); // mid-path
-    $router->post('/items/{id}/delete', 'DeleteItemRoute',  group: 'inventory'); // mid-path
+return [
+    'GET' => [
+        // inventory group — covers tail-id, no-id, and mid-path-id shapes
+        '/portal/tenant/{tenantId}/items'        => ['handler' => 'ListItemsRoute',   'service' => 'portal', 'group' => 'inventory'],
+        '/portal/tenant/{tenantId}/items/{id}'   => ['handler' => 'GetItemRoute',     'service' => 'portal', 'group' => 'inventory'],
+        '/portal/tenant/{tenantId}/items/search' => ['handler' => 'SearchItemsRoute', 'service' => 'portal', 'group' => 'inventory'],
 
-    // routes group — RPC-style: POST /routes/{id}/start and /assign-driver are mid-path
-    $router->get('/routes',                        'ListRoutesRoute',  group: 'routes');
-    $router->post('/routes/{id}/start',            'StartRouteRoute',  group: 'routes'); // mid-path
-    $router->post('/routes/{id}/assign-driver',    'AssignDriverRoute', group: 'routes'); // mid-path
-});
+        // routes group — RPC-style: POST /routes/{id}/start and /assign-driver are mid-path
+        '/portal/tenant/{tenantId}/routes' => ['handler' => 'ListRoutesRoute', 'service' => 'portal', 'group' => 'routes'],
 
-// Admin routes — POST /tenants/{id}/suspend is mid-path
-$router->group('/admin', ['service' => 'admin'], function () use ($router) {
-    $router->get('/tenants',              'ListTenantsRoute',   group: 'tenants');
-    $router->get('/tenants/{id}',         'GetTenantRoute',     group: 'tenants'); // tail
-    $router->post('/tenants/{id}/suspend', 'SuspendTenantRoute', group: 'tenants'); // mid-path
-});
+        '/admin/tenants'       => ['handler' => 'ListTenantsRoute', 'service' => 'admin', 'group' => 'tenants'],
+        '/admin/tenants/{id}'  => ['handler' => 'GetTenantRoute',   'service' => 'admin', 'group' => 'tenants'], // tail
+    ],
+    'POST' => [
+        '/portal/tenant/{tenantId}/items/create'      => ['handler' => 'CreateItemRoute', 'service' => 'portal', 'group' => 'inventory'],
+        '/portal/tenant/{tenantId}/items/{id}/update' => ['handler' => 'UpdateItemRoute', 'service' => 'portal', 'group' => 'inventory'], // mid-path
+        '/portal/tenant/{tenantId}/items/{id}/delete' => ['handler' => 'DeleteItemRoute', 'service' => 'portal', 'group' => 'inventory'], // mid-path
+
+        '/portal/tenant/{tenantId}/routes/{id}/start'         => ['handler' => 'StartRouteRoute',   'service' => 'portal', 'group' => 'routes'], // mid-path
+        '/portal/tenant/{tenantId}/routes/{id}/assign-driver' => ['handler' => 'AssignDriverRoute', 'service' => 'portal', 'group' => 'routes'], // mid-path
+
+        // admin — mid-path
+        '/admin/tenants/{id}/suspend' => ['handler' => 'SuspendTenantRoute', 'service' => 'admin', 'group' => 'tenants'],
+    ],
+];
 PHP
         );
 

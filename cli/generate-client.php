@@ -74,8 +74,12 @@
  * v4.2: PUT/PATCH/DELETE transport + ApiResponse = unknown.
  *
  * Key behaviours (v4.0):
- *   - Reads `service` (group-level) and `group`/`action`/`streaming`/`param` (route-level)
- *     from route declarations via $router->group() / $router->get() / $router->post()
+ *   - Reads `service`/`group`/`action`/`streaming`/`param` from each route's array
+ *     declaration in routes.php: ['handler' => X::class, 'service' => ..., 'group' => ...].
+ *     (Programmatic $router->group()/scope()-based route registration was removed in
+ *     v6.0.0 — routing consolidation, see ROUTING-CONSOLIDATION-PLAN.md. It was never
+ *     adopted by any real platform; the array format above is the only one now supported,
+ *     matching what every platform's routes.php already used.)
  *   - Emits ONE package per distinct non-excluded `service` (A6):
  *       docker/api/client/portal/  → T3 tenant-scoped client with setTenant()
  *       docker/api/client/admin/   → admin client, no setTenant(), no /tenant/{id} URLs
@@ -287,14 +291,13 @@ if (!str_starts_with($outputBaseDir, '/')) {
 // ============================================================================
 
 /**
- * Load routes by instantiating a Router and requiring the platform's routes.php.
+ * Load routes by requiring the platform's routes.php (must return the flat
+ * array format — the only format supported since v6.0.0's routing
+ * consolidation, see ROUTING-CONSOLIDATION-PLAN.md) and loading it into a
+ * fresh Router.
  *
  * Returns the raw route metadata array from Router::getRouteMeta() — each entry has:
  *   method, path, handler, service, group, action, streaming, param, is_public
- *
- * Falls back to the legacy flat-array format if the platform's routes.php returns
- * a raw array (old convention). In that case, routes have no `group` and will trigger
- * the hard-error guard in the generator (intentional — forces migration to v4.0).
  */
 function loadRoutesFromPlatform(): array
 {
@@ -305,28 +308,20 @@ function loadRoutesFromPlatform(): array
         exit(1);
     }
 
-    // Try v4.0 path: routes.php calls $router->group()/get()/post() with a pre-built router
-    // injected from the bootstrap, and returns the router OR an array.
-    // We inject a fresh router and eval the routes file against it.
+    $routesResult = require $routesFile;
+
+    if (!is_array($routesResult)) {
+        fwrite(STDERR,
+            "[stone generate client] ERROR: routes.php must return an array, e.g.:\n" .
+            "  return ['GET' => ['/path' => ['handler' => X::class, 'service' => 'portal', 'group' => 'billing']]];\n" .
+            "Programmatic \$router->group()/get()/post() route registration (a routes.php that calls\n" .
+            "Router methods instead of returning an array) was removed in v6.0.0.\n"
+        );
+        exit(1);
+    }
+
     $router = new \StoneScriptPHP\Routing\Router();
-
-    // Inject $router into the routes file scope so it can call $router->group()/get()/post()
-    $routesResult = (function() use ($router, $routesFile) {
-        return require $routesFile;
-    })();
-
-    if ($routesResult instanceof \StoneScriptPHP\Routing\Router) {
-        // v4.0: routes.php returned the router directly
-        return $router->getRouteMeta();
-    }
-
-    if (is_array($routesResult)) {
-        // Legacy flat array — load via loadRoutes()
-        $router->loadRoutes($routesResult);
-        return $router->getRouteMeta();
-    }
-
-    // routes.php mutated $router in place (most common v4.0 pattern)
+    $router->loadRoutes($routesResult);
     return $router->getRouteMeta();
 }
 

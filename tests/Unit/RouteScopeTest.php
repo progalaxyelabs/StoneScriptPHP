@@ -199,43 +199,30 @@ class RouteScopeTest extends TestCase
         $this->assertFalse($byPath['/projects/add']['is_public'], 'Route without is_public key must default to protected (backward compat)');
     }
 
-    public function test_load_routes_public_protected_format_with_service(): void
+    /**
+     * Regression guard (v6.0.0, routing consolidation — see
+     * ROUTING-CONSOLIDATION-PLAN.md): the 'public'/'protected' sectioned
+     * format is REMOVED, not silently reinterpreted. Before this change,
+     * feeding this shape to a flat-format-only loadRoutes() would have
+     * silently registered routes under the bogus HTTP methods "PUBLIC"/
+     * "PROTECTED" — never matching any real request, with no error at all.
+     * loadRoutes() must instead fail loudly and name the migration path.
+     */
+    public function test_load_routes_rejects_removed_public_protected_format(): void
     {
         $router = new Router();
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("'public'/'protected' sectioned route format was removed in v6.0.0");
+
         $router->loadRoutes([
             'public' => [
-                'GET' => [
-                    '/health' => 'App\\Routes\\HealthRoute',
-                    '/portal/status' => ['handler' => 'App\\Routes\\StatusRoute', 'service' => 'portal'],
-                ],
+                'GET' => ['/health' => 'App\\Routes\\HealthRoute'],
             ],
             'protected' => [
-                'GET' => [
-                    '/portal/dashboard' => ['handler' => 'App\\Routes\\DashboardRoute', 'service' => 'portal'],
-                    '/admin/users' => ['handler' => 'App\\Routes\\AdminUsersRoute', 'service' => 'admin'],
-                ],
+                'GET' => ['/portal/dashboard' => ['handler' => 'App\\Routes\\DashboardRoute', 'service' => 'portal']],
             ],
         ]);
-
-        $meta = $router->getRouteMeta();
-        $this->assertCount(4, $meta);
-
-        $byPath = [];
-        foreach ($meta as $m) {
-            $byPath[$m['path']] = $m;
-        }
-
-        // Verify services
-        $this->assertEquals('shared', $byPath['/health']['service']);
-        $this->assertEquals('portal', $byPath['/portal/status']['service']);
-        $this->assertEquals('portal', $byPath['/portal/dashboard']['service']);
-        $this->assertEquals('admin', $byPath['/admin/users']['service']);
-
-        // Verify public/protected
-        $this->assertTrue($byPath['/health']['is_public']);
-        $this->assertTrue($byPath['/portal/status']['is_public']);
-        $this->assertFalse($byPath['/portal/dashboard']['is_public']);
-        $this->assertFalse($byPath['/admin/users']['is_public']);
     }
 
     // =========================================================================

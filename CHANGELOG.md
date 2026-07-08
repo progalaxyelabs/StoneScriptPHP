@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-07-08
+
+### Routing consolidation — BREAKING CHANGES
+
+The framework had accumulated four coexisting routing philosophies since a
+Jan 2026 architecture pivot: two router engines (one dead), three
+`routes.php` config formats, two Route-Handler authoring patterns, and a CLI
+generator actively incompatible with both the official skeleton's format and
+the real 11-platform fleet's format. Consolidated onto exactly ONE routing
+implementation — the one already load-bearing in production across all 11
+real platforms — with no deprecation window. Full evidence trail, rationale,
+and phased rollout plan: `ROUTING-CONSOLIDATION-PLAN.md`.
+
+**Removed** (confirmed zero real-world usage across all 11 platforms before removal):
+
+- **Legacy `StoneScriptPHP\Router` + `RequestParser` family** (`src/Router.php`:
+  `Router`, `RequestParser`, `GetRequestParser`, `PostRequestParser`,
+  `OptionsRequestParser`, `NullRequestParser`). Deprecated since 3.28.0; had
+  zero call sites in the framework, skeleton, or any of the 11 fleet
+  platforms. `Routing\Router` (the middleware-pipeline router) is now the
+  only router.
+- **`BaseRoute`** (`src/BaseRoute.php`) — the template-method Route/Service/
+  Contract/DTO split. Zero `extends BaseRoute` anywhere in any real
+  platform's route directory; only `cli/generate-route.php` ever produced
+  it. Route handlers implement `IRouteHandler` directly now (see below).
+- **The `'public'`/`'protected'` sectioned `routes.php` format.**
+  `Routing\Router::loadRoutes()` now *rejects* this shape with a clear
+  migration error, rather than silently registering routes under the bogus
+  HTTP methods "PUBLIC"/"PROTECTED" (which would never match any real
+  request — the failure mode before this fix would have been *silent*, not
+  loud). Only `StoneScriptPHP-Server`'s own skeleton template used this
+  format; no real platform did.
+- **Programmatic `$router->group()` route registration** (a `routes.php`
+  that calls Router methods directly instead of returning an array).
+  `Router::group()` and its `groupContext` state are removed entirely.
+  `cli/generate-client.php`'s `loadRoutesFromPlatform()` no longer supports
+  this style either — `routes.php` must return an array. Zero call sites
+  anywhere, including inside the framework's own `Application.php`.
+  (`Router::scope()` — a *different* mechanism for attaching middleware to a
+  named scope, not route registration — is unaffected.)
+
+### Fixed
+
+- **`cli/generate-route.php` was actively broken, not just inconsistent.**
+  It read a `'class'` array key that no real platform's `routes.php` ever
+  used (they use `'handler'`) and would corrupt any real platform's
+  `routes.php` if run — every existing route would lose its `service`/
+  `group`/`action`/`is_public` metadata and become invalid PHP
+  (`'$path' => ::class,`). Rewritten to read/write the same flat array
+  format every real platform uses, with `--service=`/`--group=`/`--action=`/
+  `--public` flags, and to scaffold a route class implementing
+  `IRouteHandler` directly (matching real fleet convention) instead of the
+  5-file `BaseRoute`/Service/Contract/DTO split. Verified end-to-end against
+  a realistic multi-route fixture: pre-existing routes' metadata now
+  survives a regenerate byte-for-byte; before this fix it would have been
+  silently destroyed.
+- **`cli/init.php`'s scaffolded `public/index.php` and example route were
+  both fatally broken.** The entry-point template called `new Router();
+  $router->handleRequest();` — neither the bare-constructor `Router` nor
+  `handleRequest()` ever existed, on the legacy or current router. The
+  example route used `#[Route]`/`#[GET]` PHP attributes from
+  `StoneScriptPHP\Attributes\Route`/`GET` — classes that were never
+  implemented anywhere in the framework. Both would have fatally errored on
+  first use. Fixed to emit the same working `Application::run()` +
+  `IRouteHandler` pattern the skeleton actually uses; `init.php` also now
+  creates a `routes.php` wiring the example route (it previously created
+  none at all, despite its own `public/index.php` needing one).
+
+### Documentation
+
+- `SPEC.md` §3 Routing Conventions rewritten to describe the one supported
+  format (previously described a fictional `'scope'`/`'scopes'` key
+  convention that was never implemented — the real, only-ever-implemented
+  key is `service`).
+- `SPEC.md` §10 Gap 5 (Router doesn't support PUT/PATCH/DELETE) marked
+  resolved — it was exclusively about the now-deleted legacy router; the
+  current router was never affected.
+- `SPEC.md` §10 Gap 2 and Gap 8 citations updated to point at current code
+  instead of the deleted legacy `Router.php`/`BaseRoute`.
+- New `ROUTING-CONSOLIDATION-PLAN.md` — full evidence trail, phased rollout
+  plan (framework → skeleton → sandbox platform → live deploy), and
+  environment map for this work.
+
 ## [5.12.0] - 2026-07-08
 
 ### Added

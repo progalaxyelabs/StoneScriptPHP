@@ -143,41 +143,43 @@ class Init {
         // Create public/index.php
         $this->createIndexFile();
 
-        // Create example route
+        // Create example route (+ the routes.php config entry it needs)
         $this->createExampleRoute();
+        $this->createRoutesFile();
 
         echo "\n✅ Minimal structure created\n\n";
     }
 
+    /**
+     * Canonical, working entry point — Application::run() reading routes.php.
+     * (Was previously `new Router(); $router->handleRequest();` — neither
+     * `handleRequest()` nor a bare-constructor Router exist in this
+     * framework, past or present. That template would have fatally errored
+     * on first request. Fixed as part of the routing consolidation — see
+     * ROUTING-CONSOLIDATION-PLAN.md.)
+     */
     private function createIndexFile(): void
     {
         $indexPath = $this->projectRoot . '/public/index.php';
         if (!file_exists($indexPath)) {
             $indexContent = <<<'PHP'
 <?php
-/**
- * StoneScriptPHP Application Entry Point
- */
 
-require_once __DIR__ . '/../vendor/autoload.php';
+define('ROOT_PATH', realpath(__DIR__ . '/..') . DIRECTORY_SEPARATOR);
+define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
+define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
 
-use StoneScriptPHP\Router;
-use StoneScriptPHP\Database;
-
-// Load environment variables
-if (file_exists(__DIR__ . '/../.env')) {
-    $env = parse_ini_file(__DIR__ . '/../.env');
-    foreach ($env as $key => $value) {
-        $_ENV[$key] = $value;
-    }
+if (!defined('DEBUG_MODE')) {
+    define('DEBUG_MODE', ($_SERVER['DEBUG_MODE'] ?? 'false') === 'true');
 }
 
-// Initialize database connection
-Database::init();
+require_once ROOT_PATH . 'vendor/autoload.php';
 
-// Initialize router and handle request
-$router = new Router();
-$router->handleRequest();
+use StoneScriptPHP\Application;
+
+Application::run([
+    'routes' => require CONFIG_PATH . 'routes.php',
+]);
 PHP;
 
             file_put_contents($indexPath, $indexContent);
@@ -185,6 +187,14 @@ PHP;
         }
     }
 
+    /**
+     * Canonical example route — a class implementing IRouteHandler directly.
+     * (Was previously a #[Route]/#[GET] attribute-based example; those
+     * attribute classes were never implemented anywhere in the framework —
+     * `StoneScriptPHP\Attributes\Route` and `\GET` do not exist. That
+     * template would have fatally errored on autoload. Fixed as part of the
+     * routing consolidation — see ROUTING-CONSOLIDATION-PLAN.md.)
+     */
     private function createExampleRoute(): void
     {
         $routePath = $this->projectRoot . '/src/App/Routes/HealthRoute.php';
@@ -194,26 +204,54 @@ PHP;
 
 namespace App\Routes;
 
-use StoneScriptPHP\Attributes\Route;
-use StoneScriptPHP\Attributes\GET;
+use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\IRouteHandler;
 
-class HealthRoute
+class HealthRoute implements IRouteHandler
 {
-    #[Route('/health')]
-    #[GET]
-    public function health(): array
+    public function validation_rules(): array
     {
-        return [
+        return [];
+    }
+
+    public function process(): ApiResponse
+    {
+        return res_ok([
             'status' => 'ok',
             'timestamp' => time(),
-            'message' => 'StoneScriptPHP is running!'
-        ];
+        ], 'StoneScriptPHP is running!');
     }
 }
 PHP;
 
             file_put_contents($routePath, $routeContent);
             echo "  ✓ Created src/App/Routes/HealthRoute.php\n";
+        }
+    }
+
+    /**
+     * Create src/config/routes.php wiring the example route above. `init`
+     * previously created no routes.php at all, even though its own
+     * public/index.php now requires one — this is the missing piece.
+     */
+    private function createRoutesFile(): void
+    {
+        $routesPath = $this->projectRoot . '/src/config/routes.php';
+        if (!file_exists($routesPath)) {
+            $routesContent = <<<'PHP'
+<?php
+
+use App\Routes\HealthRoute;
+
+return [
+    'GET' => [
+        '/health' => HealthRoute::class,
+    ],
+];
+PHP;
+
+            file_put_contents($routesPath, $routesContent);
+            echo "  ✓ Created src/config/routes.php\n";
         }
     }
 

@@ -216,22 +216,42 @@ return [
     ],
 ];
 
-// routes.php
-use StoneScriptPHP\Auth\Middleware\ValidateJwtMiddleware;
+// src/config/routes.php — route-specific middleware is passed as the 3rd
+// positional argument to get()/post() (an array of MiddlewareInterface
+// instances), not a fluent ->middleware() chain method (that method does
+// not exist on Router). Since v6.0.0's routing consolidation, routes.php
+// must return the flat array format below — see SPEC.md §3 Routing
+// Conventions and ROUTING-CONSOLIDATION-PLAN.md.
+
+use App\Routes\ProductListRoute;
+use App\Routes\CreateOrderRoute;
+use App\Routes\AdminStatsRoute;
 use StoneScriptPHP\Auth\Middleware\RequireIssuerMiddleware;
 
-$router->group(['middleware' => [new ValidateJwtMiddleware($jwtHandler)]], function($router) {
+return [
+    'GET' => [
+        // Public API - both customer and employee
+        '/api/products' => [
+            'handler' => ProductListRoute::class,
+            'service' => 'shared',
+        ],
+        // Employee-only admin panel
+        '/admin/stats' => [
+            'handler' => AdminStatsRoute::class,
+            'service' => 'admin',
+        ],
+    ],
+    'POST' => [
+        // Customer-only API
+        '/api/orders' => [
+            'handler' => CreateOrderRoute::class,
+            'service' => 'portal',
+        ],
+    ],
+];
 
-    // Public API - both customer and employee
-    $router->get('/api/products', ProductController::class, 'list')
-        ->middleware(new RequireIssuerMiddleware(['customer', 'employee']));
-
-    // Customer-only API
-    $router->post('/api/orders', OrderController::class, 'create')
-        ->middleware(new RequireIssuerMiddleware(['customer']));
-
-    // Employee-only admin panel
-    $router->get('/admin/stats', AdminController::class, 'stats')
-        ->middleware(new RequireIssuerMiddleware(['employee']));
-});
+// Inside each route handler's process(), or via a route-specific middleware
+// array, apply RequireIssuerMiddleware to restrict which auth_servers entry
+// (customer/employee) may call that route — JWT validation itself is applied
+// globally via JwtAuthMiddleware in Application::run(), not per-route here.
 ```

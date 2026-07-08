@@ -25,12 +25,6 @@ class Router
     /** @var string[] Known service names (from routes config or scope()/service() calls) */
     private array $knownScopes = [];
 
-    /**
-     * Context set by group() — carried into individual route registrations.
-     * Reset to null after each group() callback returns.
-     */
-    private ?array $groupContext = null;
-
     public function __construct()
     {
         $this->globalMiddleware = new MiddlewarePipeline();
@@ -93,69 +87,6 @@ class Router
     }
 
     /**
-     * Register a group of routes sharing a common path prefix and attributes.
-     *
-     * This is the v4.0 route-grouping API (CLIENT-SDK-SPEC §0 A2). Individual routes
-     * inside the callback receive `group:`, `action:`, `streaming:`, and `param:` named
-     * arguments to carry client-generation metadata.
-     *
-     * Usage:
-     *   $router->group('/portal/tenant/{tenantId}', ['service' => 'portal', 'middleware' => 'tenant-access'], function() use ($router) {
-     *       $router->get('/items',           ListItemsRoute::class,   group: 'inventory');
-     *       $router->post('/items/create',   CreateItemRoute::class,  group: 'inventory');
-     *       $router->get('/ws/{id}/events',  WsEventsRoute::class,    group: 'workspaces', streaming: true);
-     *   });
-     *
-     *   // Excluded routes (no group required):
-     *   $router->group('/', [], function() use ($router) {
-     *       $router->get('/health',                HealthRoute::class,   service: 'infra');
-     *       $router->post('/payments/webhook',     WebhookRoute::class,  service: 'webhook');
-     *   });
-     *
-     * @param string   $prefix     URL prefix for all routes in this group
-     * @param array    $attributes Group-level attributes: 'service', 'middleware', 'is_public'
-     * @param callable $callback   Registers routes via $router->get()/post() inside the group
-     * @return self
-     */
-    public function group(string $prefix, array $attributes, callable $callback): self
-    {
-        // Resolve service from attributes
-        $service = $attributes['service'] ?? 'shared';
-        $isPublic = $attributes['is_public'] ?? false;
-
-        // Save previous context (supports nested groups)
-        $previousContext = $this->groupContext;
-
-        $this->groupContext = [
-            'prefix'    => $prefix,
-            'service'   => $service,
-            'is_public' => $isPublic,
-        ];
-
-        // Register scope-level middleware if declared via 'middleware' key
-        if (isset($attributes['middleware'])) {
-            $middlewareName = $attributes['middleware'];
-            if (!isset($this->scopeMiddleware[$service])) {
-                $this->scopeMiddleware[$service] = new MiddlewarePipeline();
-            }
-            if (!in_array($service, $this->knownScopes)) {
-                $this->knownScopes[] = $service;
-            }
-            // Note: string middleware names are resolved at dispatch time by the platform's
-            // index.php. The group() API records the intent; it doesn't wire a PHP object here.
-            // Platforms that use named middleware pass objects via scope() — this is fine for
-            // recording metadata (the generator reads service/group/action, not middleware).
-        }
-
-        $callback();
-
-        // Restore previous context
-        $this->groupContext = $previousContext;
-
-        return $this;
-    }
-
-    /**
      * Register a GET route.
      *
      * v4.0 named parameters (CLIENT-SDK-SPEC §0 A2):
@@ -165,7 +96,7 @@ class Router
      *   param:     documentation label for the tail :id parameter (A5, doc-only)
      *   service:   service partition key override (overrides group-level service when set)
      *
-     * @param string      $path      Route path (relative to group prefix when inside group())
+     * @param string      $path      Route path
      * @param string|object $handler Handler class name or pre-instantiated handler object
      * @param array       $middleware Route-specific middleware
      * @param bool        $isPublic  Whether this route is public (no JWT required)
@@ -217,7 +148,7 @@ class Router
      * Register a route.
      *
      * @param string      $method    HTTP method
-     * @param string      $path      Route path (relative to group prefix when inside group())
+     * @param string      $path      Route path
      * @param string|object $handler Handler class name or pre-instantiated handler object
      * @param array       $middleware Route-specific middleware
      * @param bool        $isPublic  Whether this route is public (no JWT required). Default false (protected).
@@ -243,25 +174,9 @@ class Router
         bool $collection = false,
     ): self {
         $method = strtoupper($method);
-
-        // Resolve full path and service from group context (if inside group())
         $fullPath = $path;
         $effectiveService = $service ?? 'shared';
         $effectiveIsPublic = $isPublic;
-
-        if ($this->groupContext !== null) {
-            $prefix = rtrim($this->groupContext['prefix'], '/');
-            $fullPath = $prefix . '/' . ltrim($path, '/');
-            // Group service wins unless route explicitly sets its own service
-            if ($service === null) {
-                $effectiveService = $this->groupContext['service'];
-            } else {
-                $effectiveService = $service;
-            }
-            if (!$isPublic) {
-                $effectiveIsPublic = $this->groupContext['is_public'];
-            }
-        }
 
         if (!isset($this->routes[$method])) {
             $this->routes[$method] = [];
@@ -331,54 +246,46 @@ class Router
     /**
      * Load routes from configuration array.
      *
-     * Supports multiple formats:
+     * ONE format, as of v6.0.0 (see ROUTING-CONSOLIDATION-PLAN.md): a flat
+     * array keyed by HTTP method.
      *
-     * Format 1 (public/protected sections):
-     *   ['public'    => ['GET' => ['/health' => HealthRoute::class]],
-     *    'protected' => ['GET' => ['/dashboard' => DashboardRoute::class]]]
-     *
-     * Format 2 (flat format):
      *   ['GET' => ['/health' => HealthRoute::class]]
      *
      * Route values can be:
-     *   - string: Handler class name (service defaults to 'shared')
-     *   - array:  ['handler' => class, 'service' => 'portal', 'group' => 'billing', 'alias' => false]
+     *   - string: Handler class name (service defaults to 'shared', protected by default)
+     *   - array:  ['handler' => class, 'service' => 'portal', 'group' => 'billing',
+     *              'action' => 'get', 'is_public' => false, 'alias' => false]
+     *
+     * The previously-supported 'public'/'protected'-sectioned format (removed
+     * in v6.0.0 — it was never adopted by any real platform; every one of the
+     * 11 fleet platforms already used the flat format above) is detected and
+     * rejected with a clear migration error below, rather than silently
+     * registering routes that will never match a real request (their HTTP
+     * method keys would be the strings "public"/"protected", not GET/POST/etc).
      *
      * @param array $routesConfig
      * @return self
+     * @throws \Exception If $routesConfig uses the removed 'public'/'protected' sectioned format.
      */
     public function loadRoutes(array $routesConfig): self
     {
         if (array_key_exists('public', $routesConfig) || array_key_exists('protected', $routesConfig)) {
-            // Format 1: public/protected sections
-            foreach ($routesConfig['public'] ?? [] as $method => $routes) {
-                if (is_array($routes)) {
-                    foreach ($routes as $path => $config) {
-                        $entry = self::normalizeRouteConfig($config);
-                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], true, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
-                    }
-                }
+            throw new \Exception(
+                "Router::loadRoutes(): the 'public'/'protected' sectioned route format was removed in v6.0.0. " .
+                "Use the flat format instead: ['GET' => ['/path' => ['handler' => X::class, 'is_public' => true, ...]]]. " .
+                'See SPEC.md §3 Routing Conventions.'
+            );
+        }
+
+        foreach ($routesConfig as $method => $routes) {
+            // Skip non-HTTP-method keys
+            if (!is_array($routes)) {
+                continue;
             }
-            foreach ($routesConfig['protected'] ?? [] as $method => $routes) {
-                if (is_array($routes)) {
-                    foreach ($routes as $path => $config) {
-                        $entry = self::normalizeRouteConfig($config);
-                        $this->addRoute(strtoupper($method), $path, $entry->handler, [], false, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
-                    }
-                }
-            }
-        } else {
-            // Format 2: flat format with optional service in route values
-            foreach ($routesConfig as $method => $routes) {
-                // Skip non-HTTP-method keys
-                if (!is_array($routes)) {
-                    continue;
-                }
-                $method = strtoupper($method);
-                foreach ($routes as $path => $config) {
-                    $entry = self::normalizeRouteConfig($config);
-                    $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
-                }
+            $method = strtoupper($method);
+            foreach ($routes as $path => $config) {
+                $entry = self::normalizeRouteConfig($config);
+                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
             }
         }
         return $this;

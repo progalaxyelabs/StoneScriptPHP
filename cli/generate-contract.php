@@ -140,7 +140,7 @@ function extractPublicProperties(string $className): array
 
     $result = [];
     foreach ($properties as $property) {
-        // Skip inherited properties from BaseRoute/interfaces
+        // Skip inherited properties from parent classes/interfaces
         if ($property->getDeclaringClass()->getName() !== $className) {
             continue;
         }
