@@ -21,6 +21,7 @@ composer.lock
 *.swp
 *.swo
 *~
+/.dev/
 
 # Logs
 logs/*
