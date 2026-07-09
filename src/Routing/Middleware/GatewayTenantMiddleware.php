@@ -7,6 +7,8 @@ namespace StoneScriptPHP\Routing\Middleware;
 use StoneScriptPHP\Routing\MiddlewareInterface;
 use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\Database;
+use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
+use StoneScriptPHP\Tenancy\NoTenantStrategy;
 
 /**
  * GatewayTenantMiddleware
@@ -40,21 +42,43 @@ use StoneScriptPHP\Database;
  * Usage:
  *   $router->use(new JwtAuthMiddleware($jwtHandler, $excludedPaths))
  *          ->use(new GatewayTenantMiddleware());
+ *
+ * ### Pluggable tenancy resolution (Phase 1 extensibility)
+ *
+ * `tenant_id` resolution is delegated to a `TenancyStrategyInterface` (default:
+ * `NoTenantStrategy`, which reproduces the exact behavior above —
+ * `$user->tenant_id ?? null`, nothing more). Pass a different strategy to
+ * change how tenant_id is resolved (e.g. a future multi-tenancy plugin) without
+ * modifying this class:
+ *
+ *   new GatewayTenantMiddleware($myTenancyStrategy)
+ *
+ * Omitting the constructor argument (the pre-Phase-1 call site,
+ * `new GatewayTenantMiddleware()`) is unaffected — it still defaults to
+ * `NoTenantStrategy` and behaves identically to every prior release.
  */
 class GatewayTenantMiddleware implements MiddlewareInterface
 {
+    private TenancyStrategyInterface $strategy;
+
+    public function __construct(?TenancyStrategyInterface $strategy = null)
+    {
+        $this->strategy = $strategy ?? new NoTenantStrategy();
+    }
+
     public function handle(array $request, callable $next): ?ApiResponse
     {
         $user = auth();
+        $tenantId = $this->strategy->resolveTenantId($request, $user);
 
-        if ($user && $user->tenant_id) {
+        if ($tenantId !== null && $tenantId !== '') {
             // Route subsequent DB calls to this tenant's database.
-            Database::getGatewayClient()->setTenantId((string) $user->tenant_id);
-            log_debug('GatewayTenantMiddleware: tenant_id set to ' . $user->tenant_id);
+            Database::getGatewayClient()->setTenantId((string) $tenantId);
+            log_debug('GatewayTenantMiddleware: tenant_id set to ' . $tenantId);
 
             // identity_id and role_id are on $user (via auth()) and available to route
             // handlers. SQL-layer forwarding is deferred to the §5.4 sweep.
-            if ($user->user_id) {
+            if ($user && $user->user_id) {
                 log_debug('GatewayTenantMiddleware: identity_id=' . $user->user_id
                     . ' role_id=' . ($user->role_id ?? '(none)'));
             }

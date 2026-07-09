@@ -1,6 +1,18 @@
 parameters:
 	ignoreErrors:
 		-
+			message: '#^Instanceof between StoneScriptPHP\\Routing\\MiddlewareInterface and StoneScriptPHP\\Routing\\MiddlewareInterface will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Application.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, array\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Application.php
+
+		-
 			message: '#^Property StoneScriptPHP\\Env\:\:\$ALLOWED_ORIGINS \(string\) on left side of \?\? is not nullable\.$#'
 			identifier: nullCoalesce.property
 			count: 1

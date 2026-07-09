@@ -91,6 +91,17 @@ class ExternalAuthConfig
      */
     public readonly mixed $tenantsResolver;
 
+    /**
+     * @var TenantRouteProviderInterface Registers the tenant-specific route
+     * subset (select-tenant, provision-tenant, invite, memberships,
+     * check-tenant-slug, accept-invite) and computes their public/protected
+     * path lists. Defaults to `DefaultTenantRouteProvider` — the framework's
+     * built-in behavior, unchanged from pre-Phase-1 StoneScriptPHP. Override
+     * with `tenant_route_provider` in options (Phase 2 extraction seam — see
+     * TenantRouteProviderInterface's docblock).
+     */
+    public readonly TenantRouteProviderInterface $tenantRouteProvider;
+
     /** @var array<string, callable|null> Lifecycle hooks */
     public readonly array $hooks;
 
@@ -186,6 +197,13 @@ class ExternalAuthConfig
         // Tenants resolver for the card model (framework-spec.md §6).
         // fn(array $passportClaims): array — returns tenant objects for the identity.
         $this->tenantsResolver = $options['tenants_resolver'] ?? null;
+
+        // Phase 1 plugin seam (see TenantRouteProviderInterface docblock). Defaults to
+        // the framework's built-in provider — identical behavior to before this seam existed.
+        $providedTenantRouteProvider = $options['tenant_route_provider'] ?? null;
+        $this->tenantRouteProvider = $providedTenantRouteProvider instanceof TenantRouteProviderInterface
+            ? $providedTenantRouteProvider
+            : new DefaultTenantRouteProvider();
 
         // Hooks
         $this->hooks = [

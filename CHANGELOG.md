@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-07-09
+
+### Added — Plugin extensibility seam (Phase 1, non-breaking)
+
+Adds hook points so multi-tenancy (and other optional functionality) can
+later be extracted into opt-in plugins, WITHOUT changing any current
+behavior. Purely additive — every contribution point defaults to "nothing",
+so a platform that never touches `plugins`/`tenancy` config gets byte-for-byte
+identical behavior to 6.0.0.
+
+- **`StoneScriptPHP\Plugin\PluginInterface`** (+ `AbstractPlugin` convenience
+  base with no-op defaults) — a plugin contributes middleware, routes,
+  migration paths, schema paths, and/or a tenancy strategy. Wired via
+  `Application::run(['plugins' => [...]])`, conventionally sourced from a
+  platform's own `src/config/plugins.php`. Plugin middleware is appended after
+  a platform's own custom middleware; plugin routes are merged UNDER a
+  platform's own `routes.php` (an explicit platform route always wins on a
+  METHOD+path collision). Invalid `plugins[]` entries are dropped with a
+  warning, never fatal.
+- **`StoneScriptPHP\Tenancy\TenancyStrategyInterface`** + default
+  **`NoTenantStrategy`** — `GatewayTenantMiddleware` no longer reads
+  `tenant_id` directly off the authenticated user; it delegates to a strategy.
+  `NoTenantStrategy` reproduces the pre-6.1.0 middleware body exactly
+  (`$user->tenant_id ?? null`, nothing derived from elsewhere) — every
+  existing T1 and card-model T2 platform is unaffected. A future
+  multi-tenancy plugin can register an alternate strategy via
+  `PluginInterface::tenancyStrategy()` or `Application::run(['tenancy' =>
+  ['strategy' => ...]])`.
+- **`Migrations::addMigrationPath()` / `Migrations::addSchemaPath()`** —
+  process-wide registries a plugin can populate at boot so its own
+  `*.sql` migrations and `{tables,functions}` schema-drift directories are
+  scanned additively alongside the app's own `ROOT_PATH/migrations/` and
+  `src/App/Database/postgresql/{tables,functions}/`. Empty by default.
+- **`StoneScriptPHP\Auth\ExternalAuth\TenantRouteProviderInterface`** +
+  default **`DefaultTenantRouteProvider`** — `ExternalAuthRoutes` no longer
+  hard-`use`-imports the tenant-specific route classes (`SelectTenantRoute`,
+  `ProvisionTenantRoute`, `InviteMemberRoute`, `MembershipsRoute`,
+  `UpdateMembershipRoute`, `CheckTenantSlugRoute`, `AcceptInviteRoute`); it
+  delegates both registration AND public/protected path computation to a
+  provider (default: `DefaultTenantRouteProvider`, which registers the exact
+  same routes under the exact same feature toggles as before this refactor).
+  Registration and the `RequireCardMiddleware` exemption-path derivation
+  (`ExternalAuthRoutes::protectedPaths()`) are bundled into ONE interface so
+  they cannot drift apart — a plugin author replacing the provider must
+  implement both together, preventing a recurrence of the 2026-07-05
+  fleet-wide RequireCardMiddleware incident. Identity-only routes (register,
+  login, logout, refresh, password reset, change-password, profile, OAuth,
+  exchange, etc.) stay in `ExternalAuthRoutes` — nothing about their
+  registration changed.
+
+Verified non-breaking: full framework test suite (541 tests, up from 517)
+green; phpstan clean against the existing baseline (0 new errors); `composer
+update` via a local path-repo override against a real single-tenant platform
+(`AUTH_MODE=builtin`) and a real multi-tenant platform (`AUTH_MODE=external`,
+card model) installs cleanly and both boot with identical route/middleware
+wiring — including a live check that a platform's own `select_tenant: false`
+/ `check_slug: false` config still correctly 404s those routes, and its
+enabled tenant routes (`memberships`, `invite-member`) still correctly
+require auth (401), unchanged from before this refactor.
+
 ## [6.0.0] - 2026-07-08
 
 ### Routing consolidation — BREAKING CHANGES

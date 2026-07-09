@@ -26,6 +26,8 @@ use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
 use StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware;
 use StoneScriptPHP\Auth\Middleware\RequireCardMiddleware;
 use StoneScriptPHP\RequestLogging\RequestLogger;
+use StoneScriptPHP\Plugin\PluginInterface;
+use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
 
 /**
  * Application entry point
@@ -110,6 +112,13 @@ class Application
         $requireCardConfig  = $config['require_card'] ?? [];
         $authMode           = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
 
+        // Phase 1 plugin seam (§ PluginInterface). `$config['plugins']` is `?? []` for
+        // every platform today — none of the 11 fleet platforms pass this key yet, so
+        // $plugins is always empty and nothing below this point changes behavior.
+        // Invalid entries (not a PluginInterface instance) are dropped, not fatal —
+        // a malformed plugins.php must not take down the whole platform at boot.
+        $plugins = self::normalizePlugins($config['plugins'] ?? []);
+
         // Computed once, lazily, and reused everywhere it's needed (store_access,
         // require_card exemption list, ExternalAuthRoutes::register itself) so there
         // is exactly one derivation of these options, not several that could drift.
@@ -148,6 +157,11 @@ class Application
             );
         }
 
+        // Tenancy strategy (§ TenancyStrategyInterface): explicit config wins over a
+        // plugin-supplied one; with neither, GatewayTenantMiddleware defaults to
+        // NoTenantStrategy itself — identical to pre-Phase-1 behavior.
+        $tenancyStrategy = self::resolveTenancyStrategy($config['tenancy'] ?? [], $plugins);
+
         $router = new Router();
         $router->use(new LoggingMiddleware());
         $router->use(new CorsMiddleware(
@@ -158,7 +172,7 @@ class Application
             jwtHandler: $jwtHandler,
             excludedPaths: $jwtExcludedPaths
         ));
-        $router->use(new GatewayTenantMiddleware());
+        $router->use(new GatewayTenantMiddleware($tenancyStrategy));
 
         // T3 url-tenant: StoreAccessMiddleware MUST run before SubscriptionMiddleware.
         // It extracts :storeId from the URL, validates membership via HTTP to the
@@ -183,6 +197,18 @@ class Application
         foreach ($customMiddleware as $middleware) {
             if ($middleware instanceof MiddlewareInterface) {
                 $router->use($middleware);
+            }
+        }
+
+        // Plugin middleware (§ PluginInterface) — appended AFTER the platform's own
+        // custom middleware, BEFORE require_card/tenant_url_match enforcement below,
+        // so a plugin can never silently reorder a platform's own middleware
+        // guarantees. Empty $plugins (the default) adds nothing.
+        foreach ($plugins as $plugin) {
+            foreach ($plugin->middleware() as $middleware) {
+                if ($middleware instanceof MiddlewareInterface) {
+                    $router->use($middleware);
+                }
             }
         }
 
@@ -247,7 +273,10 @@ class Application
             ));
         }
 
-        $router->loadRoutes($appRoutes);
+        // Merge plugin-contributed routes UNDER the platform's own routes.php — a
+        // platform's explicit route for the same METHOD+path always wins (§
+        // PluginInterface precedence). Empty $plugins (the default) is a no-op merge.
+        $router->loadRoutes(self::mergePluginRoutes($appRoutes, $plugins));
 
         $response = $router->dispatch();
 
@@ -540,5 +569,95 @@ class Application
         }
 
         return $options;
+    }
+
+    /**
+     * Validate and normalize `$config['plugins']` into a clean list of
+     * PluginInterface instances.
+     *
+     * Non-fatal on bad input: a plugins.php that returns something malformed
+     * (wrong type, non-PluginInterface object, etc.) logs a warning and drops
+     * that entry rather than throwing — a boot-time crash here would take down
+     * the whole platform over what is, for now, an entirely optional feature.
+     *
+     * @param mixed $rawPlugins Whatever `$config['plugins']` was (normally an array).
+     * @return PluginInterface[]
+     */
+    private static function normalizePlugins(mixed $rawPlugins): array
+    {
+        if (!is_array($rawPlugins)) {
+            return [];
+        }
+
+        $plugins = [];
+        foreach ($rawPlugins as $plugin) {
+            if ($plugin instanceof PluginInterface) {
+                $plugins[] = $plugin;
+            } else {
+                log_warning('Application::run(): ignoring invalid plugins[] entry — expected a '
+                    . 'PluginInterface instance, got ' . (is_object($plugin) ? get_class($plugin) : gettype($plugin)));
+            }
+        }
+
+        return $plugins;
+    }
+
+    /**
+     * Resolve the active TenancyStrategyInterface, or null (GatewayTenantMiddleware
+     * defaults to NoTenantStrategy on null — today's exact behavior).
+     *
+     * Precedence: explicit `$config['tenancy']['strategy']` wins over any
+     * plugin-supplied strategy. Among plugins, the first one (in registration
+     * order) that returns a non-null strategy wins — plugins are expected to
+     * coordinate if more than one wants to own tenancy resolution.
+     *
+     * @param array $tenancyConfig The 'tenancy' section of the config array.
+     * @param PluginInterface[] $plugins
+     * @return TenancyStrategyInterface|null
+     */
+    private static function resolveTenancyStrategy(array $tenancyConfig, array $plugins): ?TenancyStrategyInterface
+    {
+        if (isset($tenancyConfig['strategy']) && $tenancyConfig['strategy'] instanceof TenancyStrategyInterface) {
+            return $tenancyConfig['strategy'];
+        }
+
+        foreach ($plugins as $plugin) {
+            $strategy = $plugin->tenancyStrategy();
+            if ($strategy instanceof TenancyStrategyInterface) {
+                return $strategy;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Merge plugin-contributed routes underneath the platform's own $appRoutes,
+     * per METHOD+path, so an explicit platform route always wins over a plugin
+     * default. With no plugins (the default), returns $appRoutes unchanged.
+     *
+     * @param array $appRoutes The platform's own routes.php array.
+     * @param PluginInterface[] $plugins
+     * @return array
+     */
+    private static function mergePluginRoutes(array $appRoutes, array $plugins): array
+    {
+        if (empty($plugins)) {
+            return $appRoutes;
+        }
+
+        $merged = $appRoutes;
+        foreach ($plugins as $plugin) {
+            foreach ($plugin->routes() as $method => $pluginMethodRoutes) {
+                if (!is_array($pluginMethodRoutes)) {
+                    continue;
+                }
+                // Plugin routes go UNDER the platform's own (array_merge: later args win),
+                // so an existing platform-defined path for this method is never overridden.
+                $merged[$method] = array_merge($pluginMethodRoutes, $merged[$method] ?? []);
+            }
+        }
+
+        return $merged;
     }
 }

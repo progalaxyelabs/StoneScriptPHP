@@ -11,10 +11,75 @@ class Migrations
     private array $dbDefinitions = [];
     private array $differences = [];
 
+    /**
+     * Phase 1 plugin seam (§ PluginInterface::migrationPaths()). Process-wide
+     * registry (not per-instance) so a plugin registers its paths once at boot,
+     * before any Migrations instance exists. Empty by default — no behavior
+     * change for platforms that never call addMigrationPath().
+     *
+     * @var string[] Absolute directory paths, each scanned for *.sql files
+     *   exactly like ROOT_PATH/migrations/ is.
+     */
+    private static array $pluginMigrationPaths = [];
+
+    /**
+     * Phase 1 plugin seam (§ PluginInterface::schemaPaths()). Process-wide
+     * registry of additional {tables,functions} directories, scanned exactly
+     * like src/App/Database/postgresql/{tables,functions}/ are. Empty by
+     * default — no behavior change for platforms that never call addSchemaPath().
+     *
+     * @var array{tables: string[], functions: string[]}
+     */
+    private static array $pluginSchemaPaths = ['tables' => [], 'functions' => []];
+
     public function __construct()
     {
         // Get database connection
         $this->connection = $this->getConnection();
+    }
+
+    /**
+     * Register an additional absolute directory of *.sql migration files,
+     * scanned alongside ROOT_PATH/migrations/. Purely additive — call this
+     * before instantiating Migrations (e.g. in a plugin's boot code) to have
+     * its migrations picked up by scanMigrationFiles()/getPendingMigrations().
+     *
+     * Idempotent: re-registering the same path is a no-op.
+     */
+    public static function addMigrationPath(string $absolutePath): void
+    {
+        $normalized = rtrim($absolutePath, DIRECTORY_SEPARATOR . '/');
+        if (!in_array($normalized, self::$pluginMigrationPaths, true)) {
+            self::$pluginMigrationPaths[] = $normalized;
+        }
+    }
+
+    /**
+     * Register additional absolute directories for schema-drift scanning
+     * (verify()), scanned alongside src/App/Database/postgresql/{tables,functions}/.
+     * Purely additive. Either key may be omitted.
+     *
+     * @param string|null $tablesDir Absolute path to a directory of table *.pgsql files.
+     * @param string|null $functionsDir Absolute path to a directory of function *.pgsql files.
+     */
+    public static function addSchemaPath(?string $tablesDir = null, ?string $functionsDir = null): void
+    {
+        if ($tablesDir !== null && !in_array($tablesDir, self::$pluginSchemaPaths['tables'], true)) {
+            self::$pluginSchemaPaths['tables'][] = $tablesDir;
+        }
+        if ($functionsDir !== null && !in_array($functionsDir, self::$pluginSchemaPaths['functions'], true)) {
+            self::$pluginSchemaPaths['functions'][] = $functionsDir;
+        }
+    }
+
+    /**
+     * Reset plugin-registered paths. Test-only — production code never needs
+     * to un-register a plugin mid-process.
+     */
+    public static function resetPluginPaths(): void
+    {
+        self::$pluginMigrationPaths = [];
+        self::$pluginSchemaPaths = ['tables' => [], 'functions' => []];
     }
 
     /**
@@ -78,9 +143,17 @@ class Migrations
             'functions' => []
         ];
 
-        // Scan tables
-        $tablesPath = ROOT_PATH . 'src/App/Database/postgresql/tables/';
-        if (is_dir($tablesPath)) {
+        // Scan tables — the app's own directory plus any plugin-registered
+        // ones (§ addSchemaPath()). Empty plugin list = identical to before.
+        $tablesPaths = array_merge(
+            [ROOT_PATH . 'src/App/Database/postgresql/tables/'],
+            self::$pluginSchemaPaths['tables']
+        );
+        foreach ($tablesPaths as $tablesPath) {
+            $tablesPath = rtrim($tablesPath, DIRECTORY_SEPARATOR . '/') . DIRECTORY_SEPARATOR;
+            if (!is_dir($tablesPath)) {
+                continue;
+            }
             $files = array_merge(
                 glob($tablesPath . '*.pgsql') ?: [],
                 glob($tablesPath . '*.pssql') ?: []
@@ -94,9 +167,16 @@ class Migrations
             }
         }
 
-        // Scan functions
-        $functionsPath = ROOT_PATH . 'src/App/Database/postgresql/functions/';
-        if (is_dir($functionsPath)) {
+        // Scan functions — same additive pattern as tables above.
+        $functionsPaths = array_merge(
+            [ROOT_PATH . 'src/App/Database/postgresql/functions/'],
+            self::$pluginSchemaPaths['functions']
+        );
+        foreach ($functionsPaths as $functionsPath) {
+            $functionsPath = rtrim($functionsPath, DIRECTORY_SEPARATOR . '/') . DIRECTORY_SEPARATOR;
+            if (!is_dir($functionsPath)) {
+                continue;
+            }
             $files = array_merge(
                 glob($functionsPath . '*.pgsql') ?: [],
                 glob($functionsPath . '*.pssql') ?: []
@@ -544,21 +624,49 @@ class Migrations
     }
 
     /**
-     * Scan filesystem for migration SQL files
+     * Absolute file path for each migration basename discovered by the most
+     * recent scanMigrationFiles() call, so up() can locate plugin-contributed
+     * migrations (which don't live under ROOT_PATH/migrations/). Populated by
+     * scanMigrationFiles(); read by up().
+     *
+     * @var array<string, string> basename => absolute path
+     */
+    private array $migrationFileMap = [];
+
+    /**
+     * Scan filesystem for migration SQL files — the app's own ROOT_PATH/migrations/
+     * directory plus any plugin-registered directories (§ addMigrationPath()).
+     * Empty plugin list = identical to before this addition.
+     *
+     * Scans the app's own directory FIRST so that, on a basename collision
+     * between the app and a plugin, the app's own migration file wins (same
+     * "platform config wins over plugin default" precedence as routes/middleware).
      */
     private function scanMigrationFiles(): array
     {
-        $migrationsPath = ROOT_PATH . 'migrations' . DIRECTORY_SEPARATOR;
+        $searchPaths = array_merge(
+            [rtrim(ROOT_PATH . 'migrations', DIRECTORY_SEPARATOR . '/')],
+            self::$pluginMigrationPaths
+        );
 
-        if (!is_dir($migrationsPath)) {
-            return [];
-        }
-
-        $files = glob($migrationsPath . '*.sql');
         $migrations = [];
+        foreach ($searchPaths as $migrationsPath) {
+            $migrationsPath = rtrim($migrationsPath, DIRECTORY_SEPARATOR . '/') . DIRECTORY_SEPARATOR;
+            if (!is_dir($migrationsPath)) {
+                continue;
+            }
 
-        foreach ($files as $file) {
-            $migrations[] = basename($file);
+            $files = glob($migrationsPath . '*.sql') ?: [];
+            foreach ($files as $file) {
+                $basename = basename($file);
+                // First path wins on a basename collision (app's own dir is always first).
+                if (!isset($this->migrationFileMap[$basename])) {
+                    $this->migrationFileMap[$basename] = $file;
+                }
+                if (!in_array($basename, $migrations, true)) {
+                    $migrations[] = $basename;
+                }
+            }
         }
 
         sort($migrations); // Ensure migrations run in order
@@ -589,7 +697,11 @@ class Migrations
         echo "Running " . count($pendingMigrations) . " pending migration(s)...\n\n";
 
         foreach ($pendingMigrations as $migration) {
-            $filePath = $migrationsPath . $migration;
+            // getPendingMigrations() -> scanMigrationFiles() already populated
+            // migrationFileMap with the correct absolute path (app dir or a
+            // plugin-registered dir). Fall back to the app's own dir for safety
+            // if the map is somehow empty — matches pre-Phase-1 behavior exactly.
+            $filePath = $this->migrationFileMap[$migration] ?? ($migrationsPath . $migration);
 
             if (!file_exists($filePath)) {
                 echo "❌ Migration file not found: $migration\n";
