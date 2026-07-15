@@ -48,6 +48,13 @@ class TokenExchangeService
      * @param string $jwksUrl JWKS endpoint URL (e.g., https://auth.example.com/.well-known/jwks.json)
      * @param string $expectedIssuer Expected issuer claim (e.g., https://auth.example.com)
      * @param string|null $expectedAudience Optional audience to verify
+     * @param string|null $expectedPurpose Optional strict `purpose` assertion. When set
+     *   (TokenClaims::PURPOSE_AUTHENTICATION), the passport MUST carry a matching
+     *   `purpose` claim. Left null by default because the federated passport minter
+     *   (the external auth service) stamps `purpose` in a LATER phase — enabling the
+     *   assertion before that would reject every in-flight passport. Builtin-mode
+     *   platforms, whose passports this framework mints and already stamps, may pass
+     *   TokenClaims::PURPOSE_AUTHENTICATION to enforce it today.
      * @return array Decoded passport claims
      * @throws TokenExchangeException If validation fails
      */
@@ -55,7 +62,8 @@ class TokenExchangeService
         string $token,
         string $jwksUrl,
         string $expectedIssuer,
-        ?string $expectedAudience = null
+        ?string $expectedAudience = null,
+        ?string $expectedPurpose = null
     ): array {
         try {
             // Decode header to get kid for key lookup
@@ -95,6 +103,18 @@ class TokenExchangeService
                     throw new TokenExchangeException(
                         "Invalid audience: expected '$expectedAudience'",
                         'INVALID_AUDIENCE'
+                    );
+                }
+            }
+
+            // Optional strict purpose assertion (see param docblock — off by default
+            // for the federated path, whose minter is a later phase).
+            if ($expectedPurpose !== null) {
+                $purpose = $claims[TokenClaims::CLAIM_PURPOSE] ?? null;
+                if ($purpose !== $expectedPurpose) {
+                    throw new TokenExchangeException(
+                        "Invalid token purpose: expected '$expectedPurpose', got " . var_export($purpose, true),
+                        'INVALID_PURPOSE'
                     );
                 }
             }
@@ -141,14 +161,19 @@ class TokenExchangeService
     public function exchangeCard(
         array $identityClaimsWithTenant,
         string $activeRoleId,
-        array $config
+        array $config,
+        string $tokenType = TokenClaims::TYPE_ACCESS
     ): string {
         return $this->mintToken(
             $identityClaimsWithTenant,
             $config,
-            static function (array $base) use ($activeRoleId): array {
-                $base['token_type'] = 'card';
-                $base['role_id']    = $activeRoleId;
+            static function (array $base) use ($activeRoleId, $tokenType): array {
+                // `token_type` is the token CLASS (card). `type`/`purpose` are the
+                // orthogonal typed claims — a card is always purpose=authorization.
+                $base['token_type']                = 'card';
+                $base['role_id']                   = $activeRoleId;
+                $base[TokenClaims::CLAIM_PURPOSE]   = TokenClaims::PURPOSE_AUTHORIZATION;
+                $base[TokenClaims::CLAIM_TYPE]      = $tokenType;
                 return $base;
             }
         );

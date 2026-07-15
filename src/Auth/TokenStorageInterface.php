@@ -5,6 +5,19 @@ namespace StoneScriptPHP\Auth;
 /**
  * Token Storage Interface
  *
+ * @deprecated since 6.2.0 — use {@see RefreshTokenStore} for the body-mode
+ *   passport/card refresh flow the fleet actually uses. This interface serves ONLY
+ *   the framework's cookie/CSRF `Routes/RefreshRoute`/`LogoutRoute` flow and its
+ *   contract is INCOMPATIBLE with the settled model in two ways:
+ *     1. Its `revokeRefreshToken()` docblock says "mark as revoked, don't delete —
+ *        keep audit trail" (soft-delete). The settled model is REVOKE = DELETE the
+ *        row (hard); see RefreshTokenStore.
+ *     2. It has no `purpose` discriminator, so it cannot persist BOTH identity and
+ *        card refresh tokens in one store.
+ *   New code MUST implement RefreshTokenStore and gate refresh routes with
+ *   RefreshTokenMiddleware. This interface is retained only so the legacy cookie
+ *   routes keep compiling until they are removed.
+ *
  * Optional interface for refresh token storage and blacklisting.
  * Implement this interface if you need to:
  * - Store refresh tokens in database

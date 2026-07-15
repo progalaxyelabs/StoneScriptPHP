@@ -92,7 +92,55 @@ class RouteEntry
          * passed isPublic=false for flat-format routes, with no per-route override).
          */
         public readonly bool $isPublic = false,
+
+        /**
+         * Route access model (v6.2.0) — supersedes the `$isPublic` boolean.
+         * One of RouteAccess::PUBLIC | AUTHENTICATION | AUTHORIZATION.
+         *
+         * When null, it is DERIVED for backward compatibility: `$isPublic === true`
+         * ⇒ `public`, otherwise `authorization` (the historical "protected" default —
+         * a card-token business route). Declare it explicitly to opt a route into the
+         * typed access/refresh middleware.
+         */
+        public readonly ?string $access = null,
+
+        /**
+         * Which credential this route consumes (v6.2.0):
+         * RouteAccess::TOKEN_ACCESS (Bearer access token, stateless) or
+         * RouteAccess::TOKEN_REFRESH (body refresh token, stateful DB-gated).
+         */
+        public readonly string $tokenType = RouteAccess::TOKEN_ACCESS,
     ) {
+        if ($access !== null && !RouteAccess::isValidAccess($access)) {
+            throw new \InvalidArgumentException(
+                "RouteEntry \$access must be one of "
+                . implode('|', RouteAccess::ACCESS_VALUES) . ", got '$access'."
+            );
+        }
+        if (!RouteAccess::isValidTokenType($tokenType)) {
+            throw new \InvalidArgumentException(
+                "RouteEntry \$tokenType must be one of "
+                . implode('|', RouteAccess::TOKEN_TYPE_VALUES) . ", got '$tokenType'."
+            );
+        }
+    }
+
+    /**
+     * The effective access value, deriving from the legacy `$isPublic` flag when
+     * `$access` was not declared. Never null.
+     */
+    public function resolvedAccess(): string
+    {
+        if ($this->access !== null) {
+            return $this->access;
+        }
+        return $this->isPublic ? RouteAccess::PUBLIC : RouteAccess::AUTHORIZATION;
+    }
+
+    /** Whether the route requires no token (public), honouring both dimensions. */
+    public function isPublicAccess(): bool
+    {
+        return $this->resolvedAccess() === RouteAccess::PUBLIC;
     }
 
     /**

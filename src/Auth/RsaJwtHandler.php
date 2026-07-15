@@ -34,12 +34,22 @@ class RsaJwtHandler implements JwtHandlerInterface
      *
      * @param array $payload Data to encode in the token
      * @param int $expirySeconds Token expiry in seconds (default: 900 = 15 minutes)
-     * @param string $tokenType 'access' or 'refresh' (determines which expiry to use)
+     * @param string $tokenType 'access' or 'refresh' — selects the expiry AND is stamped
+     *   as the first-class `type` claim (TokenClaims::CLAIM_TYPE). Distinct from the
+     *   `token_type` (card/platform) CLASS claim — do not conflate.
+     * @param string $purpose 'authentication' (identity/passport) or 'authorization'
+     *   (card/API) — stamped as the first-class `purpose` claim. Defaults to
+     *   authentication because RsaJwtHandler is the local identity handler; card mint
+     *   sites pass 'authorization'.
      * @return string JWT token
      * @throws \RuntimeException if private key cannot be loaded
      */
-    public function generateToken(array $payload, ?int $expirySeconds = null, string $tokenType = 'access'): string
-    {
+    public function generateToken(
+        array $payload,
+        ?int $expirySeconds = null,
+        string $tokenType = TokenClaims::TYPE_ACCESS,
+        string $purpose = TokenClaims::PURPOSE_AUTHENTICATION
+    ): string {
         $privateKeyPath = $this->getPrivateKeyPath();
         $privateKeyContent = file_get_contents($privateKeyPath);
 
@@ -87,10 +97,17 @@ class RsaJwtHandler implements JwtHandlerInterface
         // Spreading $payload after the standard claims means any claim in $payload
         // (e.g. 'exp') would override the standard value — callers should not include
         // reserved JWT fields in $payload.
+        // Stamp the typed token claims (type/purpose) as first-class framework
+        // defaults. They sit in the base array so an explicit $payload value still
+        // wins (consistent with the long-standing payload-spread-last convention,
+        // and required by internal callers such as the OAuth state token, which
+        // legitimately reuses the `purpose` key for its own state marker).
         $data = array_merge([
-            'iss' => $issuer,
-            'iat' => $issuedAt,
-            'exp' => $expire,
+            'iss'                      => $issuer,
+            'iat'                      => $issuedAt,
+            'exp'                      => $expire,
+            TokenClaims::CLAIM_TYPE    => $tokenType,
+            TokenClaims::CLAIM_PURPOSE => $purpose,
         ], $payload);
 
         return JWT::encode($data, $privateKey, self::ALGORITHM);

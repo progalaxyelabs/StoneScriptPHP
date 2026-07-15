@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-07-15
+
+### Added — Typed auth-token model (access/refresh, authentication/authorization)
+
+Every auth token now carries two orthogonal, strictly-checked claims, routes
+declare a typed access model, and refresh tokens are DB-gated with hard revocation.
+The additive API is opt-in — a platform that does not wire the new middleware or
+declare route `access` gets identical 6.1.0 behaviour — so this is a MINOR bump.
+The *behavioural* tightening (strict token typing, DB-gated refresh) only applies
+to routes that adopt the new middleware; see "Breaking on adoption" below.
+
+- **`StoneScriptPHP\Auth\TokenClaims`** — the typed vocabulary. `type` ∈
+  {`access`, `refresh`} (what the credential IS) and `purpose` ∈
+  {`authentication`, `authorization`} (what it is FOR). These are DISTINCT from
+  the pre-existing `token_type` (card/platform) CLASS claim — not an overload.
+- **`RsaJwtHandler::generateToken()`** now stamps `type` (from its token-type arg,
+  previously used only to pick the expiry) and takes + stamps a new `$purpose`
+  argument. Both are first-class defaults; an explicit `$payload` value still wins
+  (so the internal OAuth `purpose=oauth_state` marker is preserved).
+  `HybridCardJwtHandler::generateToken()` gains the same `$purpose` passthrough.
+- **`TokenExchangeService::exchangeCard()`** stamps `purpose=authorization` and a
+  `type` (new `$tokenType` arg, default `access`) on cards, alongside the existing
+  `token_type=card`. `validateIdentityToken()` gains an optional
+  `$expectedPurpose` assertion (off by default — see notes).
+- **`StoneScriptPHP\Auth\TrustedIssuerVerifier`** — mandatory-`iss`, issuer-selects-
+  the-key verification. A token's `iss` selects its verification key from a trusted
+  map (local RSA public key, or JWKS for federated identity); an untrusted or
+  missing `iss` is rejected outright, and a token whose `iss` was forged to route
+  it to a different key fails the signature check. This is the typed evolution of
+  `MultiAuthJwtValidator.auth_servers[]`, unifying the local-key and JWKS paths.
+- **`StoneScriptPHP\Auth\RefreshTokenStore`** (+ reference
+  **`InMemoryRefreshTokenStore`**) — framework-owned persistence for ALL refresh
+  tokens (identity AND card), discriminated by `purpose`. **Revoke = DELETE the
+  row (hard).** A refresh token is valid iff its row exists.
+- **`StoneScriptPHP\Auth\Middleware\AccessTokenMiddleware`** — STATELESS. For a
+  route whose `access` is authentication/authorization, verifies a Bearer access
+  token: signature + `iss`(→key-select) + `exp` + `type==access` +
+  `purpose==route.access`. No DB.
+- **`StoneScriptPHP\Auth\Middleware\RefreshTokenMiddleware`** — STATEFUL. For a
+  `token_type=refresh` route, verifies the body refresh token (sig + `iss` + `exp`
+  + `type==refresh` + `purpose`) AND that its row exists in the `RefreshTokenStore`
+  (absent ⇒ revoked ⇒ reject). `purpose` is a constructor parameter, not a third
+  class — the two middleware split by TYPE only (owner preference).
+- **`StoneScriptPHP\Routing\RouteAccess`** + new `RouteEntry`/`Router` fields —
+  routes declare `access` ∈ {`public`, `authentication`, `authorization`} plus a
+  `token_type` ∈ {`access`, `refresh`}, superseding the `is_public` boolean. The
+  boolean is retained as a back-compat shim (`is_public=true` ⇒ `access=public`;
+  a protected route with no explicit `access` derives `authorization`).
+
+### Deprecated
+
+- **`TokenStorageInterface`** — deprecated in favour of `RefreshTokenStore`. Its
+  contract said "revoke = UPDATE revoked_at, keep an audit trail" (soft-delete) and
+  has no `purpose` discriminator; it serves only the legacy cookie/CSRF refresh
+  flow. The settled model is hard-delete via `RefreshTokenStore`. Retained only so
+  the legacy cookie routes keep compiling.
+
+### Breaking on adoption (not on upgrade)
+
+Upgrading the library alone changes no existing behaviour. A consuming platform
+that adopts the new model must expect:
+
+- Refresh routes gated by `RefreshTokenMiddleware` reject any refresh token that
+  has no `RefreshTokenStore` row — including all previously-issued (rowless) refresh
+  tokens ⇒ a one-time forced re-login for that platform. Identity refresh tokens,
+  never persisted before, must now be written to the store at mint time.
+- Access routes gated by `AccessTokenMiddleware` strictly require `type=access` and
+  `purpose==route.access`; an identity token can no longer satisfy a card route (or
+  vice-versa) even when signature + `iss` match — closing the issuer-indistinguishable
+  token-confusion hole on single-key/builtin platforms.
+- `TrustedIssuerVerifier` requires an explicit trusted-issuer→key map; there is no
+  "skip issuer check when unset" escape hatch.
+- `validateIdentityToken()`'s `$expectedPurpose` is left OFF by default on purpose:
+  the federated passport minter (the external auth service) stamps `purpose` only
+  in a later phase, so enabling the assertion fleet-wide before that would reject
+  in-flight passports. Builtin-mode platforms, whose passports this framework mints
+  and already stamps, may enable it today.
+
 ## [6.1.0] - 2026-07-09
 
 ### Added — Plugin extensibility seam (Phase 1, non-breaking)

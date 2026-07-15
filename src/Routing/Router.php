@@ -119,8 +119,10 @@ class Router
         ?string $service = null,
         ?string $response = null,
         bool $collection = false,
+        ?string $access = null,
+        string $tokenType = 'access',
     ): self {
-        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection);
+        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection, $access, $tokenType);
     }
 
     /**
@@ -140,8 +142,10 @@ class Router
         ?string $service = null,
         ?string $response = null,
         bool $collection = false,
+        ?string $access = null,
+        string $tokenType = 'access',
     ): self {
-        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection);
+        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection, $access, $tokenType);
     }
 
     /**
@@ -172,11 +176,32 @@ class Router
         ?string $service = null,
         ?string $response = null,
         bool $collection = false,
+        ?string $access = null,
+        string $tokenType = 'access',
     ): self {
         $method = strtoupper($method);
         $fullPath = $path;
         $effectiveService = $service ?? 'shared';
-        $effectiveIsPublic = $isPublic;
+
+        // Reconcile the legacy `is_public` boolean with the v6.2.0 `access` model.
+        // `access` wins when set; otherwise derive it from `is_public`. `is_public`
+        // stays populated (== access is 'public') so the legacy JwtAuthMiddleware
+        // path keeps working unchanged.
+        if ($access !== null && !RouteAccess::isValidAccess($access)) {
+            throw new \InvalidArgumentException(
+                "Route '$method $fullPath' declares invalid access '$access' — expected one of "
+                . implode('|', RouteAccess::ACCESS_VALUES) . '.'
+            );
+        }
+        if ($access === null) {
+            $access = $isPublic ? RouteAccess::PUBLIC : RouteAccess::AUTHORIZATION;
+        }
+        $effectiveIsPublic = $access === RouteAccess::PUBLIC;
+        if (!RouteAccess::isValidTokenType($tokenType)) {
+            throw new \InvalidArgumentException(
+                "Route '$method $fullPath' declares invalid token_type '$tokenType'."
+            );
+        }
 
         if (!isset($this->routes[$method])) {
             $this->routes[$method] = [];
@@ -188,6 +213,8 @@ class Router
         $routeKey = "$method:$fullPath";
         $this->routeMeta[$routeKey] = [
             'is_public' => $effectiveIsPublic,
+            'access'    => $access,
+            'token_type' => $tokenType,
             'service'   => $effectiveService,
             'group'      => $group,
             'action'     => $action,
@@ -240,6 +267,8 @@ class Router
             response:  $config['response']   ?? null,
             collection: $config['collection'] ?? false,
             isPublic:  $config['is_public']  ?? false,
+            access:    $config['access']     ?? null,
+            tokenType: $config['token_type'] ?? 'access',
         );
     }
 
@@ -285,7 +314,7 @@ class Router
             $method = strtoupper($method);
             foreach ($routes as $path => $config) {
                 $entry = self::normalizeRouteConfig($config);
-                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection);
+                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection, $entry->access, $entry->tokenType);
             }
         }
         return $this;
@@ -331,6 +360,8 @@ class Router
                     'response'   => $meta['response']   ?? null,
                     'collection' => $meta['collection'] ?? false,
                     'is_public' => $meta['is_public'] ?? false,
+                    'access'     => $meta['access']     ?? null,
+                    'token_type' => $meta['token_type'] ?? 'access',
                 ];
             }
         }
@@ -380,6 +411,8 @@ class Router
             'route'   => $match ? [
                 'pattern'       => $match['pattern'],
                 'is_public'     => $match['is_public'] ?? false,
+                'access'        => $match['access'] ?? null,
+                'token_type'    => $match['token_type'] ?? 'access',
                 'service'       => $match['service'] ?? 'shared',
                 'handler_class' => is_object($match['handler']) ? get_class($match['handler']) : $match['handler'],
             ] : null,
@@ -460,6 +493,8 @@ class Router
                     'params'    => [],
                     'pattern'   => $pattern,
                     'is_public' => $this->routeMeta[$routeKey]['is_public'] ?? false,
+                    'access'     => $this->routeMeta[$routeKey]['access'] ?? null,
+                    'token_type' => $this->routeMeta[$routeKey]['token_type'] ?? 'access',
                     'service'   => $this->routeMeta[$routeKey]['service'] ?? 'shared',
                 ];
             }
@@ -475,6 +510,8 @@ class Router
                     'params'    => $params,
                     'pattern'   => $pattern,
                     'is_public' => $this->routeMeta[$routeKey]['is_public'] ?? false,
+                    'access'     => $this->routeMeta[$routeKey]['access'] ?? null,
+                    'token_type' => $this->routeMeta[$routeKey]['token_type'] ?? 'access',
                     'service'   => $this->routeMeta[$routeKey]['service'] ?? 'shared',
                 ];
             }

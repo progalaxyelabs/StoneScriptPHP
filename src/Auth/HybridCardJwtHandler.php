@@ -110,12 +110,17 @@ class HybridCardJwtHandler implements JwtHandlerInterface
      *
      * @param array       $payload      Claims to stamp on the card.
      * @param int|null    $expirySeconds Expiry in seconds (defaults to JWT_ACCESS_TOKEN_EXPIRY or 900).
-     * @param string      $tokenType    'access' or 'refresh'.
+     * @param string      $tokenType    'access' or 'refresh' — stamped as the `type` claim.
+     * @param string      $purpose      'authentication'|'authorization' — stamped as the `purpose` claim.
      * @return string Signed JWT.
      * @throws \RuntimeException if JWT_ISSUER is unset/empty or private key is missing.
      */
-    public function generateToken(array $payload, ?int $expirySeconds = null, string $tokenType = 'access'): string
-    {
-        return $this->platformHandler->generateToken($payload, $expirySeconds, $tokenType);
+    public function generateToken(
+        array $payload,
+        ?int $expirySeconds = null,
+        string $tokenType = TokenClaims::TYPE_ACCESS,
+        string $purpose = TokenClaims::PURPOSE_AUTHENTICATION
+    ): string {
+        return $this->platformHandler->generateToken($payload, $expirySeconds, $tokenType, $purpose);
     }
 }
