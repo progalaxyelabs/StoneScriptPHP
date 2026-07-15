@@ -164,8 +164,17 @@ class Application
 
         $router = new Router();
         $router->use(new LoggingMiddleware());
+        // No '*' fallback here on purpose — Env::$ALLOWED_ORIGINS is a non-nullable
+        // typed string (Env.php already resolves it from src/config/allowed-origins.php
+        // and/or the ALLOWED_ORIGINS env var, defaulting to '' if neither is set), so
+        // this never actually receives null; a literal '*' would also never work
+        // anyway (CorsMiddleware matches the real Origin header by exact string, and
+        // '*' is not a real origin any browser sends) while implying a match-all
+        // behavior that would be unsafe to actually implement given
+        // Access-Control-Allow-Credentials is always sent true. Unconfigured ->
+        // empty array -> CorsMiddleware allows no origin (fail-closed).
         $router->use(new CorsMiddleware(
-            explode(',', $env->ALLOWED_ORIGINS ?? '*'),
+            array_values(array_filter(array_map('trim', explode(',', $env->ALLOWED_ORIGINS)))),
             explode(',', $env->ALLOWED_METHODS ?? 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
         ));
         $router->use(new JwtAuthMiddleware(

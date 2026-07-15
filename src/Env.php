@@ -81,7 +81,17 @@ class Env
     public string $AUTH_COOKIE_DOMAIN = '';
     public ?bool $AUTH_COOKIE_SECURE = null;
 
-    public string $ALLOWED_ORIGINS = 'http://localhost:3000,http://localhost:4200';
+    // No hardcoded guess here on purpose (was 'http://localhost:3000,http://localhost:4200'
+    // — a generic default that happened to match nobody's real dev port and let CORS
+    // silently, permanently fail for any platform that forgot to configure this).
+    // Real default is computed in __construct() from src/config/allowed-origins.php
+    // (if the app defines one), BEFORE the env-var override loop below runs — so an
+    // explicit ALLOWED_ORIGINS env var still always wins. If neither is set, this
+    // stays empty: CorsMiddleware then allows no origin at all (fail-closed), never
+    // '*' — Access-Control-Allow-Credentials is always sent true, and browsers reject
+    // (and it would be unsafe regardless of browser behavior) Access-Control-Allow-Origin:
+    // * combined with credentials.
+    public string $ALLOWED_ORIGINS = '';
 
     // Redis / cache (v4.1.0+) — typed so they flow through the central secret
     // resolution chain instead of Cache.php reading $_ENV directly.
@@ -122,11 +132,47 @@ class Env
 
     protected function __construct()
     {
+        // Break a real reentrancy hazard: get_instance() only assigns
+        // self::$_instance AFTER `new static()` (this constructor) fully
+        // returns. src/config/allowed-origins.php is `require`d further down,
+        // and it's an app-owned file this class doesn't control the contents
+        // of — if it ever called Env::get_instance() itself (not an
+        // unreasonable thing for someone to try), self::$_instance would
+        // still be null at that point, triggering a second `new static()`,
+        // which would read allowed-origins.php again, which would call
+        // get_instance() again — infinite recursion, hard crash at boot.
+        // Assigning $this here, before any app-level file is read, means a
+        // reentrant get_instance() call gets back this same (still
+        // mid-construction) instance instead of recursing. Any property read
+        // through that reentrant path before this constructor finishes will
+        // see not-yet-fully-resolved values (class defaults / whatever has
+        // been resolved so far) rather than final ones — an acceptable, far
+        // safer tradeoff than a boot crash. allowed-origins.php should use
+        // getenv() directly (like every real platform's copy already does)
+        // rather than Env::get_instance(), precisely to avoid depending on
+        // this partially-initialized window at all.
+        self::$_instance = $this;
+
         // Load .env file if it exists (optional for Docker environments)
         $env_file_path = ROOT_PATH . DIRECTORY_SEPARATOR . '.env';
         if (file_exists($env_file_path)) {
             $dotenv = \Dotenv\Dotenv::createImmutable(ROOT_PATH);
             $dotenv->load();
+        }
+
+        // ALLOWED_ORIGINS base: src/config/allowed-origins.php, if the app defines
+        // one — read BEFORE the env-var override loop below, so an explicit
+        // ALLOWED_ORIGINS env var (set via docker-compose/.env/CLI/secret) always
+        // wins over it, matching how every other typed property here already
+        // resolves (env > default). This is the file every platform already gets
+        // from the skeleton; it was previously scaffolded but never actually read
+        // by the framework. Config file wins over the hardcoded class default
+        // (now empty); env var wins over the config file.
+        if (defined('CONFIG_PATH')) {
+            $fileOrigins = $this->loadOriginsFromFile(CONFIG_PATH . 'allowed-origins.php');
+            if ($fileOrigins !== null) {
+                $this->ALLOWED_ORIGINS = $fileOrigins;
+            }
         }
 
         // Use reflection to discover all public properties and override with env vars
@@ -172,6 +218,113 @@ class Env
                 ));
             }
         }
+    }
+
+    /**
+     * Read an app-owned "list of strings" config file (e.g. allowed-origins.php)
+     * and return it as a comma-joined string, or null if the file doesn't
+     * exist / doesn't return a non-empty array. Extracted as its own method
+     * (rather than inlined in __construct()) specifically so it's testable
+     * against an arbitrary path — CONFIG_PATH is a global constant defined
+     * once at bootstrap and can't be swapped per-test.
+     *
+     * The file is validated at the TOKEN level, BEFORE it is ever executed —
+     * only a bare `return [...]` array-literal-of-strings shape is accepted.
+     * This is not just a style rule: this method runs mid-Env::__construct()
+     * (before get_instance() is safe to call reentrantly, before most of
+     * Env's own properties are resolved), so any function/method call in
+     * this file — Env::get_instance(), getenv(), array_merge(), anything —
+     * runs in that same unsafe, partially-initialized window. Rejecting the
+     * file at the token level means the code inside it is guaranteed to
+     * never execute at all, not just "discouraged" by a comment.
+     */
+    protected function loadOriginsFromFile(string $path): ?string
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $source = @file_get_contents($path);
+        if ($source === false) {
+            return null;
+        }
+
+        if (!$this->isPureArrayReturnSource($source)) {
+            log_warning(
+                "Env: '$path' is not a plain `return [...]` array of string literals — " .
+                'ignoring it. Config files under src/config/ that Env reads at construction ' .
+                'time must not call any function (including Env::get_instance() itself, ' .
+                'getenv(), array_merge(), etc.) — this file is read before Env is safely ' .
+                're-entrant. Falling back to the ALLOWED_ORIGINS env var / empty default.'
+            );
+            return null;
+        }
+
+        // Safe to execute now — validated above to contain nothing but a
+        // literal array return.
+        $origins = include $path;
+        if (!is_array($origins) || empty($origins)) {
+            return null;
+        }
+
+        return implode(',', $origins);
+    }
+
+    /**
+     * Token-level check: $source must be nothing but an opening <?php tag,
+     * optional comments/whitespace, and a single `return <array literal of
+     * scalars>;` — no function/method calls, no `::`/`->`, no variables, no
+     * `new`/`function`/`fn`/`include`/`require`/`static`. Deliberately
+     * conservative (reject-by-default): anything this doesn't explicitly
+     * recognize as safe array-literal syntax is rejected, not allowed
+     * through.
+     */
+    private function isPureArrayReturnSource(string $source): bool
+    {
+        $tokens = @token_get_all($source);
+        if ($tokens === false) {
+            return false;
+        }
+
+        $forbiddenTokenIds = [
+            T_DOUBLE_COLON, T_OBJECT_OPERATOR, T_VARIABLE, T_FUNCTION, T_FN,
+            T_NEW, T_STATIC, T_INCLUDE, T_INCLUDE_ONCE, T_REQUIRE, T_REQUIRE_ONCE,
+        ];
+        if (defined('T_NULLSAFE_OBJECT_OPERATOR')) {
+            $forbiddenTokenIds[] = T_NULLSAFE_OBJECT_OPERATOR;
+        }
+
+        $lastBareword = null; // text of the most recent T_STRING, for the "name(" function-call check below
+
+        foreach ($tokens as $token) {
+            if (!is_array($token)) {
+                // Single-character structural token: ( ) [ ] , ; - etc.
+                if ($token === '(' && $lastBareword !== null && strtolower($lastBareword) !== 'array') {
+                    return false; // bareword immediately followed by '(' and it isn't the `array(...)` literal form — a function call
+                }
+                $lastBareword = null;
+                continue;
+            }
+
+            [$id, $text] = $token;
+
+            if (in_array($id, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT, T_OPEN_TAG, T_CLOSE_TAG], true)) {
+                continue;
+            }
+
+            if (in_array($id, $forbiddenTokenIds, true)) {
+                return false;
+            }
+
+            if ($id === T_STRING) {
+                $lastBareword = $text;
+                continue;
+            }
+
+            $lastBareword = null;
+        }
+
+        return true;
     }
 
     /**

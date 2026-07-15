@@ -9,6 +9,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [6.2.0] - 2026-07-15
 
+### Fixed — CORS: fail-closed by default, allowed-origins.php actually wired up
+
+Found live during a progalaxy-platform browser test: a real Google-OAuth login
+completed server-side (200 OK) but the browser blocked reading the response —
+`Access-Control-Allow-Origin` was silently missing for a real, listed dev
+origin. Root cause was three compounding framework bugs, not one:
+
+- `Env::$ALLOWED_ORIGINS` defaulted to a hardcoded, generic
+  `'http://localhost:3000,http://localhost:4200'` — silently wrong for any
+  platform running its Angular dev server on a different port (every real
+  platform in the fleet does), with no loud failure to notice it by.
+- `Application.php`'s `$env->ALLOWED_ORIGINS ?? '*'` fallback was dead code —
+  `Env::$ALLOWED_ORIGINS` is a non-nullable typed string with an explicit
+  default, so it is never actually `null`. The intended "unconfigured ->
+  allow all" fallback never ran, and would have been unsafe if it had:
+  `CorsMiddleware` always sends `Access-Control-Allow-Credentials: true`, and
+  `Access-Control-Allow-Origin: *` combined with credentials is invalid in
+  browsers and a real security hole.
+- `src/config/allowed-origins.php` has been scaffolded by the skeleton since
+  day one but was never read by `Application.php`/`Env.php` at all — every
+  platform that populated it (following the skeleton's implication that it
+  does something) was configuring dead weight.
+
+Fix:
+- **`Env`** now reads `src/config/allowed-origins.php` (if the app defines
+  one) as the base for `ALLOWED_ORIGINS`, with the `ALLOWED_ORIGINS` env var
+  still overriding it exactly like every other typed `Env` property already
+  resolves (env > default). Unconfigured (neither file nor env var) is now
+  genuinely empty — fail-closed, never `'*'`. The config file is validated at
+  the **token level before it is ever executed**: only a bare
+  `return [...]` array-literal-of-strings is accepted. This isn't a style
+  rule — this file is read mid-`Env::__construct()`, before
+  `Env::get_instance()` is safe to call reentrantly and before most of
+  `Env`'s own properties are resolved, so a config file calling any
+  function (`Env::get_instance()`, `getenv()`, `array_merge()`, closures,
+  `new`, etc.) would run in that same unsafe window. Rejecting the file at
+  the token level (`Env::isPureArrayReturnSource()`) guarantees the code in
+  it never executes at all, rather than merely discouraging it in a comment.
+  A defensive `self::$_instance = $this;` was also added as the first line
+  of `Env::__construct()`, closing a real reentrancy hazard this change
+  could otherwise have introduced (a config file calling
+  `Env::get_instance()` before this guard would recurse into a second
+  construction — infinite loop / boot crash).
+- **`CorsMiddleware`**: a configured `'*'` is stripped (with a loud
+  `log_warning`, not silently dropped or, worse, honored) rather than ever
+  being treated as match-all, for the credentials-safety reason above.
+  Origin matching is now case-insensitive on both sides (configured origins
+  are lowercased too, not just the incoming header). The origin-match
+  decision (`resolveAllowedOrigin()`) is extracted as its own pure,
+  independently-testable method.
+
+Verified: 616/616 tests pass (600 pre-existing + 16 new, including a test
+that a config file calling `Env::get_instance()` is rejected without ever
+executing, not merely discouraged). Root cause was reproduced live against
+progalaxy-platform (missing `Access-Control-Allow-Origin` on both the
+`OPTIONS` preflight and the actual `POST /api/auth/exchange` for a real
+browser `Origin: http://localhost:3040` header) before this fix was written;
+re-verification against progalaxy-platform with this exact framework version
+is a separate, subsequent step — not yet done as of this commit.
+
 ### Added — Typed auth-token model (access/refresh, authentication/authorization)
 
 Every auth token now carries two orthogonal, strictly-checked claims, routes
