@@ -278,6 +278,15 @@ class Application
         // PluginInterface precedence). Empty $plugins (the default) is a no-op merge.
         $router->loadRoutes(self::mergePluginRoutes($appRoutes, $plugins));
 
+        // Fail-closed wiring guard: if any route declares the typed access/refresh
+        // model but the pipeline is missing the matching AccessToken/RefreshToken
+        // middleware, refuse to boot rather than serve a silently-unprotected route.
+        // No-op for platforms that never adopt the typed model (no `access` routes).
+        \StoneScriptPHP\Auth\Middleware\AuthMiddlewareRegistrar::assertFullyWired(
+            $router->getGlobalMiddleware(),
+            $router->getRouteMeta()
+        );
+
         $response = $router->dispatch();
 
         // Set HTTP status code from ApiResponse when provided.

@@ -55,6 +55,16 @@ class Router
     }
 
     /**
+     * The global middleware instances, in pipe order (read-only introspection).
+     *
+     * @return array<int, MiddlewareInterface>
+     */
+    public function getGlobalMiddleware(): array
+    {
+        return $this->globalMiddleware->getMiddleware();
+    }
+
+    /**
      * Define scope/service-specific middleware.
      *
      * When a request matches a route with the given scope, these middleware

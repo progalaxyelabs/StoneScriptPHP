@@ -221,10 +221,11 @@ class TrustedIssuerVerifier
                 continue;
             }
             $authServers[$issuer] = array_filter([
-                'issuer'    => $issuer,
-                'jwks_url'  => $entry['jwks_url'],
-                'audience'  => $entry['audience'] ?? null,
-                'cache_ttl' => $entry['cache_ttl'] ?? null,
+                'issuer'        => $issuer,
+                'jwks_url'      => $entry['jwks_url'],
+                'audience'      => $entry['audience'] ?? null,
+                'cache_ttl'     => $entry['cache_ttl'] ?? null,
+                'max_stale_ttl' => $entry['max_stale_ttl'] ?? null,
             ], fn($v) => $v !== null);
         }
         return new MultiAuthJwtValidator($authServers, $this->jwksCacheDir);

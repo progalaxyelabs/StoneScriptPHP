@@ -55,6 +55,23 @@ to routes that adopt the new middleware; see "Breaking on adoption" below.
   `token_type` ∈ {`access`, `refresh`}, superseding the `is_public` boolean. The
   boolean is retained as a back-compat shim (`is_public=true` ⇒ `access=public`;
   a protected route with no explicit `access` derives `authorization`).
+- **`StoneScriptPHP\Auth\Middleware\AuthMiddlewareRegistrar`** — safe-by-construction
+  wiring. `create()` returns BOTH typed-auth middleware as a unit (install one, get
+  both). `assertFullyWired()` is a fail-closed boot assertion — wired automatically
+  into `Application::run()` — that refuses to boot if the route model declares an
+  access/refresh route class the pipeline does not enforce, so a half-wired pipeline
+  can never leave one credential class silently unauthenticated. No-op for platforms
+  that don't adopt the typed model. Adds read-only `Router::getGlobalMiddleware()`
+  and `MiddlewarePipeline::getMiddleware()` introspection.
+- **`RefreshTokenMiddleware` body-parser robustness** — reads the refresh token from
+  the request body; documents that `JsonBodyParserMiddleware` should precede it, and
+  self-parses `php://input` as a fallback when the `body` key is absent, so a
+  mis-ordered pipeline cannot silently 401 every refresh endpoint.
+- **`MultiAuthJwtValidator` bounded stale JWKS** — new optional `max_stale_ttl`
+  per-issuer config caps how long a stale key set is served when the auth service is
+  unreachable; past the ceiling it fails closed rather than trust a possibly
+  rotated/revoked key. Unset ⇒ unbounded (prior behavior preserved).
+  `TrustedIssuerVerifier` passes it through for `jwks` issuers.
 
 ### Deprecated
 

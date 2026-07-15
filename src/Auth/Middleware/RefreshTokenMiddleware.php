@@ -33,6 +33,16 @@ use StoneScriptPHP\Auth\TrustedIssuerVerifier;
  * The middleware OWNS the gate; the handler performs the actual re-mint using the
  * platform's minter.
  *
+ * ## Body-parsing ordering
+ *
+ * The refresh token is read from the request BODY. Pipe {@see \StoneScriptPHP\Routing\Middleware\JsonBodyParserMiddleware}
+ * BEFORE this middleware so `$request['body']` is populated. As a safety net (so a
+ * missing parser cannot silently 401 every refresh endpoint), when the `body` key is
+ * ABSENT this middleware parses `php://input` itself. When the `body` key is PRESENT
+ * (even as an empty array) it is trusted as-is — an empty body then legitimately
+ * yields "missing refresh token". Prefer the explicit parser; the fallback exists
+ * only to remove the silent-miswire footgun.
+ *
  * @package StoneScriptPHP\Auth\Middleware
  * @since   6.2.0
  */
@@ -75,7 +85,8 @@ class RefreshTokenMiddleware implements MiddlewareInterface
             return $this->deny(500, 'Route access model misconfigured');
         }
 
-        $refreshToken = $request['body'][$this->bodyField] ?? null;
+        $body = $this->resolveBody($request);
+        $refreshToken = $body[$this->bodyField] ?? null;
         if (!is_string($refreshToken) || $refreshToken === '') {
             return $this->deny(401, 'Unauthorized: Missing refresh token');
         }
@@ -105,6 +116,31 @@ class RefreshTokenMiddleware implements MiddlewareInterface
         $request['jwt_claims'] = $claims;
 
         return $next($request);
+    }
+
+    /**
+     * Resolve the request body, tolerating a missing JSON body-parser.
+     *
+     * If the `body` key is present (the parser ran), it is trusted as-is. If it is
+     * ABSENT, we parse `php://input` ourselves so a mis-ordered pipeline cannot make
+     * every refresh endpoint silently 401. Non-JSON / unreadable input yields an
+     * empty array (⇒ a clean "missing refresh token" rather than a crash).
+     *
+     * @param array<string,mixed> $request
+     * @return array<string,mixed>
+     */
+    private function resolveBody(array $request): array
+    {
+        if (array_key_exists('body', $request)) {
+            return is_array($request['body']) ? $request['body'] : [];
+        }
+
+        $raw = @file_get_contents('php://input');
+        if ($raw === false || $raw === '') {
+            return [];
+        }
+        $parsed = json_decode($raw, true);
+        return is_array($parsed) ? $parsed : [];
     }
 
     /**

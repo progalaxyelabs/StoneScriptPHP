@@ -36,6 +36,20 @@ class MiddlewarePipeline
     }
 
     /**
+     * The installed middleware instances, in pipe order.
+     *
+     * Read-only introspection — used by boot-time wiring assertions (e.g.
+     * AuthMiddlewareRegistrar::assertFullyWired) to verify the pipeline enforces
+     * every declared route access model.
+     *
+     * @return array<int, MiddlewareInterface>
+     */
+    public function getMiddleware(): array
+    {
+        return $this->middleware;
+    }
+
+    /**
      * Execute the middleware pipeline
      *
      * @param array $request The request data

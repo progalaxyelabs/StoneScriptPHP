@@ -105,6 +105,23 @@ class RefreshTokenMiddlewareTest extends TestCase
         $this->assertSame(401, $r['response']->httpStatusCode);
     }
 
+    public function test_absent_body_key_fails_closed_without_crashing(): void
+    {
+        // No JSON body-parser ran → request has NO 'body' key. The middleware must
+        // fall back gracefully (self-parse php://input, empty here) and 401 cleanly
+        // rather than error — the documented footgun-removal.
+        $passed = false;
+        $request = ['route' => $this->authnRefreshRoute()]; // deliberately no 'body'
+        $response = $this->middleware->handle($request, function ($req) use (&$passed) {
+            $passed = true;
+            return null;
+        });
+
+        $this->assertFalse($passed);
+        $this->assertInstanceOf(ApiResponse::class, $response);
+        $this->assertSame(401, $response->httpStatusCode);
+    }
+
     public function test_valid_signature_but_absent_row_returns_401(): void
     {
         // Signature + exp valid, but no DB row was ever stored → reject (the gap the

@@ -175,6 +175,7 @@ class MultiAuthJwtValidator
 
         // 2. Persistent cache (APCu or file-based)
         $staleKeys = null;
+        $staleAge = null;
         $persistentData = $this->readPersistentCache($issuerType);
 
         if ($persistentData !== null) {
@@ -191,6 +192,7 @@ class MultiAuthJwtValidator
 
                 // Keep for fallback (stale or kid-miss)
                 $staleKeys = $keys;
+                $staleAge = $age;
             } catch (\Exception $e) {
                 error_log("JWKS persistent cache parse error for '$issuerType': " . $e->getMessage());
             }
@@ -223,8 +225,19 @@ class MultiAuthJwtValidator
             error_log("Failed to fetch JWKS from '$jwksUrl' for issuer type '$issuerType'");
         }
 
-        // 4. Graceful degradation: use stale cache if fetch failed
+        // 4. Graceful degradation: use stale cache if fetch failed — but BOUNDED.
+        // Serving a stale key set indefinitely means a rotated/compromised key stays
+        // trusted for as long as the auth server is unreachable. `max_stale_ttl`
+        // (seconds) caps that window; past it we fail closed rather than trust a key
+        // that may have been revoked. Unset ⇒ unbounded (prior behavior preserved).
         if ($staleKeys !== null) {
+            $maxStale = $config['max_stale_ttl'] ?? null;
+            if ($maxStale !== null && $staleAge !== null && $staleAge > $maxStale) {
+                throw new \Exception(
+                    "Refusing stale JWKS for '$issuerType': cache age {$staleAge}s exceeds "
+                    . "max_stale_ttl {$maxStale}s and the auth service is unreachable (fail-closed)."
+                );
+            }
             error_log("Using stale JWKS cache for '$issuerType' (fetch failed)");
             $this->jwksCache[$issuerType] = $staleKeys;
             return $staleKeys;
