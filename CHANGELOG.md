@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [6.2.0] - 2026-07-15
+## [7.0.0] - 2026-07-15
+
+**BREAKING RELEASE.** The typed access/token_type route model + typed-auth
+middleware are now the framework's single, strict auth model — there is no pre-7.0
+fallback. Every platform with protected routes MUST migrate on upgrade (declare
+`access`/`token_type` and wire `AuthMiddlewareRegistrar::create()`), or the app
+fails fast at boot with an actionable migration error. See **BREAKING CHANGES** and
+**Migration** below, and `UPGRADING-7.0.md`. Also folds in the CORS fail-closed fix.
 
 ### Fixed — CORS: fail-closed by default, allowed-origins.php actually wired up
 
@@ -73,10 +80,8 @@ is a separate, subsequent step — not yet done as of this commit.
 
 Every auth token now carries two orthogonal, strictly-checked claims, routes
 declare a typed access model, and refresh tokens are DB-gated with hard revocation.
-The additive API is opt-in — a platform that does not wire the new middleware or
-declare route `access` gets identical 6.1.0 behaviour — so this is a MINOR bump.
-The *behavioural* tightening (strict token typing, DB-gated refresh) only applies
-to routes that adopt the new middleware; see "Breaking on adoption" below.
+This is the framework's single auth model in 7.0.0 — strict, no opt-out. See
+**BREAKING CHANGES** for what every consuming platform must do on upgrade.
 
 - **`StoneScriptPHP\Auth\TokenClaims`** — the typed vocabulary. `type` ∈
   {`access`, `refresh`} (what the credential IS) and `purpose` ∈
@@ -112,17 +117,20 @@ to routes that adopt the new middleware; see "Breaking on adoption" below.
   class — the two middleware split by TYPE only (owner preference).
 - **`StoneScriptPHP\Routing\RouteAccess`** + new `RouteEntry`/`Router` fields —
   routes declare `access` ∈ {`public`, `authentication`, `authorization`} plus a
-  `token_type` ∈ {`access`, `refresh`}, superseding the `is_public` boolean. The
-  boolean is retained as a back-compat shim (`is_public=true` ⇒ `access=public`;
-  a protected route with no explicit `access` derives `authorization`).
+  `token_type` ∈ {`access`, `refresh`}, replacing the `is_public` boolean. `is_public`
+  still resolves (`is_public=true` ⇒ `access=public`); a protected route with no
+  explicit `access` is treated as `authorization`/`access`.
 - **`StoneScriptPHP\Auth\Middleware\AuthMiddlewareRegistrar`** — safe-by-construction
   wiring. `create()` returns BOTH typed-auth middleware as a unit (install one, get
-  both). `assertFullyWired()` is a fail-closed boot assertion — wired automatically
-  into `Application::run()` — that refuses to boot if the route model declares an
-  access/refresh route class the pipeline does not enforce, so a half-wired pipeline
-  can never leave one credential class silently unauthenticated. No-op for platforms
-  that don't adopt the typed model. Adds read-only `Router::getGlobalMiddleware()`
-  and `MiddlewarePipeline::getMiddleware()` introspection.
+  both). `assertFullyWired()` is a fail-fast boot guard — wired automatically into
+  `Application::run()` — that refuses to boot when protected routes exist but the
+  typed-auth middleware are not (fully) wired. It distinguishes two cases with
+  distinct, actionable messages (both `AuthMiddlewareRegistrar::AuthWiringException`,
+  caught by `run()` and rendered as a clean 500 — never a bare stack trace): an
+  **un-migrated** platform (neither middleware wired → full migration guide, also
+  exposed as `AuthMiddlewareRegistrar::migrationMessage()`) and a **half-wired** one
+  (one credential class left unprotected → names the missing middleware). Adds
+  read-only `Router::getGlobalMiddleware()` and `MiddlewarePipeline::getMiddleware()`.
 - **`RefreshTokenMiddleware` body-parser robustness** — reads the refresh token from
   the request body; documents that `JsonBodyParserMiddleware` should precede it, and
   self-parses `php://input` as a fallback when the `body` key is absent, so a
@@ -141,26 +149,51 @@ to routes that adopt the new middleware; see "Breaking on adoption" below.
   flow. The settled model is hard-delete via `RefreshTokenStore`. Retained only so
   the legacy cookie routes keep compiling.
 
-### Breaking on adoption (not on upgrade)
+### BREAKING CHANGES (on upgrade)
 
-Upgrading the library alone changes no existing behaviour. A consuming platform
-that adopts the new model must expect:
+Merely vendoring 7.0.0 changes boot behaviour for every platform with protected
+routes. This is the intended, strict, single-mode cutover.
 
-- Refresh routes gated by `RefreshTokenMiddleware` reject any refresh token that
-  has no `RefreshTokenStore` row — including all previously-issued (rowless) refresh
-  tokens ⇒ a one-time forced re-login for that platform. Identity refresh tokens,
-  never persisted before, must now be written to the store at mint time.
-- Access routes gated by `AccessTokenMiddleware` strictly require `type=access` and
-  `purpose==route.access`; an identity token can no longer satisfy a card route (or
-  vice-versa) even when signature + `iss` match — closing the issuer-indistinguishable
-  token-confusion hole on single-key/builtin platforms.
-- `TrustedIssuerVerifier` requires an explicit trusted-issuer→key map; there is no
-  "skip issuer check when unset" escape hatch.
-- `validateIdentityToken()`'s `$expectedPurpose` is left OFF by default on purpose:
-  the federated passport minter (the external auth service) stamps `purpose` only
-  in a later phase, so enabling the assertion fleet-wide before that would reject
-  in-flight passports. Builtin-mode platforms, whose passports this framework mints
-  and already stamps, may enable it today.
+- **Boot now requires the typed-auth middleware.** `Application::run()` fails fast if
+  protected routes exist but `AccessTokenMiddleware` + `RefreshTokenMiddleware` are
+  not wired. An un-migrated (old `is_public`-only) platform — including one that just
+  wanted the CORS fix — gets the migration error at boot and does NOT serve requests.
+  (This corrects a 6.2.0-line regression where the guard fired with only a cryptic
+  assertion/500; it now emits a clear, actionable migration message and `run()`
+  renders it as a controlled 500 rather than an uncaught stack trace.)
+- **Refresh routes are DB-gated.** `RefreshTokenMiddleware` rejects any refresh token
+  with no `RefreshTokenStore` row — including all previously-issued (rowless) tokens
+  ⇒ a one-time forced re-login fleet-wide. Identity refresh tokens, never persisted
+  before, must be written to the store at mint time.
+- **Access routes are strictly typed.** `AccessTokenMiddleware` requires `type=access`
+  and `purpose==route.access`; an identity token can no longer satisfy a card route
+  (or vice-versa) even when signature + `iss` match — closing the
+  issuer-indistinguishable token-confusion hole on single-key/builtin platforms.
+- **`iss` verification is mandatory.** `TrustedIssuerVerifier` requires an explicit
+  trusted-issuer→key map; there is no "skip issuer check when unset" escape hatch.
+- **`TokenStorageInterface` is deprecated** in favour of `RefreshTokenStore` (see
+  above). `validateIdentityToken()`'s `$expectedPurpose` stays OFF by default: the
+  federated passport minter stamps `purpose` in a later phase, so enabling it before
+  that would reject in-flight passports. Builtin-mode platforms may enable it today.
+
+### Migration
+
+To take 7.0.0, each consuming platform must:
+
+1. **Declare `access`/`token_type` on routes** in `routes.php` — `public` for open
+   endpoints; `authentication`+`access` for identity-bearer routes; `authorization`+
+   `access` for card/business routes; `authentication`/`authorization`+`refresh` for
+   the refresh/logout endpoints.
+2. **Wire both typed-auth middleware:**
+   `$auth = AuthMiddlewareRegistrar::create($trustedIssuerVerifier, $refreshTokenStore);`
+   then `Application::run(['middleware' => [...$auth], /* ... */])`.
+3. **Provide a `TrustedIssuerVerifier`** (issuer→key map: local RSA key for
+   builtin/card, JWKS for federated identity) and a **`RefreshTokenStore`**
+   implementation (persist every refresh token; revoke = delete the row).
+
+The boot error text emitted to an un-migrated platform is itself the migration
+checklist (`AuthMiddlewareRegistrar::migrationMessage()`). Full guide in
+`UPGRADING-7.0.md`.
 
 ## [6.1.0] - 2026-07-09
 

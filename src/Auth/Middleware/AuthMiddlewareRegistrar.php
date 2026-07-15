@@ -23,9 +23,16 @@ use StoneScriptPHP\Routing\RouteAccess;
  *   1. {@see create()} — the sanctioned install path. It returns BOTH middleware as a
  *      unit; spread it into the pipeline and you cannot get one without the other.
  *   2. {@see assertFullyWired()} — a boot assertion (wired automatically by
- *      `Application::run()`): if the route model declares any access/refresh route but
- *      the pipeline is missing the matching middleware, it throws and refuses to boot.
+ *      `Application::run()`): if protected routes exist but the pipeline is missing the
+ *      typed-auth middleware, it throws {@see AuthWiringException} and refuses to boot.
  *      Fail-closed, loud, at startup — never a silently-open route at request time.
+ *
+ * ## 7.0.0 — strict, single-mode
+ *
+ * The typed access/token_type model IS the model in 7.0.0; there is no pre-7.0
+ * fallback. A platform still on the old `is_public` schema (protected routes, no
+ * typed-auth middleware wired) is DETECTED at boot and gets a clear, actionable
+ * migration error — the message tells the developer exactly what to change.
  *
  * @package StoneScriptPHP\Auth\Middleware
  * @since   6.2.0
@@ -66,14 +73,21 @@ final class AuthMiddlewareRegistrar
     }
 
     /**
-     * Fail loudly if the route model needs typed auth the pipeline does not enforce.
+     * Fail fast at boot if protected routes exist but the typed-auth middleware are
+     * not (fully) wired. Distinguishes two failure modes with distinct, actionable
+     * messages:
      *
-     * A no-op unless at least one route declares an `access` of `authentication` or
-     * `authorization` — so platforms that never adopt the typed model are unaffected.
+     *   - OLD SCHEMA (neither typed middleware wired): the platform has not migrated
+     *     to 7.0.0 — emit the full migration guide.
+     *   - HALF-WIRE (exactly one wired): a migrated platform installed one credential
+     *     class but not the other — name the missing middleware.
+     *
+     * A genuine no-op only when there are NO protected routes at all (a pure-public
+     * service). Any platform with protected routes MUST wire both middleware.
      *
      * @param iterable<mixed> $pipeline The global middleware instances.
      * @param iterable<array<string,mixed>> $routeMetas `Router::getRouteMeta()` output.
-     * @throws \RuntimeException if a declared access/refresh route class is unenforced.
+     * @throws AuthWiringException if protected routes are not fully enforced.
      */
     public static function assertFullyWired(iterable $pipeline, iterable $routeMetas): void
     {
@@ -103,6 +117,18 @@ final class AuthMiddlewareRegistrar
             }
         }
 
+        // Pure-public service: nothing to enforce.
+        if (!$needsAccess && !$needsRefresh) {
+            return;
+        }
+
+        // OLD SCHEMA: protected routes exist but NEITHER typed middleware is wired.
+        // This is the pre-7.0 platform that merely vendored the new version.
+        if (!$hasAccessMw && !$hasRefreshMw) {
+            throw new AuthWiringException(self::migrationMessage());
+        }
+
+        // HALF-WIRE: one credential class installed, the needed other one missing.
         $missing = [];
         if ($needsAccess && !$hasAccessMw) {
             $missing[] = 'AccessTokenMiddleware (access-token routes would be UNAUTHENTICATED)';
@@ -110,14 +136,46 @@ final class AuthMiddlewareRegistrar
         if ($needsRefresh && !$hasRefreshMw) {
             $missing[] = 'RefreshTokenMiddleware (refresh routes would be UNAUTHENTICATED)';
         }
-
         if ($missing !== []) {
-            throw new \RuntimeException(
-                'Typed-auth wiring incomplete — the route model declares access/refresh routes '
-                . 'but the middleware pipeline is missing: ' . implode('; ', $missing)
-                . '. Install both together via AuthMiddlewareRegistrar::create(). Refusing to '
-                . 'boot with a credential class left silently unprotected (fail-closed).'
+            throw new AuthWiringException(
+                'StoneScriptPHP 7.0.0: typed-auth wiring incomplete — cannot boot. '
+                . 'The route model declares access/refresh routes but the middleware pipeline '
+                . 'is missing: ' . implode('; ', $missing) . '. Install BOTH together via '
+                . 'AuthMiddlewareRegistrar::create($verifier, $store) and pass them into '
+                . "Application::run(['middleware' => [...\$auth]]). Refusing to boot with a "
+                . 'credential class left unprotected (fail-closed). See UPGRADING-7.0.md.'
             );
         }
+    }
+
+    /**
+     * The actionable "old routing schema detected" migration message. Public so
+     * consumers and tests can reference the exact text.
+     */
+    public static function migrationMessage(): string
+    {
+        return <<<TXT
+StoneScriptPHP 7.0.0: old routing schema detected — cannot boot.
+
+This release replaces the `is_public` route flag with a strict typed access model
+and REQUIRES the typed-auth middleware. This platform registered protected routes
+(including the framework's own auth routes) but wired NEITHER typed-auth middleware,
+so it is still on the pre-7.0 schema. 7.0.0 is single-mode — there is no old-mode
+fallback — so it refuses to boot rather than serve routes with no authentication.
+
+To migrate:
+  1. Declare access + token_type on every non-public route:
+       access     ∈ {public, authentication, authorization}
+       token_type ∈ {access, refresh}
+     (a protected route with no explicit access is treated as authorization/access.)
+  2. Wire BOTH typed-auth middleware via the registrar:
+       \$auth = StoneScriptPHP\\Auth\\Middleware\\AuthMiddlewareRegistrar::create(
+                   \$trustedIssuerVerifier, \$refreshTokenStore);
+       Application::run(['middleware' => [...\$auth], /* ... */]);
+  3. Provide a TrustedIssuerVerifier (issuer→key map) and a RefreshTokenStore
+     implementation (see InMemoryRefreshTokenStore for the contract).
+
+See UPGRADING-7.0.md for the full migration guide.
+TXT;
     }
 }

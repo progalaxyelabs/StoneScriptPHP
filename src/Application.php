@@ -287,14 +287,19 @@ class Application
         // PluginInterface precedence). Empty $plugins (the default) is a no-op merge.
         $router->loadRoutes(self::mergePluginRoutes($appRoutes, $plugins));
 
-        // Fail-closed wiring guard: if any route declares the typed access/refresh
-        // model but the pipeline is missing the matching AccessToken/RefreshToken
-        // middleware, refuse to boot rather than serve a silently-unprotected route.
-        // No-op for platforms that never adopt the typed model (no `access` routes).
-        \StoneScriptPHP\Auth\Middleware\AuthMiddlewareRegistrar::assertFullyWired(
-            $router->getGlobalMiddleware(),
-            $router->getRouteMeta()
-        );
+        // Fail-fast wiring guard (7.0.0, strict single-mode): if protected routes exist
+        // but the typed-auth middleware are not (fully) wired, refuse to boot rather
+        // than serve a silently-unprotected route. An un-migrated (old-schema) platform
+        // gets a CLEAR, ACTIONABLE migration error here — never a bare stack trace.
+        try {
+            \StoneScriptPHP\Auth\Middleware\AuthMiddlewareRegistrar::assertFullyWired(
+                $router->getGlobalMiddleware(),
+                $router->getRouteMeta()
+            );
+        } catch (\StoneScriptPHP\Auth\Middleware\AuthWiringException $e) {
+            self::renderBootConfigError($e->getMessage());
+            return;
+        }
 
         $response = $router->dispatch();
 
@@ -328,6 +333,30 @@ class Application
      *
      * CLI mode defines these automatically, but PHP-FPM does not.
      */
+    /**
+     * Emit a clean, controlled boot-configuration error (HTTP 500) instead of letting
+     * an uncaught exception surface as a bare stack trace. Used when the typed-auth
+     * wiring guard rejects an un-migrated / half-wired platform at boot: the full
+     * actionable message is logged AND returned in the JSON body so the operator sees
+     * exactly what to fix. This is a developer-facing boot misconfiguration, not a
+     * per-request error — the guidance is safe (and intended) to surface.
+     */
+    private static function renderBootConfigError(string $message): void
+    {
+        error_log('[StoneScriptPHP boot] ' . $message);
+        http_response_code(500);
+        if (!headers_sent()) {
+            header('Content-Type: application/json');
+        }
+        echo (new ApiResponse(
+            'error',
+            $message,
+            ['error' => 'auth_wiring_required'],
+            500
+        ))->toJson();
+        self::logRequest();
+    }
+
     private static function defineStdStreams(): void
     {
         if (!defined('STDIN')) {
