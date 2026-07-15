@@ -73,6 +73,51 @@ final class AuthMiddlewareRegistrar
     }
 
     /**
+     * Build the standalone single-token pipeline: {@see SingleTokenMiddleware}
+     * (access-token routes, no authn/authz purpose gate) + {@see RefreshTokenMiddleware}
+     * (refresh routes, unchanged). Use this INSTEAD of {@see create()} on a
+     * standalone + no-tenant platform (one principal, one signing key, no
+     * exchange step) — see SingleTokenMiddleware for the full rationale.
+     *
+     * The refresh half is identical to {@see create()}'s: single-token mode only
+     * relaxes the access-token PURPOSE check; refresh-token handling (stateful,
+     * DB-gated) is unchanged. Because SingleTokenMiddleware extends
+     * AccessTokenMiddleware, {@see assertFullyWired()} accepts this pipeline as
+     * fully protecting access-token routes.
+     *
+     * @param TrustedIssuerVerifier $verifier Issuer→key verifier (mandatory iss).
+     * @param RefreshTokenStore $store Refresh-token persistence gate.
+     * @param array{
+     *   refresh_purpose?: string|null,
+     *   header_name?: string,
+     *   body_field?: string
+     * } $options `access_purpose` is intentionally ignored — single-token mode
+     *   enforces no purpose. All other options match {@see create()}.
+     * @return array{0: SingleTokenMiddleware, 1: RefreshTokenMiddleware}
+     */
+    public static function createSingleToken(
+        TrustedIssuerVerifier $verifier,
+        RefreshTokenStore $store,
+        array $options = []
+    ): array {
+        return [
+            new SingleTokenMiddleware(
+                $verifier,
+                // Pass null purpose: SingleTokenMiddleware ignores the purpose gate
+                // entirely, so a constructor purpose would be inert (and misleading).
+                null,
+                $options['header_name'] ?? 'Authorization'
+            ),
+            new RefreshTokenMiddleware(
+                $verifier,
+                $store,
+                $options['refresh_purpose'] ?? null,
+                $options['body_field'] ?? 'refresh_token'
+            ),
+        ];
+    }
+
+    /**
      * Fail fast at boot if protected routes exist but the typed-auth middleware are
      * not (fully) wired. Distinguishes two failure modes with distinct, actionable
      * messages:
@@ -94,6 +139,9 @@ final class AuthMiddlewareRegistrar
         $hasAccessMw = false;
         $hasRefreshMw = false;
         foreach ($pipeline as $mw) {
+            // SingleTokenMiddleware extends AccessTokenMiddleware, so a standalone
+            // single-token pipeline is correctly recognised as protecting
+            // access-token routes (it enforces everything but the purpose gate).
             if ($mw instanceof AccessTokenMiddleware) {
                 $hasAccessMw = true;
             }

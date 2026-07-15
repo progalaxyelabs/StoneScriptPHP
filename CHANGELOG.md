@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.0] - 2026-07-16
+
+**Additive, backward-compatible.** Adds a standalone single-token auth mode for
+the standalone + no-tenant cell of the auth matrix (one principal, one signing
+key, no exchange). Nothing in the existing two-token (external / multi-tenant)
+path changes — the strict `AccessTokenMiddleware` purpose gate, the registrar's
+`create()`, and the boot-time wiring assertions are untouched.
+
+### Added — `SingleTokenMiddleware` + `AuthMiddlewareRegistrar::createSingleToken()`
+
+A standalone + no-tenant platform issues ONE login token that is BOTH the
+identity (passport) and the API bearer — there is no exchange step and no second
+signing authority. The two-token model's strict authn/authz `purpose` equality
+gate (a passport, `purpose=authentication`, is rejected 403 on an API route that
+requires `authorization`) forces such a platform to hand-roll a redundant
+same-key self-exchange purely to flip the `purpose` claim.
+
+- **`SingleTokenMiddleware`** (`src/Auth/Middleware/SingleTokenMiddleware.php`)
+  extends `AccessTokenMiddleware` and overrides only the purpose hook: it accepts
+  a valid, in-date, correctly-signed access token from the trusted issuer
+  REGARDLESS of its `purpose` claim. Every other check — signature, `iss`→key
+  selection, `exp`, and `type == access` (a refresh token still can never satisfy
+  an access route) — is retained exactly as strict. The identity-token-as-API-bearer
+  allowance is a deliberate exception scoped precisely to the standalone +
+  no-tenant cell (one principal, one key → nothing to separate).
+- **`AuthMiddlewareRegistrar::createSingleToken($verifier, $store, $options)`**
+  returns `[SingleTokenMiddleware, RefreshTokenMiddleware]` as a unit — refresh
+  routes stay protected exactly as in `create()`. Because `SingleTokenMiddleware`
+  extends `AccessTokenMiddleware`, `assertFullyWired()` recognises the pipeline as
+  fully protecting access-token routes; a single-token platform boots as fully
+  wired, not half-wired.
+
+### Changed — `AccessTokenMiddleware` purpose check extracted to an overridable hook
+
+The strict purpose-equality check moved into a `protected assertPurpose()` method
+(behaviour identical; `deny()` is now `protected`). This is the seam
+`SingleTokenMiddleware` overrides. No behavioural change for existing consumers.
+
 ## [7.0.0] - 2026-07-15
 
 **BREAKING RELEASE.** The typed access/token_type route model + typed-auth

@@ -98,9 +98,13 @@ class AccessTokenMiddleware implements MiddlewareInterface
             return $this->deny(401, 'Unauthorized: wrong token type (access token required)');
         }
 
-        // Strict purpose: must match the route's access requirement.
-        if (($claims[TokenClaims::CLAIM_PURPOSE] ?? null) !== $requiredPurpose) {
-            return $this->deny(403, 'Forbidden: token purpose does not match route');
+        // Strict purpose: must match the route's access requirement. Extracted to
+        // an overridable hook so SingleTokenMiddleware (standalone + no-tenant
+        // single-token mode) can accept EITHER purpose — one principal / one key
+        // means there is nothing to separate. See {@see SingleTokenMiddleware}.
+        $purposeDenial = $this->assertPurpose($claims, $requiredPurpose);
+        if ($purposeDenial !== null) {
+            return $purposeDenial;
         }
 
         // Populate the shared auth context + raw claims for the Require* guard family.
@@ -114,7 +118,28 @@ class AccessTokenMiddleware implements MiddlewareInterface
         return $next($request);
     }
 
-    private function deny(int $code, string $message): ApiResponse
+    /**
+     * Enforce the strict authn/authz purpose-equality gate: the token's
+     * `purpose` claim MUST equal the route's required purpose. Returns a 403
+     * denial on mismatch, or null to allow.
+     *
+     * Overridable: {@see SingleTokenMiddleware} returns null unconditionally
+     * (accept any valid purpose) — in the standalone + no-tenant cell there is
+     * one principal signed by one key, so the authn/authz separation does not
+     * exist and there is nothing to gate on. The base class keeps the strict
+     * gate for the two-token (external / multi-tenant) paths.
+     *
+     * @param array<string,mixed> $claims Verified token claims.
+     */
+    protected function assertPurpose(array $claims, string $requiredPurpose): ?ApiResponse
+    {
+        if (($claims[TokenClaims::CLAIM_PURPOSE] ?? null) !== $requiredPurpose) {
+            return $this->deny(403, 'Forbidden: token purpose does not match route');
+        }
+        return null;
+    }
+
+    protected function deny(int $code, string $message): ApiResponse
     {
         http_response_code($code);
         return new ApiResponse('error', $message, ['error' => 'unauthorized'], $code);
