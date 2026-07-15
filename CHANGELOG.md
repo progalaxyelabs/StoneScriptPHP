@@ -18,10 +18,9 @@ fails fast at boot with an actionable migration error. See **BREAKING CHANGES** 
 
 ### Fixed — CORS: fail-closed by default, allowed-origins.php actually wired up
 
-Found live during a progalaxy-platform browser test: a real Google-OAuth login
-completed server-side (200 OK) but the browser blocked reading the response —
-`Access-Control-Allow-Origin` was silently missing for a real, listed dev
-origin. Root cause was three compounding framework bugs, not one:
+A real Google-OAuth login completed server-side (200 OK) but the browser blocked
+reading the response — `Access-Control-Allow-Origin` was silently missing for a
+real, listed dev origin. Root cause was three compounding framework bugs, not one:
 
 - `Env::$ALLOWED_ORIGINS` defaulted to a hardcoded, generic
   `'http://localhost:3000,http://localhost:4200'` — silently wrong for any
@@ -69,12 +68,10 @@ Fix:
 
 Verified: 616/616 tests pass (600 pre-existing + 16 new, including a test
 that a config file calling `Env::get_instance()` is rejected without ever
-executing, not merely discouraged). Root cause was reproduced live against
-progalaxy-platform (missing `Access-Control-Allow-Origin` on both the
-`OPTIONS` preflight and the actual `POST /api/auth/exchange` for a real
-browser `Origin: http://localhost:3040` header) before this fix was written;
-re-verification against progalaxy-platform with this exact framework version
-is a separate, subsequent step — not yet done as of this commit.
+executing, not merely discouraged). The root cause was reproduced in a real
+browser (missing `Access-Control-Allow-Origin` on both the `OPTIONS` preflight
+and the actual `POST /api/auth/exchange` for an `Origin: http://localhost:3040`
+header) before the fix.
 
 ### Added — Typed auth-token model (access/refresh, authentication/authorization)
 
@@ -412,7 +409,7 @@ and phased rollout plan: `ROUTING-CONSOLIDATION-PLAN.md`.
   without a pre-existing valid access token (e.g. a token-refresh endpoint
   validated by its own body-supplied refresh token) were incorrectly gated
   by `JwtAuthMiddleware` requiring one first — an unsatisfiable requirement
-  for their actual purpose. Found live: progalaxy's `POST /user/refresh-access`
+  for their actual purpose. For example, a `POST /user/refresh-access` endpoint
   returned 401 "Missing authentication token" instead of ever reaching the
   handler's own refresh-token validation.
   - `RouteEntry` gained an `isPublic` field (default `false`, backward

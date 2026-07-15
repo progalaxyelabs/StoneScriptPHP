@@ -177,7 +177,7 @@ class RouteScopeTest extends TestCase
      * work without a pre-existing valid access token (e.g. a token-refresh
      * endpoint validated by its OWN body-supplied refresh token) to incorrectly
      * require one via JwtAuthMiddleware first — an unsatisfiable requirement for
-     * their actual purpose. Found live: progalaxy's POST /user/refresh-access.
+     * their actual purpose (e.g. a `POST /user/refresh-access` endpoint).
      */
     public function test_load_routes_flat_format_respects_per_route_is_public(): void
     {
