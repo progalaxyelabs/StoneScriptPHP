@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.1] - 2026-07-17
+
+**Bug fix, backward-compatible.** `Database::array_to_class_object()` now
+correctly hydrates a SQL `NULL` result column to PHP `null` when the target
+model property is declared nullable (e.g. `public ?string $token = null;`).
+
+### Fixed — nullable property NULL hydration
+
+Previously, the NULL branch reflected `ReflectionNamedType::allowsNull()` into
+a local variable but never used it: any non-`int`/non-`bool` property received
+`''` for a `NULL` column regardless of nullability, and non-nullable `int`/
+`bool` properties correctly received `0`/`false`. This meant a genuinely-NULL
+nullable column (e.g. an optional encrypted-token field) hydrated as an empty
+string instead of `null`, so `$row->prop !== null` checks on nullable
+properties incorrectly treated an absent value as present — silently passing
+`''` into any downstream code that expected either a real value or `null`
+(e.g. a decrypt routine, producing a "malformed ciphertext" failure rather
+than a clean not-set branch).
+
+- `array_to_class_object()` now checks `$p_type` nullability FIRST in the
+  `NULL` branch: nullable properties (of any type) are set to `null`.
+  Non-nullable properties keep the exact prior defaults (`int` → `0`,
+  `bool` → `false`, everything else → `''`) — no behavior change for
+  non-nullable properties.
+- Added regression tests: a nullable string property hydrates to `null` for a
+  SQL `NULL`; a non-nullable string property still hydrates to `''`; and
+  non-nullable `int`/`bool` properties still hydrate to `0`/`false`.
+
 ## [7.1.0] - 2026-07-16
 
 **Additive, backward-compatible.** Adds a standalone single-token auth mode for

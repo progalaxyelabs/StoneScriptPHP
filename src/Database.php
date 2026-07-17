@@ -393,7 +393,9 @@ class Database
 
             if ($row_key !== null) {
                 if ($row[$row_key] === null) {
-                    if ($p_type === 'int') {
+                    if ($p_nullable) {
+                        $instance->$p_name = null;
+                    } else if ($p_type === 'int') {
                         $instance->$p_name = 0;
                     } else if ($p_type === 'bool') {
                         $instance->$p_name = false;

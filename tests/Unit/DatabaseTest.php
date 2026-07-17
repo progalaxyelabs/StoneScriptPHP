@@ -165,6 +165,77 @@ class DatabaseTest extends TestCase
     }
 
     /**
+     * Regression guard: a SQL NULL for a NULLABLE typed property must hydrate
+     * to PHP null, not '' — the mapper previously ignored ReflectionType::
+     * allowsNull() in the NULL branch and always fell back to '' for any
+     * non-int/non-bool property, even when the property was declared
+     * nullable (e.g. `public ?string $o_encrypted_token = null;`). This
+     * caused callers doing `$row->prop !== null` to treat a genuinely-NULL
+     * column as present, passing '' into decrypt()/etc downstream.
+     */
+    public function test_array_to_class_object_hydrates_null_for_nullable_string(): void
+    {
+        $testClass = new class {
+            public ?string $o_encrypted_token = null;
+        };
+
+        $row = ['o_encrypted_token' => null];
+
+        $result = \StoneScriptPHP\Database::array_to_class_object(
+            'test_fn',
+            $row,
+            get_class($testClass)
+        );
+
+        $this->assertNull($result->o_encrypted_token);
+    }
+
+    /**
+     * A non-nullable string property must still get '' (unchanged behavior),
+     * even though a nullable property with the same underlying type now
+     * gets null. Verifies the fix is scoped to nullable properties only.
+     */
+    public function test_array_to_class_object_non_nullable_string_still_empty(): void
+    {
+        $testClass = new class {
+            public string $description = '';
+        };
+
+        $row = ['description' => null];
+
+        $result = \StoneScriptPHP\Database::array_to_class_object(
+            'test_fn',
+            $row,
+            get_class($testClass)
+        );
+
+        $this->assertSame('', $result->description);
+    }
+
+    /**
+     * Non-nullable int/bool properties must still get 0/false (unchanged
+     * behavior) — the nullability check must not affect these branches.
+     */
+    public function test_array_to_class_object_non_nullable_int_bool_unchanged(): void
+    {
+        $testClass = new class {
+            public int $count = 0;
+            public bool $enabled = false;
+        };
+
+        $row = ['count' => null, 'enabled' => null];
+
+        $result = \StoneScriptPHP\Database::array_to_class_object(
+            'test_fn',
+            $row,
+            get_class($testClass)
+        );
+
+        $this->assertSame(0, $result->count);
+        $this->assertFalse($result->enabled);
+    }
+
+    /**
      * Test that array_to_class_object converts PostgreSQL boolean 't' to true
      */
     public function test_array_to_class_object_converts_pg_bool_true(): void
