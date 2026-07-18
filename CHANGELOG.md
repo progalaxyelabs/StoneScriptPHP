@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.2] - 2026-07-18
+
+**Bug fix, backward-compatible.** External-mode tier-2 identity routes now
+register with the correct typed access (`authentication`) so the 7.x typed-auth
+`AccessTokenMiddleware` admits a passport on them. Required to make an
+external/card-model platform actually WORK under 7.x (not just boot) — surfaced
+by the first external-mode 7.x adoption (medstoreapp).
+
+### Fixed — external tier-2 routes were mis-typed as `authorization`
+
+Under 7.0.0's strict typed model, any registered route with no explicit `access`
+defaults to `access=authorization` (a card, `purpose=authorization`). But the
+framework's own external-auth **tier-2 identity routes** — `GET /me`,
+`POST /change-password`, `POST /select-tenant`, `POST /provision-tenant`,
+`POST /invite-member`, `GET /memberships`, `PUT /memberships/{id}` — consume a
+**passport** (`purpose=authentication`), never a tenant-scoped card. They are
+exactly the routes already listed in `ExternalAuthRoutes::protectedPaths()` (the
+`RequireCardMiddleware` "no card needed" exemption set). Left at the
+`authorization` default, `AccessTokenMiddleware` rejected a valid passport on
+them with a 403 purpose-mismatch — e.g. `MembershipsRoute`, which proxies the
+bearer straight to the auth service's JWKS-validated `/memberships`, could never
+receive the passport it forwards.
+
+- `ExternalAuthRoutes` now registers `/me` and `/change-password` with
+  `access: RouteAccess::AUTHENTICATION`.
+- `DefaultTenantRouteProvider` now registers `/select-tenant`,
+  `/provision-tenant`, `/invite-member`, `/memberships`, `/memberships/{id}`
+  with `access: RouteAccess::AUTHENTICATION`.
+- Pre-auth/proxy routes (`/login`, `/register`, `/exchange`, `/refresh-token`,
+  `/logout`, …) are unchanged — they stay `access=public`.
+
+No behaviour change for platforms below 7.0.0. Regression tests added in
+`tests/Unit/TenantRouteProviderSeamTest.php`.
+
 ## [7.1.1] - 2026-07-17
 
 **Bug fix, backward-compatible.** `Database::array_to_class_object()` now

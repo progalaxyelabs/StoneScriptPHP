@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Auth\ExternalAuth;
 
 use StoneScriptPHP\Routing\Router;
+use StoneScriptPHP\Routing\RouteAccess;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\RegisterRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\LoginRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\LogoutRoute;
@@ -185,11 +186,17 @@ class ExternalAuthRoutes
         // Protected routes (auth required)
 
         if ($config->isEnabled('change_password')) {
+            // Tier-2 identity route: consumes a PASSPORT (purpose=authentication),
+            // never a card. Typed access=authentication so the 7.x typed-auth
+            // AccessTokenMiddleware admits the passport (a card would be a purpose
+            // mismatch → 403). Mirrors this route's membership of protectedPaths()
+            // (the RequireCardMiddleware "no card needed" exemption list).
             $router->post(
                 "$prefix/change-password",
-                new ChangePasswordRoute($client, $config->hooks, $config)
+                new ChangePasswordRoute($client, $config->hooks, $config),
+                access: RouteAccess::AUTHENTICATION
             );
-            log_debug("ExternalAuthRoutes: Registered POST $prefix/change-password (protected)");
+            log_debug("ExternalAuthRoutes: Registered POST $prefix/change-password (protected, authentication)");
         }
 
         // select_tenant, provision_tenant, invite, memberships are tenant routes —
@@ -207,11 +214,16 @@ class ExternalAuthRoutes
         );
 
         if ($config->isEnabled('profile')) {
+            // Tier-2 identity route: consumes a PASSPORT (purpose=authentication).
+            // /me returns the cross-tenant session context (identity + available
+            // tenants/roles) resolved from the passport — it is NOT a tenant-scoped
+            // card route. Typed access=authentication (see change-password above).
             $router->get(
                 "$prefix/me",
-                new ProfileRoute($client, $config->hooks, $config, $rolesResolver, $tenantsResolver)
+                new ProfileRoute($client, $config->hooks, $config, $rolesResolver, $tenantsResolver),
+                access: RouteAccess::AUTHENTICATION
             );
-            log_debug("ExternalAuthRoutes: Registered GET $prefix/me (protected, card-model session)");
+            log_debug("ExternalAuthRoutes: Registered GET $prefix/me (protected, authentication session)");
         }
     }
 

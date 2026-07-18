@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Auth\ExternalAuth;
 
 use StoneScriptPHP\Routing\Router;
+use StoneScriptPHP\Routing\RouteAccess;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\SelectTenantRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\InviteMemberRoute;
@@ -50,42 +51,54 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
             log_debug("DefaultTenantRouteProvider: Registered POST $prefix/accept-invite");
         }
 
-        // Protected (tier-2) tenant routes.
+        // Protected (tier-2) tenant routes. These are IDENTITY routes: the caller
+        // presents a PASSPORT (purpose=authentication), never a tenant-scoped card —
+        // they operate BEFORE / ACROSS tenant selection (select/provision/invite/
+        // memberships all resolve against the identity, and memberships proxies the
+        // passport straight to the auth service's JWKS-validated endpoint). Typed
+        // access=authentication so the 7.x AccessTokenMiddleware admits the passport;
+        // a card here would be a purpose mismatch → 403. This mirrors their membership
+        // of protectedPaths() (the RequireCardMiddleware "no card needed" exemptions).
         if ($config->isEnabled('select_tenant')) {
             $router->post(
                 "$prefix/select-tenant",
-                new SelectTenantRoute($client, $config->hooks, $config)
+                new SelectTenantRoute($client, $config->hooks, $config),
+                access: RouteAccess::AUTHENTICATION
             );
-            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/select-tenant (protected)");
+            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/select-tenant (protected, authentication)");
         }
 
         if ($config->isEnabled('provision_tenant')) {
             $router->post(
                 "$prefix/provision-tenant",
-                new ProvisionTenantRoute($client, $config->hooks, $config, $provisioner)
+                new ProvisionTenantRoute($client, $config->hooks, $config, $provisioner),
+                access: RouteAccess::AUTHENTICATION
             );
-            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/provision-tenant (protected)");
+            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/provision-tenant (protected, authentication)");
         }
 
         if ($config->isEnabled('invite')) {
             $router->post(
                 "$prefix/invite-member",
-                new InviteMemberRoute($client, $config->hooks, $config)
+                new InviteMemberRoute($client, $config->hooks, $config),
+                access: RouteAccess::AUTHENTICATION
             );
-            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/invite-member (protected)");
+            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/invite-member (protected, authentication)");
         }
 
         if ($config->isEnabled('memberships')) {
             $router->get(
                 "$prefix/memberships",
-                new MembershipsRoute($client, $config->hooks, $config)
+                new MembershipsRoute($client, $config->hooks, $config),
+                access: RouteAccess::AUTHENTICATION
             );
             $router->addRoute(
                 'PUT',
                 "$prefix/memberships/{id}",
-                new UpdateMembershipRoute($client, $config->hooks, $config)
+                new UpdateMembershipRoute($client, $config->hooks, $config),
+                access: RouteAccess::AUTHENTICATION
             );
-            log_debug("DefaultTenantRouteProvider: Registered GET $prefix/memberships, PUT $prefix/memberships/{id} (protected)");
+            log_debug("DefaultTenantRouteProvider: Registered GET $prefix/memberships, PUT $prefix/memberships/{id} (protected, authentication)");
         }
     }
 

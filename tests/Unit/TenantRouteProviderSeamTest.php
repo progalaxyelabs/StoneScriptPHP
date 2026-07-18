@@ -228,4 +228,88 @@ class TenantRouteProviderSeamTest extends TestCase
         $this->assertArrayHasKey('/api/auth/login', $routes['POST']);
         $this->assertArrayHasKey('/api/auth/me', $routes['GET']);
     }
+
+    /**
+     * 7.1.2 typed-auth fix: the tier-2 IDENTITY routes registered by the default
+     * provider (select-tenant, provision-tenant, invite-member, memberships,
+     * memberships/{id}) consume a PASSPORT (purpose=authentication), never a
+     * tenant-scoped card. They MUST register with access=authentication so the
+     * 7.x AccessTokenMiddleware admits the passport — a card here is a purpose
+     * mismatch → 403. Regression guard for the external-mode 7.x boot/journey
+     * (medstoreapp #3194 pioneer; unblocks restrantapp #3195, #3196).
+     */
+    public function test_default_provider_registers_tier2_routes_as_authentication(): void
+    {
+        $config = new ExternalAuthConfig([
+            'select_tenant'    => true,
+            'provision_tenant' => true,
+            'invite'           => true,
+            'memberships'      => true,
+        ]);
+        $client = new ExternalAuthServiceClient($config->authServiceUrl, $config->platformCode);
+        $router = new Router();
+
+        (new DefaultTenantRouteProvider())->register(
+            $router,
+            '/api/auth',
+            $client,
+            $config,
+            null,
+            null,
+            null
+        );
+
+        $access = $this->accessByRoute($router);
+
+        $this->assertSame('authentication', $access['POST /api/auth/select-tenant'] ?? null);
+        $this->assertSame('authentication', $access['POST /api/auth/provision-tenant'] ?? null);
+        $this->assertSame('authentication', $access['POST /api/auth/invite-member'] ?? null);
+        $this->assertSame('authentication', $access['GET /api/auth/memberships'] ?? null);
+        $this->assertSame('authentication', $access['PUT /api/auth/memberships/{id}'] ?? null);
+    }
+
+    /**
+     * 7.1.2 typed-auth fix: ExternalAuthRoutes' own tier-2 identity routes
+     * (/me, /change-password) are access=authentication, while its pre-auth
+     * routes (/login, /register, /exchange, /refresh-token) stay access=public.
+     * This is the exact split an external-mode platform relies on to boot under
+     * 7.x AND route passports vs cards correctly at request time.
+     */
+    public function test_external_auth_routes_type_identity_vs_public_routes(): void
+    {
+        $router = new Router();
+
+        ExternalAuthRoutes::register($router, [
+            'prefix'          => '/api/auth',
+            'legacy_compat'   => false,
+            'change_password' => true,
+            'profile'         => true,
+        ]);
+
+        $access = $this->accessByRoute($router);
+
+        // Tier-2 identity routes → authentication (passport).
+        $this->assertSame('authentication', $access['GET /api/auth/me'] ?? null);
+        $this->assertSame('authentication', $access['POST /api/auth/change-password'] ?? null);
+
+        // Pre-auth / proxy routes → public.
+        $this->assertSame('public', $access['POST /api/auth/login'] ?? null);
+        $this->assertSame('public', $access['POST /api/auth/register'] ?? null);
+        $this->assertSame('public', $access['POST /api/auth/exchange'] ?? null);
+        $this->assertSame('public', $access['POST /api/auth/refresh-token'] ?? null);
+    }
+
+    /**
+     * Build a "METHOD path" => access lookup from a router's route metadata.
+     *
+     * @return array<string, string|null>
+     */
+    private function accessByRoute(Router $router): array
+    {
+        $map = [];
+        foreach ($router->getRouteMeta() as $meta) {
+            $map[$meta['method'] . ' ' . $meta['path']] = $meta['access'] ?? null;
+        }
+        return $map;
+    }
 }
