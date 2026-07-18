@@ -28,9 +28,20 @@ use StoneScriptPHP\Database;
  *
  *   // In index.php:
  *   'provisioner' => new AcmeProvisioner('acme', $env->SCHEMA_NAME, $env->DB_GATEWAY_URL, $env->DB_GATEWAY_ADMIN_TOKEN),
+ *
+ *   // Optional: pin a specific platform token instead of auto-provisioning one
+ *   // on every provision() call (see getPlatformToken() below):
+ *   'provisioner' => new AcmeProvisioner('acme', $env->SCHEMA_NAME, $env->DB_GATEWAY_URL, $env->DB_GATEWAY_ADMIN_TOKEN, platformToken: $env->DB_GATEWAY_PLATFORM_TOKEN),
  */
 abstract class TenantProvisioner
 {
+    /**
+     * Cached per-platform scoped bearer token (ssdb_pt_...), lazily resolved by
+     * getPlatformToken(). Either the explicit $platformToken constructor value,
+     * or the result of auto-provisioning via POST /admin/platform-token.
+     */
+    private ?string $resolvedPlatformToken = null;
+
     public function __construct(
         protected string $platformCode,
         protected string $schemaName,
@@ -38,6 +49,7 @@ abstract class TenantProvisioner
         protected string $adminToken,
         protected string $authServiceUrl = '',      // NEW: auth service HTTP URL
         protected string $platformSecret = '',       // NEW: X-Platform-Secret value
+        protected ?string $platformToken = null,     // NEW: explicit DB_GATEWAY_PLATFORM_TOKEN override
     ) {}
 
     /**
@@ -128,12 +140,23 @@ abstract class TenantProvisioner
      * platform-side fix that first uncovered this bug) so the payload shape and the
      * 409/success/failure handling are independently unit testable without a live gateway.
      *
-     * @throws \RuntimeException If the gateway returns a non-success, non-409 response
+     * IMPORTANT: gateway v4.1.0+ protects POST /admin/database/create with
+     * `platform_token_middleware` — it requires a per-platform scoped bearer token
+     * (ssdb_pt_...), NOT the shared admin token. Sending the admin token here gets a
+     * `403 unknown token` from the gateway (fleet-wide new-tenant-signup blocker fixed
+     * in 7.1.3 — see getPlatformToken()). This mirrors the CLI's
+     * resolveGatewayPlatformToken()/stepCreateDatabase() in cli/helpers/gateway-common.php,
+     * which deploy-manager's register-tenant/migrate-all-tenants steps already use
+     * successfully.
+     *
+     * @throws \RuntimeException If the gateway returns a non-success, non-409 response,
+     *                           or if a platform token cannot be resolved/provisioned.
      */
     protected function createDatabase(array $data): void
     {
         $payload = json_encode($this->buildCreateDatabasePayload($data));
-        [$httpCode, $response, $curlErr] = $this->postToGateway('/admin/database/create', $payload);
+        $platformToken = $this->getPlatformToken();
+        [$httpCode, $response, $curlErr] = $this->postToGateway('/admin/database/create', $payload, $platformToken);
 
         if ($response === false) {
             log_error("TenantProvisioner::createDatabase: gateway unreachable for tenant {$data['tenant_id']}: {$curlErr}");
@@ -152,6 +175,65 @@ abstract class TenantProvisioner
         }
 
         log_info("TenantProvisioner: Provisioned database for tenant {$data['tenant_id']} slug={$data['tenant_slug']}");
+    }
+
+    /**
+     * Resolve the per-platform scoped bearer token (ssdb_pt_...) required by
+     * gateway v4.1.0+ for platform-scoped admin operations (database create,
+     * migrate, migrate-all).
+     *
+     * Mirrors cli/helpers/gateway-common.php's resolveGatewayPlatformToken() /
+     * stepProvisionPlatformToken(), which is the exact flow deploy-manager's
+     * gateway:register-tenant / gateway:migrate-all-tenants CLI steps already use
+     * successfully in production.
+     *
+     * Resolution order:
+     *   1. Explicit constructor override ($platformToken, e.g. from
+     *      Env::DB_GATEWAY_PLATFORM_TOKEN) — preferred, avoids a round trip.
+     *   2. Cached value from a prior call within this instance's lifetime
+     *      (resolvedPlatformToken) — provision() only calls createDatabase() once,
+     *      but subclasses/tests may call getPlatformToken() more than once.
+     *   3. Auto-provision via POST /admin/platform-token using the admin token.
+     *      Idempotent on the gateway side (upsert — see
+     *      stonescriptdb-gateway/src/api/admin_platform_token.rs): a routine
+     *      redeploy or repeated provision() calls will NOT rotate an
+     *      already-issued token, so this is safe to call on every provision().
+     *
+     * @throws \RuntimeException If the gateway is unreachable, returns a
+     *                           non-2xx response, or omits the token field.
+     */
+    protected function getPlatformToken(): string
+    {
+        if ($this->platformToken !== null && $this->platformToken !== '') {
+            return $this->platformToken;
+        }
+
+        if ($this->resolvedPlatformToken !== null) {
+            return $this->resolvedPlatformToken;
+        }
+
+        $payload = json_encode(['platform' => $this->platformCode]);
+        [$httpCode, $response, $curlErr] = $this->postToGateway('/admin/platform-token', $payload, $this->adminToken);
+
+        if ($response === false) {
+            log_error("TenantProvisioner::getPlatformToken: gateway unreachable provisioning platform token for {$this->platformCode}: {$curlErr}");
+            throw new \RuntimeException("Failed to reach gateway to provision platform token: {$curlErr}");
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            log_error("TenantProvisioner: platform token provisioning failed (HTTP $httpCode): $response");
+            throw new \RuntimeException("Failed to provision platform token (HTTP $httpCode)");
+        }
+
+        $decoded = json_decode($response, true);
+        $token = $decoded['token'] ?? null;
+        if (!$token) {
+            log_error("TenantProvisioner: gateway returned success but no 'token' field provisioning platform token for {$this->platformCode}");
+            throw new \RuntimeException('Gateway returned success but no token field provisioning platform token');
+        }
+
+        $this->resolvedPlatformToken = $token;
+        return $token;
     }
 
     /**
@@ -186,11 +268,21 @@ abstract class TenantProvisioner
      * can stub the transport and assert on the outgoing payload + exercise the
      * 409/success/failure branches in createDatabase() without a live gateway.
      *
+     * @param string      $path        Gateway path, e.g. '/admin/database/create'.
+     * @param string      $payload     JSON request body.
+     * @param string|null $bearerToken Bearer token for the Authorization header.
+     *   Callers MUST pass the correct token for the target endpoint — gateway-wide
+     *   admin operations (POST /admin/platform-token) take the shared admin token;
+     *   platform-scoped operations (POST /admin/database/create) take the
+     *   per-platform token from getPlatformToken(). Defaults to $this->adminToken
+     *   for backward compatibility with any direct callers, but createDatabase()
+     *   always passes the resolved platform token explicitly.
      * @return array{0:int,1:string|false,2:string} [httpCode, response, curlError]
      */
-    protected function postToGateway(string $path, string $payload): array
+    protected function postToGateway(string $path, string $payload, ?string $bearerToken = null): array
     {
         $gatewayUrl = rtrim($this->gatewayUrl, '/');
+        $token = $bearerToken ?? $this->adminToken;
 
         $ch = curl_init("$gatewayUrl$path");
         curl_setopt_array($ch, [
@@ -199,7 +291,7 @@ abstract class TenantProvisioner
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER     => array_values(array_filter([
                 'Content-Type: application/json',
-                $this->adminToken ? "Authorization: Bearer {$this->adminToken}" : null,
+                $token ? "Authorization: Bearer {$token}" : null,
             ])),
             CURLOPT_TIMEOUT        => 30,
         ]);

@@ -26,6 +26,14 @@ class Env
     public ?string $DB_GATEWAY_TENANT_SCHEMA_NAME = null;
     public ?string $DB_GATEWAY_UUID = null;
     public ?string $DB_GATEWAY_ADMIN_TOKEN = null;
+    // Optional explicit override for the per-platform scoped bearer token
+    // (format ssdb_pt_...) gateway v4.1.0+ requires on POST /admin/database/create,
+    // POST /v2/migrate, POST /v2/migrate-all, GET /v2/migrate-all/{job_id}. When
+    // unset, TenantProvisioner auto-provisions + caches this token at runtime via
+    // POST /admin/platform-token using DB_GATEWAY_ADMIN_TOKEN — platforms do not
+    // need to set this unless they want to pin a specific token (e.g. to avoid the
+    // re-provision round trip, or after an explicit rotation).
+    public ?string $DB_GATEWAY_PLATFORM_TOKEN = null;
     public string $PLATFORM_ID = '';
     public string $SCHEMA_NAME = 'v1_0';
     public string $DATABASE_ID = 'main';
