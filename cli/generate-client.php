@@ -164,7 +164,7 @@ Options:
                         client/portal/   client/admin/
   --tenancy=<mode>    T3 (default) | T2 | T1
                       T3: multi-tenant/URL (e.g. a store or logistics platform)
-                      T2: tenant in JWT (e.g. an app-builder — no /tenant/{id} segment)
+                      T2: tenant in JWT (e.g. an analytics platform — no /tenant/{id} segment)
                       T1: no tenant scope
   --service=<name>    Generate only the named service package (default: all)
   --language=<lang>   typescript (only option in v4.0)

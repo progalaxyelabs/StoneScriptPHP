@@ -106,7 +106,7 @@ class ClientGeneratorScopeTest extends TestCase
         $routes = [
             ['path' => '/api/workspaces', 'handler' => 'A', 'service' => 'shared', 'alias' => false],
             ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'service' => 'shared', 'alias' => false],
-            ['path' => '/api/internal/chat/app-builder/response', 'handler' => 'C', 'service' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/chat/service/response', 'handler' => 'C', 'service' => 'shared', 'alias' => false],
         ];
 
         $filtered = $this->filterRoutesByService($routes, null);
@@ -115,7 +115,7 @@ class ClientGeneratorScopeTest extends TestCase
         $this->assertCount(1, $filtered);
         $this->assertContains('/api/workspaces', $paths);
         $this->assertNotContains('/api/internal/workspace-events', $paths);
-        $this->assertNotContains('/api/internal/chat/app-builder/response', $paths);
+        $this->assertNotContains('/api/internal/chat/service/response', $paths);
     }
 
     public function test_filter_excludes_internal_routes_even_with_matching_service(): void
@@ -125,7 +125,7 @@ class ClientGeneratorScopeTest extends TestCase
         $routes = [
             ['path' => '/api/workspaces', 'handler' => 'A', 'service' => 'portal', 'alias' => false],
             ['path' => '/api/internal/workspace-events', 'handler' => 'B', 'service' => 'portal', 'alias' => false],
-            ['path' => '/api/internal/chat/app-builder/response', 'handler' => 'C', 'service' => 'shared', 'alias' => false],
+            ['path' => '/api/internal/chat/service/response', 'handler' => 'C', 'service' => 'shared', 'alias' => false],
         ];
 
         $filtered = $this->filterRoutesByService($routes, 'portal');
@@ -134,7 +134,7 @@ class ClientGeneratorScopeTest extends TestCase
         $this->assertCount(1, $filtered);
         $this->assertContains('/api/workspaces', $paths);
         $this->assertNotContains('/api/internal/workspace-events', $paths);
-        $this->assertNotContains('/api/internal/chat/app-builder/response', $paths);
+        $this->assertNotContains('/api/internal/chat/service/response', $paths);
     }
 
     public function test_filter_internal_prefix_is_exact_prefix_match(): void

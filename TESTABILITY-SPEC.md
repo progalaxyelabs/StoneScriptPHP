@@ -161,7 +161,7 @@ effort. Status column is for tracking as these get implemented one at a time.
 |----|---|---|---|---|---|
 | **T3-1** | Ship a shared `SqlFunctionTestCase` base class: provisions/tears down a disposable tenant DB (or wraps each test in a transaction rollback) against `DB_GATEWAY_URL`, so platforms stop hand-rolling this per repo. | A platform can test one `.pgsql` function in ≤15 lines against a real, isolated DB state, with automatic cleanup. | P2 | M | Not started |
 | **T3-2** | Formalize `php stone migrate verify` as a CI gate, with a documented recipe: create disposable tenant → migrate → verify → drop, reusing existing `gateway:register-tenant`/`gateway:migrate-tenant` commands. | A documented, copy-pasteable CI step exists; at least one platform's pipeline runs it. | P2 | S | Not started |
-| **T3-3** | Explicit guard: T2-1's fake-DB seam must be clearly separated from Tier 3 (no accidental "fake DB" use inside what's meant to be a real-DB integration test). | Test naming/directory convention (`tests/Unit/` vs `tests/Integration/`) enforces this; document it here and in `CLAUDE.md`/agent instructions. | P2 | S | Not started (depends on T2-1) |
+| **T3-3** | Explicit guard: T2-1's fake-DB seam must be clearly separated from Tier 3 (no accidental "fake DB" use inside what's meant to be a real-DB integration test). | Test naming/directory convention (`tests/Unit/` vs `tests/Integration/`) enforces this; document it here and in the contributor guide. | P2 | S | Not started (depends on T2-1) |
 
 ---
 

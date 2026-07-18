@@ -853,7 +853,7 @@ built-in server in a `php:8.3-cli-bookworm` container) and confirmed:
 ### Fixed
 
 - **Test-suite hygiene: resolved all 5 pre-existing `Unit` test failures/errors/warnings
-  instead of deferring them again.** Three agents earlier today waved these off as
+  instead of deferring them again.** These had repeatedly been waved off as
   "pre-existing baseline, no regression from my change." Investigated and fixed each:
 
   1. **`DatabaseTest::test_copy_from_returns_boolean` / `test_query_returns_string`
