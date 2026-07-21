@@ -684,6 +684,24 @@ explicit rollout step in §5. `ExternalAuthServiceClient::inviteMember()` and
 `createMembershipForInvite()`, and removed once no platform's `composer.lock`
 pins a version older than the deprecation.
 
+**Update (2026-07-21, same day):** the two routes were removed in `v7.2.0`
+(see `CHANGELOG.md`), and `progalaxyelabs-auth` v4.0.0 removed the endpoints
+they proxied to, same day — so this ordering concern is now moot; there is no
+platform left calling either.
+
+**A related, easy-to-rediscover trap:** `ngx-stonescriptphp-client` (the
+shared Angular client) had an in-progress `AcceptInviteComponent` drafted
+earlier the SAME day, built against the old central
+`POST {prefix}/accept-invite` contract this section removes. It was never
+merged to `main` — see branch `archive/pre-platform-owned-accept-invite` on
+that repo for the abandoned work + full writeup in its commit message. **Do
+not resurrect it by re-adding `AuthService.acceptInvite()`** — a shared
+component posting to one fixed central path cannot work under this doc's
+platform-owned model at all (the accept-invite URL is now platform-specific,
+e.g. aasaanwork's `POST /portal/tenant/{tenantId}/invitations/{token}/accept`
+per §4.2). If a shared "accept invite" UI helper is ever built, it needs to
+accept a platform-supplied URL, not assume one.
+
 ---
 
 ## 5. Migration / rollout plan (framework-focused; full per-platform plan is out of
