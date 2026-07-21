@@ -1,0 +1,302 @@
+<?php
+
+declare(strict_types=1);
+
+namespace StoneScriptPHP\Auth\Invitations;
+
+use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
+use StoneScriptPHP\Auth\TokenExchangeException;
+use StoneScriptPHP\Auth\TokenExchangeService;
+
+/**
+ * InvitationCompletionService
+ *
+ * The generic, correctness-sensitive accept-invite orchestration piece —
+ * design doc §3.4 steps 1-4 and 7-9. Ships IN the framework (unlike the
+ * table/routes/repository, which are generated per-platform by
+ * `php stone generate invitations`) because this logic — token-hash lookup,
+ * expiry/status checks, passport JWKS validation, the email-match guard, the
+ * `create-membership` server-to-server call, and card-minting/passthrough —
+ * is identical across every platform and is exactly the kind of
+ * correctness-sensitive plumbing that should not be re-implemented (and
+ * re-audited) per platform.
+ *
+ * What this class deliberately does NOT do, per the constraint in design doc
+ * §0 ("roles belong in api/platform") and §4.2's own framing — it never
+ * decides a role, and it never writes tenant-side membership data itself.
+ * Both are supplied by the caller as closures (`$roleResolver`,
+ * `$membershipWriter`), generated per-platform in `config/invitations.php`.
+ * This keeps "roles belong in api/platform" intact even inside shared
+ * framework code — the service orchestrates, the platform decides.
+ *
+ * @package StoneScriptPHP\Auth\Invitations
+ */
+class InvitationCompletionService
+{
+    public function __construct(
+        private readonly TokenExchangeService $tokenExchangeService,
+        private readonly ExternalAuthServiceClient $authClient,
+    ) {
+    }
+
+    /**
+     * Run the full accept-invite sequence (design doc §3.4).
+     *
+     * @param string $rawToken Raw invite token from the URL/path param —
+     *   NEVER the hash. Hashed internally before any repository lookup.
+     * @param string $passportToken Bearer identity token (passport) issued
+     *   by the auth service — the caller extracts this from the inbound
+     *   `Authorization: Bearer <token>` header (see the generated
+     *   `PostAcceptInvitationRoute`, which is registered PUBLIC precisely
+     *   because this is a passport, not a platform card — mirrors
+     *   `ExchangeRoute`'s own public+JWKS-validated pattern).
+     * @param InvitationRepositoryInterface $repository Platform's generated
+     *   repository, backed by the `platform_invitations` table.
+     * @param callable $roleResolver `fn(InvitationRecord $invitation): string`
+     *   — decides the role actually granted. Design doc §3.4 step 5: role
+     *   authority lives in `platform_invitations.role`, never an auth claim
+     *   — the generated default simply returns `$invitation->role` as-is;
+     *   this seam exists so a platform can re-validate/re-map at accept
+     *   time without this service ever hardcoding that policy.
+     * @param callable $membershipWriter
+     *   `fn(InvitationRecord $invitation, array $passportClaims, string $role): array`
+     *   — writes THIS platform's own tenant-membership record (step 6) and
+     *   MUST return an array containing at least a `tenant_id` string key;
+     *   every other key is passed through into the response's `membership`
+     *   field as-is.
+     * @param array{jwks_url: string, issuer: string, audience?: string|null} $authConfig
+     *   Passport (JWKS) validation config, forwarded to
+     *   `TokenExchangeService::validateIdentityToken()`.
+     * @param array{
+     *   platform_secret: string|null,
+     *   platform_code?: string|null,
+     *   tenant_db_schema?: string|null,
+     *   card?: bool,
+     *   signing_private_key_path?: string|null,
+     *   signing_private_key_passphrase?: string|null,
+     *   signing_issuer?: string|null,
+     *   ttl?: int
+     * } $platformConfig
+     *   `card` selects T2 (mint a local card, design doc §3.4.2) vs T3
+     *   (passthrough identity token + tenant_id, unchanged per §3.4.2's own
+     *   conclusion that the existing T3 contract already matches this
+     *   design). Defaults to T2 (`card` => true) when omitted.
+     * @return array Response envelope — see class docblock's two shapes
+     *   under "Response shapes" below.
+     * @throws InvitationException On any of the taxonomy failures (design
+     *   doc §3.4 steps 1, 2, 4) or on a downstream failure calling auth
+     *   (`MEMBERSHIP_FAILED`) / missing config (`CONFIG_ERROR`).
+     *
+     * Response shapes:
+     *   T2 (card):  ['mode'=>'card', 'access_token', 'token_type', 'expires_in',
+     *                'identity'=>[...], 'membership'=>[...]]
+     *   T3 (passthrough): ['mode'=>'passthrough', 'identity_token', 'tenant_id',
+     *                'identity'=>[...], 'membership'=>[...]]
+     */
+    public function complete(
+        string $rawToken,
+        string $passportToken,
+        InvitationRepositoryInterface $repository,
+        callable $roleResolver,
+        callable $membershipWriter,
+        array $authConfig,
+        array $platformConfig
+    ): array {
+        // Step 1 (§3.4): look up by sha256(token) — never the raw token.
+        $tokenHash = hash('sha256', $rawToken);
+        $invitation = $repository->findByTokenHash($tokenHash);
+        if ($invitation === null) {
+            throw new InvitationException('Invitation not found', InvitationException::NOT_FOUND, 404);
+        }
+
+        // Step 2 (§3.4): status + expiry.
+        if ($invitation->status !== 'pending') {
+            throw new InvitationException('Invitation has already been used', InvitationException::ALREADY_USED, 409);
+        }
+        if ($this->isExpired($invitation->expiresAt)) {
+            throw new InvitationException('Invitation has expired', InvitationException::EXPIRED, 410);
+        }
+
+        // Step 3 (§3.4): validate the passport via JWKS. Read-only — no
+        // auth DB write, no auth DB read even (JWKS is a published key set).
+        try {
+            $passportClaims = $this->tokenExchangeService->validateIdentityToken(
+                $passportToken,
+                $authConfig['jwks_url'],
+                $authConfig['issuer'],
+                $authConfig['audience'] ?? null
+            );
+        } catch (TokenExchangeException $e) {
+            throw new InvitationException(
+                'Invalid or expired session: ' . $e->getMessage(),
+                InvitationException::INVALID_PASSPORT,
+                401,
+                $e
+            );
+        }
+
+        // Step 4 (§3.4): email-match guard. This failure mode is a direct
+        // emergent consequence of decoupling identity creation from
+        // invitation acceptance (design doc §6 item 3) — it did not exist
+        // when auth owned both sides of accept-invite.
+        $claimedEmail = strtolower(trim((string) ($passportClaims['email'] ?? '')));
+        $invitedEmail = strtolower(trim($invitation->email));
+        if ($claimedEmail === '' || $claimedEmail !== $invitedEmail) {
+            throw new InvitationException(
+                'This invitation was sent to a different email address',
+                InvitationException::EMAIL_MISMATCH,
+                403
+            );
+        }
+
+        $identityId = (string) ($passportClaims['sub'] ?? $passportClaims['identity_id'] ?? '');
+        if ($identityId === '') {
+            throw new InvitationException(
+                'Passport is missing an identity id',
+                InvitationException::INVALID_PASSPORT,
+                401
+            );
+        }
+
+        // Step 5 (§3.4): role decision — platform-owned, never this service.
+        $role = $roleResolver($invitation);
+
+        // Step 6 (§3.4): platform's own tenant-membership write — also
+        // platform-owned. Must return at least ['tenant_id' => string].
+        $membershipData = $membershipWriter($invitation, $passportClaims, $role);
+        $tenantId = (string) ($membershipData['tenant_id'] ?? '');
+        if ($tenantId === '') {
+            throw new InvitationException(
+                'membership_writer did not return a tenant_id',
+                InvitationException::CONFIG_ERROR,
+                500
+            );
+        }
+
+        // Step 7 (§3.4): mark accepted. Steps 1-2 and 5-7 never touch auth.
+        $repository->markAccepted($invitation->id, $identityId);
+
+        // Step 8 (§3.4): the ONLY outbound call to auth — carries no
+        // invitation data, only the resulting membership fact. §3.4.1:
+        // role is deliberately never sent (createMembershipForInvite()
+        // enforces this even if a caller mistakenly includes it).
+        $platformSecret = $platformConfig['platform_secret'] ?? null;
+        if (empty($platformSecret)) {
+            throw new InvitationException(
+                'Server configuration error: platform_secret is not configured',
+                InvitationException::CONFIG_ERROR,
+                500
+            );
+        }
+
+        try {
+            $membershipResult = $this->authClient->createMembershipForInvite([
+                'identity_id'      => $identityId,
+                'tenant_id'        => $tenantId,
+                'platform_code'    => $platformConfig['platform_code'] ?? null,
+                'tenant_db_schema' => $platformConfig['tenant_db_schema'] ?? null,
+                'email'            => $invitation->email,
+            ], $platformSecret);
+        } catch (\Throwable $e) {
+            throw new InvitationException(
+                'Failed to notify auth of the new membership: ' . $e->getMessage(),
+                InvitationException::MEMBERSHIP_FAILED,
+                502,
+                $e
+            );
+        }
+
+        $identity = [
+            'id'           => $identityId,
+            'email'        => $passportClaims['email'] ?? $invitation->email,
+            'display_name' => $passportClaims['display_name'] ?? $passportClaims['name'] ?? null,
+        ];
+        $membership = array_merge($membershipData, [
+            'role' => $role,
+            'id'   => $membershipData['id'] ?? ($membershipResult['membership_id'] ?? null),
+        ]);
+
+        // Step 9 (§3.4 / §3.4.2): T2 mints a local card (same pattern as
+        // ProvisionTenantRoute::mintProvisionCard()); T3 passes through the
+        // identity token + explicit tenant_id, matching AUTH-SPEC §6b's
+        // existing T3 response shape unchanged.
+        $wantsCard = $platformConfig['card'] ?? true;
+        if ($wantsCard) {
+            $cardToken = $this->mintCard($identityId, $tenantId, $role, $identity, $platformConfig);
+
+            return [
+                'mode'         => 'card',
+                'access_token' => $cardToken ?? ($membershipResult['access_token'] ?? null),
+                'token_type'   => 'Bearer',
+                'expires_in'   => $platformConfig['ttl'] ?? 3600,
+                'identity'     => $identity,
+                'membership'   => $membership,
+            ];
+        }
+
+        return [
+            'mode'           => 'passthrough',
+            'identity_token' => $membershipResult['access_token'] ?? $passportToken,
+            'tenant_id'      => $tenantId,
+            'identity'       => $identity,
+            'membership'     => $membership,
+        ];
+    }
+
+    /**
+     * @param string $expiresAt Raw `expires_at` value from the invitation
+     *   row (TIMESTAMPTZ -> string, per generate-model.php's type mapping).
+     */
+    private function isExpired(string $expiresAt): bool
+    {
+        try {
+            $expiry = new \DateTimeImmutable($expiresAt);
+        } catch (\Exception $e) {
+            // Unparseable expiry is treated as expired — fail closed, never open.
+            return true;
+        }
+
+        return $expiry < new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+    }
+
+    /**
+     * Mint a platform card token, mirroring
+     * ProvisionTenantRoute::mintProvisionCard() verbatim (same config keys,
+     * same null-on-not-configured fallback condition) — design doc §3.4.2.
+     *
+     * @param array{id: string, email: string|null, display_name: string|null} $identity
+     */
+    private function mintCard(
+        string $identityId,
+        string $tenantId,
+        string $role,
+        array $identity,
+        array $platformConfig
+    ): ?string {
+        $privateKeyPath = $platformConfig['signing_private_key_path'] ?? null;
+        if (empty($privateKeyPath)) {
+            return null;
+        }
+
+        $claims = [
+            'sub'           => $identityId,
+            'identity_id'   => $identityId,
+            'tenant_id'     => $tenantId,
+            'email'         => $identity['email'] ?: null,
+            'display_name'  => $identity['display_name'] ?: null,
+            'platform_code' => $platformConfig['platform_code'] ?? null,
+        ];
+
+        try {
+            return $this->tokenExchangeService->exchangeCard($claims, $role, [
+                'private_key_path'       => $privateKeyPath,
+                'private_key_passphrase' => $platformConfig['signing_private_key_passphrase'] ?? null,
+                'issuer'                 => $platformConfig['signing_issuer'] ?? '',
+                'ttl'                    => $platformConfig['ttl'] ?? 3600,
+            ]);
+        } catch (TokenExchangeException $e) {
+            log_error('InvitationCompletionService: card minting failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+}

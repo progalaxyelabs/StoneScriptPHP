@@ -5,7 +5,51 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.2.0] - 2026-07-21
+
+**Real, live-breaking fix + new opt-in feature.** progalaxyelabs-auth removed
+its invitation system entirely (`POST /api/memberships/invite`,
+`POST /api/memberships/accept-invite`, `POST /api/auth/accept-invite`,
+`POST /api/internal/invite-member` are gone in every environment as of
+2026-07-21). This framework's `invite-member`/`accept-invite` proxy routes
+were pointing at those now-dead endpoints for every platform still on
+framework defaults. See `DESIGN-invitation-system.md` in this repo for the
+full design rationale.
+
+### Removed — `invite`/`accept_invite` framework defaults
+
+- `DefaultTenantRouteProvider` no longer registers `POST {prefix}/invite-member`
+  or `POST {prefix}/accept-invite` — the auth-service endpoints they proxied
+  to no longer exist, so there is no configuration under which re-enabling
+  them would work.
+- `src/Auth/ExternalAuth/Routes/InviteMemberRoute.php` and
+  `AcceptInviteRoute.php` deleted.
+- `ExternalAuthConfig`'s `invite`/`accept_invite` feature toggles and the
+  `after_accept_invite` hook removed (both are now no-ops if still passed).
+- `ExternalAuthServiceClient::inviteMember()` / `::acceptInvite()` marked
+  `@deprecated` (kept for SemVer compatibility only — always fail at
+  runtime now, since the endpoints they call are gone).
+
+### Added — `php stone generate invitations`
+
+- New CLI command scaffolds a platform-owned invitation system (table
+  migration, 3 SQL functions + their `php stone generate model` wrappers,
+  3 route handlers, a generated repository, `config/invitations.php`) into
+  the CONSUMING platform's own repo — same precedent as
+  `php stone generate auth:*`. progalaxyelabs-auth owns zero invitation
+  data; its only involvement is the pre-existing, unchanged
+  `POST /api/internal/create-membership` server-to-server call.
+- New framework-shipped `StoneScriptPHP\Auth\Invitations\InvitationCompletionService`
+  — the generic, correctness-sensitive accept-invite orchestration (token-hash
+  lookup, expiry/status checks, passport JWKS validation, the
+  `invite_email_mismatch` guard, the `create-membership` call, T2 card
+  minting / T3 passthrough). Ships in the framework so every adopting
+  platform gets this correctness for free, without a shared default route
+  forcing one role model on every platform.
+- New `ExternalAuthServiceClient::createMembershipForInvite()` — thin
+  wrapper over the existing `createMembership()` that deliberately never
+  sends a `role` key (role authority lives 100% in the platform's own
+  `platform_invitations.role`, never in anything auth stores).
 
 ## [7.1.2] - 2026-07-18
 

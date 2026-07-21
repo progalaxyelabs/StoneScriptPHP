@@ -65,6 +65,13 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
      * With default options (canonical prefix /api/auth, legacy_compat true by
      * default, provision_tenant explicitly enabled), the exact tier-2 route set
      * used to fix the 2026-07-05 fleet incident (RequireCardMiddleware) must be present.
+     *
+     * `/api/auth/invite-member` was part of this set until 2026-07-21, when
+     * `invite`/`accept_invite` were removed from DefaultTenantRouteProvider
+     * (the auth-service endpoints they proxied to no longer exist — see that
+     * class's docblock and DESIGN-invitation-system.md §1.3/§4.3). Asserting
+     * its ABSENCE now, deliberately — a regression that silently re-adds a
+     * proxy to a dead auth endpoint should fail this test.
      */
     public function test_default_options_return_the_full_tier2_route_set(): void
     {
@@ -73,7 +80,7 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
         $this->assertContains('/api/auth/select-tenant', $paths);
         $this->assertContains('/api/auth/provision-tenant', $paths);
         $this->assertContains('/api/auth/change-password', $paths);
-        $this->assertContains('/api/auth/invite-member', $paths);
+        $this->assertNotContains('/api/auth/invite-member', $paths);
         $this->assertContains('/api/auth/memberships', $paths);
         $this->assertContains('/api/auth/me', $paths);
     }
@@ -95,7 +102,6 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
         $this->assertContains('/auth/select-tenant', $paths, 'legacy prefix must be included by default');
         $this->assertContains('/auth/provision-tenant', $paths, 'legacy prefix must be included by default');
         $this->assertContains('/auth/change-password', $paths, 'legacy prefix must be included by default');
-        $this->assertContains('/auth/invite-member', $paths, 'legacy prefix must be included by default');
         $this->assertContains('/auth/memberships', $paths, 'legacy prefix must be included by default');
         $this->assertContains('/auth/me', $paths, 'legacy prefix must be included by default');
     }

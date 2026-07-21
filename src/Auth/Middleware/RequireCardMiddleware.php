@@ -38,8 +38,11 @@ use StoneScriptPHP\ApiResponse;
  *
  * Before the third bullet existed, this middleware had ZERO path awareness — it 403'd
  * ANY authenticated-but-tenantless request, including `ExternalAuthRoutes`' own tier-2
- * routes (`provision-tenant`, `select-tenant`, `change-password`, `invite-member`,
- * `memberships`, `me` — routes that intentionally take a passport, never a card). This
+ * routes (`provision-tenant`, `select-tenant`, `change-password`, `memberships`, `me` —
+ * routes that intentionally take a passport, never a card; `invite-member` was also one
+ * of these tier-2 routes at the time of this incident, but was removed 2026-07-21 along
+ * with the rest of the framework's invite/accept-invite proxy — see
+ * `DefaultTenantRouteProvider`'s class docblock). This
  * was latent on a platform whose `JwtAuthMiddleware` didn't reliably populate
  * `jwt_claims` (a separate, since-fixed bug that accidentally masked it), and broke every
  * new user's first "create organization" call the moment that masking bug was fixed.

@@ -61,8 +61,11 @@ use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
  *       'tenant_url_match' => ['enabled' => true, 'param' => 'tenantId'],
  *       // Optional (S5.1 tenant-less token cannot authorize a tenant-scoped route).
  *       // Safe to enable globally -- auto-exempts ExternalAuthRoutes' own tier-2
- *       // routes (provision-tenant, select-tenant, change-password, invite-member,
+ *       // routes (provision-tenant, select-tenant, change-password,
  *       // memberships, me) so a valid passport is never wrongly rejected on them.
+ *       // (invite-member was also on this list until 2026-07-21, when it was
+ *       // removed along with the rest of the framework's invite/accept-invite
+ *       // proxy — see DefaultTenantRouteProvider's class docblock.)
  *       // Prefer this over manually constructing `new RequireCardMiddleware()` in
  *       // 'middleware' -- the manual form has no exemption list and WILL 403 every
  *       // one of those routes the moment JwtAuthMiddleware populates jwt_claims for
@@ -230,8 +233,10 @@ class Application
         // used bare (`new RequireCardMiddleware()`, the previously-documented usage), has
         // zero path awareness — it 403s ANY authenticated-but-tenantless request, which
         // includes ExternalAuthRoutes' own tier-2 routes (provision-tenant, select-tenant,
-        // change-password, invite-member, memberships, me — routes that intentionally take
-        // a passport, never a card). Wiring it globally via THIS config key auto-derives the
+        // change-password, memberships, me — routes that intentionally take a passport,
+        // never a card; invite-member was also one of these until it was removed
+        // 2026-07-21, see DefaultTenantRouteProvider's class docblock). Wiring it
+        // globally via THIS config key auto-derives the
         // exemption list from ExternalAuthRoutes::protectedPaths($authRouteOptions) — the
         // same config that defines those routes — so the list can never drift out of sync
         // with what's actually registered, and a platform never has to hand-maintain it.

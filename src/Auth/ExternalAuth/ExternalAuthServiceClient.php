@@ -237,6 +237,16 @@ class ExternalAuthServiceClient extends AuthServiceClient
     /**
      * Accept a membership invitation
      *
+     * @deprecated Since 2026-07-21: `POST /api/auth/accept-invite` no longer
+     *   exists on the auth service — the invitation system moved fully
+     *   platform-side (see DESIGN-invitation-system.md §0/§1.3 in this
+     *   repo). Calling this method will always fail with a 404/connection
+     *   error. Use `php stone generate invitations` +
+     *   {@see \StoneScriptPHP\Auth\Invitations\InvitationCompletionService}
+     *   instead. Kept (not deleted) only for SemVer compatibility with any
+     *   external caller that references this method directly — see design
+     *   doc §4.3/§5 step 4 for the removal criteria.
+     *
      * @param string $token Invitation token
      * @param string|null $password Password (for new users)
      * @return array Auth service response
@@ -314,6 +324,41 @@ class ExternalAuthServiceClient extends AuthServiceClient
         ]);
     }
 
+    /**
+     * Create a tenant membership as a result of an invitation being
+     * accepted (design doc §3.4 step 8 / §3.4.1 / §4.2).
+     *
+     * Thin wrapper over {@see createMembership()} that deliberately NEVER
+     * sends a `role` key, even if the caller's `$data` includes one — this
+     * is intentional, not an oversight (design doc §3.4.1): role authority
+     * for invite-driven memberships lives 100% in the platform's own
+     * `platform_invitations.role` column (never in anything auth stores or
+     * returns), so sending it would be a pure write-without-read into a
+     * field this design's own constraint says auth must not own. Auth's
+     * `tenant_memberships.role` will show its own default ("owner") for
+     * invite-created memberships as a result — a known, accepted cosmetic
+     * inaccuracy in auth's storage (design doc §3.4.1 / §6 item 1), not a
+     * bug in this method.
+     *
+     * Unlike `createMembership()` (still used, unchanged, by
+     * `ProvisionTenantRoute` with an explicit structural `role: 'owner'` —
+     * that call is a constant, not invitation data, so it is NOT affected
+     * by this omission), this entry point exists specifically so a future
+     * reviewer sees the `role` omission is deliberate.
+     *
+     * @param array $data Membership data — identity_id, tenant_id,
+     *   platform_code, tenant_db_schema, email, etc. Any `role`/`roles` key
+     *   present is stripped before the call.
+     * @param string $platformSecret X-Platform-Secret header value
+     * @return array Auth service response with membership + tokens
+     * @throws AuthServiceException
+     */
+    public function createMembershipForInvite(array $data, string $platformSecret): array
+    {
+        unset($data['role'], $data['roles']);
+        return $this->createMembership($data, $platformSecret);
+    }
+
     // ──────────────────────────────────────────────
     // Protected (authenticated) endpoints
     // ──────────────────────────────────────────────
@@ -335,6 +380,14 @@ class ExternalAuthServiceClient extends AuthServiceClient
 
     /**
      * Invite a member to a tenant
+     *
+     * @deprecated Since 2026-07-21: `POST /api/auth/invite` no longer
+     *   exists on the auth service — invitation CREATION also moved fully
+     *   platform-side (design doc §0/§1.3/§2). Calling this method will
+     *   always fail. Use `php stone generate invitations`'s generated
+     *   `PostCreateInvitationRoute` (writes to this platform's own
+     *   `platform_invitations` table) instead. Kept for SemVer
+     *   compatibility only — see §4.3/§5 step 4 for removal criteria.
      *
      * @param string $email Invitee's email
      * @param string $tenantId Tenant ID

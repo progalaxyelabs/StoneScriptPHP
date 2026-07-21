@@ -8,11 +8,9 @@ use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Routing\RouteAccess;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\SelectTenantRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
-use StoneScriptPHP\Auth\ExternalAuth\Routes\InviteMemberRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\UpdateMembershipRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\MembershipsRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\CheckTenantSlugRoute;
-use StoneScriptPHP\Auth\ExternalAuth\Routes\AcceptInviteRoute;
 
 /**
  * DefaultTenantRouteProvider
@@ -26,6 +24,22 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\AcceptInviteRoute;
  * `ExternalAuthConfig` uses this as the default `tenantRouteProvider` — a
  * platform that never touches the new `tenant_route_provider` option gets
  * byte-for-byte identical route registration to pre-Phase-1 StoneScriptPHP.
+ *
+ * REMOVED 2026-07-21 (real, live-breaking fix — see
+ * DESIGN-invitation-system.md §1.3/§4.3/§5 in this repo): `invite-member`
+ * and `accept-invite` used to be registered here, proxying to
+ * `POST /api/auth/invite` / `POST /api/auth/accept-invite` on the auth
+ * service. Those auth-service endpoints are gone — the invitation system
+ * moved fully platform-side (auth owns zero invitation data, per the design
+ * doc's non-negotiable constraint §0). Every platform still on framework
+ * defaults had these two routes live and auto-registered, silently pointing
+ * at endpoints that now 404/error. Removed entirely rather than left
+ * toggled-off-by-default, because there is no configuration under which
+ * re-enabling them would ever work again — a dead toggle that always fails
+ * is worse than no toggle. Replacement: `php stone generate invitations`
+ * scaffolds a platform-owned equivalent into the CONSUMING platform's own
+ * repo, orchestrated by the framework-shipped
+ * `StoneScriptPHP\Auth\Invitations\InvitationCompletionService`.
  *
  * @package StoneScriptPHP\Auth\ExternalAuth
  */
@@ -46,10 +60,7 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
             log_debug("DefaultTenantRouteProvider: Registered GET $prefix/check-tenant-slug/{slug}");
         }
 
-        if ($config->isEnabled('accept_invite')) {
-            $router->post("$prefix/accept-invite", new AcceptInviteRoute($client, $config->hooks, $config), [], true);
-            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/accept-invite");
-        }
+        // accept-invite REMOVED 2026-07-21 — see class docblock.
 
         // Protected (tier-2) tenant routes. These are IDENTITY routes: the caller
         // presents a PASSPORT (purpose=authentication), never a tenant-scoped card —
@@ -77,14 +88,7 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
             log_debug("DefaultTenantRouteProvider: Registered POST $prefix/provision-tenant (protected, authentication)");
         }
 
-        if ($config->isEnabled('invite')) {
-            $router->post(
-                "$prefix/invite-member",
-                new InviteMemberRoute($client, $config->hooks, $config),
-                access: RouteAccess::AUTHENTICATION
-            );
-            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/invite-member (protected, authentication)");
-        }
+        // invite-member REMOVED 2026-07-21 — see class docblock.
 
         if ($config->isEnabled('memberships')) {
             $router->get(
@@ -109,9 +113,7 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         if ($config->isEnabled('check_slug')) {
             $paths[] = "$prefix/check-tenant-slug";
         }
-        if ($config->isEnabled('accept_invite')) {
-            $paths[] = "$prefix/accept-invite";
-        }
+        // accept-invite REMOVED 2026-07-21 — see class docblock.
 
         return $paths;
     }
@@ -126,9 +128,7 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         if ($config->isEnabled('provision_tenant')) {
             $paths[] = "$prefix/provision-tenant";
         }
-        if ($config->isEnabled('invite')) {
-            $paths[] = "$prefix/invite-member";
-        }
+        // invite-member REMOVED 2026-07-21 — see class docblock.
         if ($config->isEnabled('memberships')) {
             $paths[] = "$prefix/memberships";
         }
@@ -141,9 +141,7 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         $isEnabled = fn(string $feature) => $features[$feature] ?? false;
         $routes = ['GET' => [], 'POST' => [], 'PUT' => []];
 
-        if ($isEnabled('accept_invite')) {
-            $routes['POST']["$prefix/accept-invite"] = AcceptInviteRoute::class;
-        }
+        // accept-invite REMOVED 2026-07-21 — see class docblock.
         if ($isEnabled('check_slug')) {
             $routes['GET']["$prefix/check-tenant-slug/{slug}"] = CheckTenantSlugRoute::class;
         }
@@ -153,9 +151,7 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         if ($isEnabled('provision_tenant')) {
             $routes['POST']["$prefix/provision-tenant"] = ProvisionTenantRoute::class;
         }
-        if ($isEnabled('invite')) {
-            $routes['POST']["$prefix/invite-member"] = InviteMemberRoute::class;
-        }
+        // invite-member REMOVED 2026-07-21 — see class docblock.
         if ($isEnabled('memberships')) {
             $routes['GET']["$prefix/memberships"] = MembershipsRoute::class;
             $routes['PUT']["$prefix/memberships/{id}"] = UpdateMembershipRoute::class;

@@ -163,6 +163,10 @@ class TenantRouteProviderSeamTest extends TestCase
     /**
      * DefaultTenantRouteProvider's protectedPaths() output — used as the default —
      * matches the exact tier-2 tenant route set from before this refactor.
+     *
+     * `/api/auth/invite-member` was part of this set until 2026-07-21 — see
+     * DefaultTenantRouteProvider's class docblock (auth's invite/accept-invite
+     * endpoints no longer exist). Asserted absent here deliberately.
      */
     public function test_default_provider_protected_paths_matches_pre_refactor_set(): void
     {
@@ -173,7 +177,7 @@ class TenantRouteProviderSeamTest extends TestCase
 
         $this->assertContains('/api/auth/select-tenant', $paths);
         $this->assertContains('/api/auth/provision-tenant', $paths);
-        $this->assertContains('/api/auth/invite-member', $paths);
+        $this->assertNotContains('/api/auth/invite-member', $paths);
         $this->assertContains('/api/auth/memberships', $paths);
         // change-password and me stay in ExternalAuthRoutes itself (not tenant routes).
         $this->assertNotContains('/api/auth/change-password', $paths);
@@ -231,12 +235,19 @@ class TenantRouteProviderSeamTest extends TestCase
 
     /**
      * 7.1.2 typed-auth fix: the tier-2 IDENTITY routes registered by the default
-     * provider (select-tenant, provision-tenant, invite-member, memberships,
-     * memberships/{id}) consume a PASSPORT (purpose=authentication), never a
-     * tenant-scoped card. They MUST register with access=authentication so the
-     * 7.x AccessTokenMiddleware admits the passport — a card here is a purpose
+     * provider (select-tenant, provision-tenant, memberships, memberships/{id})
+     * consume a PASSPORT (purpose=authentication), never a tenant-scoped card.
+     * They MUST register with access=authentication so the 7.x
+     * AccessTokenMiddleware admits the passport — a card here is a purpose
      * mismatch → 403. Regression guard for the external-mode 7.x boot/journey
      * (medstoreapp #3194 pioneer; unblocks restrantapp #3195, #3196).
+     *
+     * invite-member was also one of these tier-2 routes at the time of the
+     * 7.1.2 fix, but was removed 2026-07-21 along with the rest of the
+     * framework's invite/accept-invite proxy (auth's endpoints no longer
+     * exist — see DefaultTenantRouteProvider's class docblock). The `invite`
+     * option below is passed for documentation purposes only — no route is
+     * registered for it now — and the route's absence is asserted below.
      */
     public function test_default_provider_registers_tier2_routes_as_authentication(): void
     {
@@ -263,7 +274,7 @@ class TenantRouteProviderSeamTest extends TestCase
 
         $this->assertSame('authentication', $access['POST /api/auth/select-tenant'] ?? null);
         $this->assertSame('authentication', $access['POST /api/auth/provision-tenant'] ?? null);
-        $this->assertSame('authentication', $access['POST /api/auth/invite-member'] ?? null);
+        $this->assertArrayNotHasKey('POST /api/auth/invite-member', $access);
         $this->assertSame('authentication', $access['GET /api/auth/memberships'] ?? null);
         $this->assertSame('authentication', $access['PUT /api/auth/memberships/{id}'] ?? null);
     }

@@ -212,7 +212,11 @@ class ExternalAuthConfig
             'after_login' => $options['after_login'] ?? null,
             'after_select_tenant' => $options['after_select_tenant'] ?? null,
             'after_password_reset' => $options['after_password_reset'] ?? null,
-            'after_accept_invite' => $options['after_accept_invite'] ?? null,
+            // 'after_accept_invite' REMOVED 2026-07-21 — AcceptInviteRoute
+            // (the only caller) was deleted along with invite/accept_invite
+            // (see DefaultTenantRouteProvider's docblock). Invitations are
+            // now generated per-platform via `php stone generate
+            // invitations`, which does not use this hook mechanism.
             'before_provision' => $options['before_provision'] ?? null,
             'after_provision' => $options['after_provision'] ?? null,
         ];
@@ -229,8 +233,13 @@ class ExternalAuthConfig
             'onboarding_status' => $options['onboarding_status'] ?? true,
             'password_reset' => $options['password_reset'] ?? true,
             'change_password' => $options['change_password'] ?? true,
-            'invite' => $options['invite'] ?? true,
-            'accept_invite' => $options['accept_invite'] ?? true,
+            // 'invite' / 'accept_invite' REMOVED 2026-07-21 — the auth-service
+            // endpoints they proxied to (`POST /api/auth/invite`,
+            // `POST /api/auth/accept-invite`) no longer exist (see
+            // DefaultTenantRouteProvider's docblock and
+            // DESIGN-invitation-system.md §0/§1.3/§4.3 in this repo).
+            // Invitations are now an opt-in, platform-generated feature via
+            // `php stone generate invitations`, not a framework default.
             'oauth' => $options['oauth'] ?? false,
             'provision_tenant' => $options['provision_tenant'] ?? ($options['oauth'] ?? false),
             'profile' => $options['profile'] ?? true,

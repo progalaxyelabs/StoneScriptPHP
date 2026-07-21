@@ -140,8 +140,10 @@ class ExternalAuthRoutes
             log_debug("ExternalAuthRoutes: Registered POST $prefix/forgot-password, $prefix/reset-password");
         }
 
-        // accept_invite + check_slug are tenant routes — delegated below via
+        // check_slug is a tenant route — delegated below via
         // $config->tenantRouteProvider (Phase 1 seam, see TenantRouteProviderInterface).
+        // (accept_invite used to live here too — removed 2026-07-21, see
+        // DefaultTenantRouteProvider's class docblock.)
 
         if ($config->isEnabled('onboarding_status')) {
             $router->get("$prefix/onboarding/status", new OnboardingStatusRoute($client, $config->hooks, $config), [], true);
@@ -199,10 +201,12 @@ class ExternalAuthRoutes
             log_debug("ExternalAuthRoutes: Registered POST $prefix/change-password (protected, authentication)");
         }
 
-        // select_tenant, provision_tenant, invite, memberships are tenant routes —
+        // select_tenant, provision_tenant, memberships are tenant routes —
         // delegated below via $config->tenantRouteProvider (Phase 1 seam, see
         // TenantRouteProviderInterface — bundles registration with the
         // RequireCardMiddleware exemption-path computation so they can't drift apart).
+        // (invite used to live here too — removed 2026-07-21, see
+        // DefaultTenantRouteProvider's class docblock.)
         $config->tenantRouteProvider->register(
             $router,
             $prefix,
@@ -282,8 +286,9 @@ class ExternalAuthRoutes
             $paths[] = "$prefix/forgot-password";
             $paths[] = "$prefix/reset-password";
         }
-        // accept_invite + check_slug are tenant routes — merged below via
+        // check_slug is a tenant route — merged below via
         // $config->tenantRouteProvider->publicPaths().
+        // (accept_invite used to live here too — removed 2026-07-21.)
         if ($config->isEnabled('onboarding_status')) {
             $paths[] = "$prefix/onboarding/status";
         }
@@ -351,11 +356,12 @@ class ExternalAuthRoutes
     {
         $paths = [];
 
-        // select_tenant, provision_tenant, invite, memberships are tenant routes —
+        // select_tenant, provision_tenant, memberships are tenant routes —
         // merged below via $config->tenantRouteProvider->protectedPaths(). Kept in
         // the SAME class as their registration (see TenantRouteProviderInterface)
         // so this exemption list can never drift out of sync with what's actually
         // registered — the root cause of the 2026-07-05 fleet incident.
+        // (invite used to live here too — removed 2026-07-21.)
         if ($config->isEnabled('change_password')) {
             $paths[] = "$prefix/change-password";
         }
@@ -412,8 +418,10 @@ class ExternalAuthRoutes
             'onboarding_status' => $options['onboarding_status'] ?? true,
             'password_reset' => $options['password_reset'] ?? true,
             'change_password' => $options['change_password'] ?? true,
-            'invite' => $options['invite'] ?? true,
-            'accept_invite' => $options['accept_invite'] ?? true,
+            // 'invite' / 'accept_invite' REMOVED 2026-07-21 — see
+            // ExternalAuthConfig::__construct() and DefaultTenantRouteProvider's
+            // class docblock for why (auth-service endpoints they proxied to
+            // are gone; invitations are now generated per-platform).
             'oauth' => $options['oauth'] ?? false,
             'provision_tenant' => $options['provision_tenant'] ?? ($options['oauth'] ?? false),
             'profile' => $options['profile'] ?? true,
@@ -443,8 +451,9 @@ class ExternalAuthRoutes
             $routes['POST']["$prefix/forgot-password"] = ForgotPasswordRoute::class;
             $routes['POST']["$prefix/reset-password"] = ResetPasswordRoute::class;
         }
-        // accept_invite + check_slug are tenant routes — merged below via the
-        // configured (or default) TenantRouteProviderInterface.
+        // check_slug is a tenant route — merged below via the configured (or
+        // default) TenantRouteProviderInterface. (accept_invite used to live
+        // here too — removed 2026-07-21.)
         if ($isEnabled('onboarding_status')) {
             $routes['GET']["$prefix/onboarding/status"] = OnboardingStatusRoute::class;
         }
@@ -473,10 +482,11 @@ class ExternalAuthRoutes
             $routes['GET']["$prefix/me"] = ProfileRoute::class;
         }
 
-        // select_tenant, provision_tenant, invite, memberships, accept_invite,
-        // check_slug are tenant routes — merged from the configured (or default)
+        // select_tenant, provision_tenant, memberships, check_slug are tenant
+        // routes — merged from the configured (or default)
         // TenantRouteProviderInterface. Reads the raw options key directly (not via
         // ExternalAuthConfig, which requires Env/database config — see docblock above).
+        // (invite, accept_invite used to live here too — removed 2026-07-21.)
         $tenantRouteProvider = $options['tenant_route_provider'] ?? null;
         if (!$tenantRouteProvider instanceof TenantRouteProviderInterface) {
             $tenantRouteProvider = new DefaultTenantRouteProvider();
