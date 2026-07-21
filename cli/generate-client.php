@@ -790,14 +790,21 @@ export class MinimalHttp {
     try { data = await res.json(); } catch { return false; }
 
     const envelope = data as Record<string, unknown>;
-    const newAccess  = envelope?.['data'] !== undefined
-      ? (envelope['data'] as Record<string, unknown>)?.['access_token'] as string | undefined
-      : envelope?.['access_token'] as string | undefined;
+    // The StoneScriptPHP response envelope is a FIXED, non-deviating contract
+    // ({status, message, data} — see framework-spec.md §"API Response
+    // Contract") — every route response body, including refresh, is built via
+    // ApiResponse('ok', [...]) / res_ok(...), which always nests payload
+    // fields under `data`. A flat top-level access_token/refresh_token is not
+    // a real shape this server ever sends (confirmed against RefreshRoute.php
+    // and BaseExternalAuthRoute::proxyCall()) — trying both shapes here was
+    // dead defensive code masking uncertainty about a contract that is
+    // actually fixed (2026-07-21 no-fallback cleanup).
+    const responseData = envelope?.['data'] as Record<string, unknown> | undefined;
+    const newAccess = responseData?.['access_token'] as string | undefined;
 
     if (newAccess) {
       this.tokens.set(newAccess);
-      const newRefresh = (envelope?.['data'] as Record<string, unknown>)?.['refresh_token']
-        ?? envelope?.['refresh_token'];
+      const newRefresh = responseData?.['refresh_token'];
       if (typeof newRefresh === 'string') this.tokens.setRefresh(newRefresh);
       return true;
     }
