@@ -692,12 +692,14 @@ platform left calling either.
 **A related, easy-to-rediscover trap:** `ngx-stonescriptphp-client` (the
 shared Angular client) had an in-progress `AcceptInviteComponent` drafted
 earlier the SAME day, built against the old central
-`POST {prefix}/accept-invite` contract this section removes. It was never
-merged to `main` — see branch `archive/pre-platform-owned-accept-invite` on
-that repo for the abandoned work + full writeup in its commit message. **Do
-not resurrect it by re-adding `AuthService.acceptInvite()`** — a shared
-component posting to one fixed central path cannot work under this doc's
-platform-owned model at all (the accept-invite URL is now platform-specific,
+`POST {prefix}/accept-invite` contract this section removes — a form +
+error-state UI shell backed by `AuthService.acceptInvite()`. It was never
+merged and has since been discarded (not preserved on a branch — the code
+targeted a dead contract and wasn't reusable as-is; this note is the
+durable record, not the diff). **Don't re-add `AuthService.acceptInvite()`
+to resurrect it** — a shared component posting to one fixed central path
+cannot work under this doc's platform-owned model at all (the accept-invite
+URL is now platform-specific,
 e.g. aasaanwork's `POST /portal/tenant/{tenantId}/invitations/{token}/accept`
 per §4.2). If a shared "accept invite" UI helper is ever built, it needs to
 accept a platform-supplied URL, not assume one.
