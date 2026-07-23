@@ -5,6 +5,39 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.5.0] - 2026-07-24
+
+### Added — test-domain email routing (Mailpit)
+
+- **`MailerFactory::forRecipient($to)`** picks the email provider per recipient,
+  the same way the auth service already routes its OTP mail: a recipient whose
+  domain matches `TEST_EMAIL_DOMAIN` (and where Mailpit is configured) is
+  delivered to **Mailpit** over plain SMTP; every other address goes to the
+  production provider (`MyZeptoMail` / ZeptoMail). Routing is data-driven by the
+  recipient address, not a dev/prod flag — so a `@<TEST_EMAIL_DOMAIN>` address is
+  captured in Mailpit wherever Mailpit is wired.
+- **`MailpitMailer`** — an `EmailInterface` provider that sends via SMTP (no
+  auth, no TLS) using `symfony/mailer`. This closes a real gap: previously every
+  provider was ZeptoMail-only, so in dev (no ZeptoMail creds) all
+  non-OTP email — invites, notifications — was silently skipped and never
+  reached Mailpit, even though the auth service's OTP mail did. Now any caller
+  that routes through `MailerFactory` gets the same testability OTP mail has.
+- New env vars: `TEST_EMAIL_DOMAIN`, `MAILPIT_SMTP_HOST`, `MAILPIT_SMTP_PORT`.
+
+  **Dependency note:** `symfony/mailer` is a **require-dev** dependency, so the
+  Mailpit path is a dev/test feature by default — `MailpitMailer::isConfigured()`
+  checks `class_exists()` and returns false when the library is absent, so a prod
+  `--no-dev` build falls back to ZeptoMail and never touches it. Two follow-ons:
+  (1) `require-dev` is **not transitive** — a platform depending on this
+  framework does not inherit `symfony/mailer`; a consuming platform that wants
+  the Mailpit dev path must add `symfony/mailer` to **its own** `require-dev`.
+  (2) To route test addresses to Mailpit in production too (as auth does),
+  promote `symfony/mailer` to `require` and set `MAILPIT_SMTP_*` in prod.
+
+  Callers that did `new MyZeptoMail()` directly (notably the `invitations`
+  scaffold's email step) should switch to `MailerFactory::forRecipient($to)` so
+  their mail becomes Mailpit-testable.
+
 ## [7.4.1] - 2026-07-24
 
 ### Fixed

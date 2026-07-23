@@ -45,6 +45,18 @@ class Env
     public ?string $ZEPTOMAIL_SENDER_NAME = null;
     public ?string $ZEPTOMAIL_SEND_MAIL_TOKEN = null;
 
+    // Test-domain email routing (MailerFactory) — mirrors progalaxyelabs-auth's
+    // provider routing. When a recipient's domain matches TEST_EMAIL_DOMAIN and
+    // MAILPIT_SMTP_* is configured, MailerFactory routes the email to Mailpit
+    // (plain SMTP, no auth/TLS) instead of the production provider (ZeptoMail),
+    // so test-address mail is captured in Mailpit in dev — and, if you wire
+    // MAILPIT_SMTP_* in prod too, in prod. The Mailpit path needs symfony/mailer
+    // (a require-dev dependency), so it is a dev/test feature by default; a
+    // prod --no-dev build without symfony/mailer simply falls back to ZeptoMail.
+    public ?string $TEST_EMAIL_DOMAIN = null;
+    public ?string $MAILPIT_SMTP_HOST = null;
+    public ?string $MAILPIT_SMTP_PORT = null;
+
     public bool $EMAIL_VERIFICATION_ENABLED = true;
 
     public ?string $CSRF_SECRET_KEY = null;

@@ -6,13 +6,12 @@ namespace App\Routes\Invitations;
 
 use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\IRouteHandler;
-use StoneScriptPHP\Lib\Email\MyZeptoMail;
+use StoneScriptPHP\Lib\Email\MailerFactory;
 
 // TODO: import this platform's own privileged-role authorization helper —
-// e.g. `use App\Lib\AdminScope;` (aasaanwork-platform's pattern, see
-// PostInviteCustomerRoute.php-style routes). The framework generator cannot
-// know which roles may invite, or what roles they may grant — that decision
-// is 100% platform-owned, per design doc §0 ("roles belong in api/platform").
+// e.g. `use App\Lib\AdminScope;`. The framework generator cannot know which
+// roles may invite, or what roles they may grant — that decision is 100%
+// platform-owned, per design doc §0 ("roles belong in api/platform").
 
 /**
  * POST {prefix}/invitations
@@ -91,7 +90,11 @@ class PostCreateInvitationRoute implements IRouteHandler
 
     private function sendInviteEmail(string $email, string $inviteUrl, array $config): void
     {
-        $emailService = new MyZeptoMail();
+        // MailerFactory routes by recipient: a TEST_EMAIL_DOMAIN address goes to
+        // Mailpit (dev/test), everything else to the production provider — so
+        // invite email is testable the same way OTP mail is. Falls back to
+        // ZeptoMail when Mailpit isn't configured.
+        $emailService = MailerFactory::forRecipient($email);
         if (!$emailService->isConfigured()) {
             log_warning('PostCreateInvitationRoute: email service not configured, skipping invite email');
             return;
