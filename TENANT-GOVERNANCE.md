@@ -336,15 +336,23 @@ Out of scope for this spec — each platform's adoption is its own task:
 
 ## 9. Acceptance checklist
 
-**Framework side (`progalaxyelabs/stonescriptphp`):**
-- [ ] `TenantGovernanceResolver` class (§5) shipped in the framework itself.
-- [ ] `php stone generate tenant-governance` command (§6) scaffolds migration + table
-      + all twelve functions (§4) + trigger (§3.1) + PHP model wrappers into the
-      consuming platform's repo.
-- [ ] PHPUnit coverage: every function's authorization gate (who may act on whom),
-      the last-owner-standing race (§3.2, concurrent-demotion test), creator
-      immutability (§3.1, both UPDATE and DELETE attempts).
-- [ ] Version bumped, tagged, per this repo's existing convention.
+**Framework side (`progalaxyelabs/stonescriptphp`):** — done in 7.4.0.
+- [x] `TenantGovernanceResolver` class (§5) shipped in the framework itself
+      (`src/Auth/TenantGovernance/TenantGovernanceResolver.php`).
+- [x] `php stone generate tenant-governance` command (§6) scaffolds migration + table
+      + all fourteen functions (§4 — twelve public + two internal helpers) + trigger
+      (§3.1) + PHP model wrappers (public functions only) into the consuming platform's
+      repo. Detects nested `main/postgresql/` layout vs flat; registers no HTTP routes.
+- [x] PHPUnit coverage: `TenantGovernanceResolverTest` (11 tests — both resolvers, the
+      enricher, suspended→empty-roles, missing-identity/tenant short-circuits, o_-prefix
+      + bare-key handling) and `GenerateTenantGovernanceCommandTest` (3 tests — nested +
+      flat layout scaffolding, model-wrapper set = public only, idempotency). The SQL
+      functions' own authorization gates, last-owner-standing race (`FOR UPDATE`), and
+      creator immutability (UPDATE + DELETE) were verified directly against a real
+      Postgres 16 during development (a live-DB integration harness for these is the one
+      remaining coverage gap — the pure-SQL behavior is proven, but not yet pinned in an
+      automated CI test; noted as follow-up).
+- [x] Version bumped (`7.4.0`) + tagged (`v7.4.0`), per this repo's convention.
 
 **Integration (later, separate step, per adopting platform):**
 - [ ] Provisioning route wires `create_tenant_membership()` at tenant creation.

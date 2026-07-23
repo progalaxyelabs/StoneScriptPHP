@@ -5,6 +5,52 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.0] - 2026-07-24
+
+**Platform-owned tenant governance — the replacement for the role data 7.3.0
+took out of auth.** AUTH-IDENTITY.md (7.3.0) correctly removed role/RBAC data
+from the auth service, but left a gap: nothing gave platforms a durable,
+cross-tenant-queryable membership ledger of their own to put in its place.
+This release ships that primitive, once, in the framework — so no platform
+hand-rolls it (and diverges) again. Full model in `TENANT-GOVERNANCE.md`.
+
+### Added
+
+- **`php stone generate tenant-governance`** — scaffolds a platform-owned
+  `tenant_memberships` table (in the platform's OWN main DB — never auth,
+  never a per-tenant DB), a creator-immutability trigger, and fourteen SQL
+  functions (twelve public + two internal helpers) with `php stone generate
+  model` wrappers for the public ones, plus an optional
+  `config/tenant-governance.php` display-name enricher hook. Detects the
+  nested `src/postgresql/main/postgresql/` layout real platforms use and
+  places files there, else falls back to the flat layout. Deliberately
+  registers NO HTTP routes — promote/demote/invite endpoints are
+  platform-specific (`TENANT-GOVERNANCE.md` §6). Mirrors the existing
+  `php stone generate invitations` precedent (scaffold into the consuming
+  repo; the platform owns and edits from there).
+- **`StoneScriptPHP\Auth\TenantGovernance\TenantGovernanceResolver`** — a
+  framework-shipped default implementation of the `tenants_resolver` /
+  `roles_resolver` closures `ExchangeRoute` expects. Reads the platform's own
+  governance ledger (`get_identity_tenant_memberships` / `resolve_role_id`)
+  with zero dependency on auth's membership response beyond the identity id.
+  Wire it into `config/auth.php` in two lines; pass an optional enricher
+  closure for human-readable tenant names in `available_tenants`.
+
+### Governance model (`TENANT-GOVERNANCE.md`)
+
+- Tiered flags per identity × tenant: `is_tenant_creator` (permanent
+  provenance marker, row never hard-deletable — DB-trigger enforced),
+  `is_tenant_owner` (many allowed, transferable, a tenant must always keep
+  ≥1 active owner — race-safe via `FOR UPDATE` owner-row locking),
+  `is_tenant_admin` (manages member↔admin, peer-demotable), plain member
+  baseline. `job_role` is a fully separate, non-permission dimension.
+- `remove_member` is a **soft delete** (`status='removed'`, distinct from
+  `suspended`); the creator can be suspended but never removed. A later
+  `add_member` reactivates a removed row rather than duplicating it.
+- Every mutation returns a typed `{error: ...}` on a business-rule violation
+  (`cannot_demote_last_owner`, `cannot_remove_tenant_creator`, ...), never a
+  bare 5xx.
+
 ## [7.3.0] - 2026-07-23
 
 **Framework-side half of "roles belong to the platform, not auth."**
