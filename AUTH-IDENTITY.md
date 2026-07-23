@@ -314,10 +314,10 @@ role at all, for either plugin.
 - [ ] Tagged per this repo's existing tag convention.
 
 **Framework side (`progalaxyelabs/stonescriptphp` + TS clients):**
-- [ ] §5 + §6 changes made.
-- [ ] PHPUnit green (`vendor/bin/phpunit`), including new/updated tests for every touched file (`ExternalAuthServiceClient`, `AuthenticatedUser`, `RequireRoleMiddleware`).
-- [ ] TS package test suites green (`ngx-stonescriptphp-client`, `stonescriptphp-client-core`, `stonescriptphp-e2e-test-helpers`).
-- [ ] Version bumped (`composer.json` + each touched `package.json`), tagged.
+- [x] §5 + §6 changes made (§6 expanded during implementation — see that section's correction note re: `TenantMembership.role` vs `User.role`).
+- [x] PHPUnit green (672 tests, 0 failures) — new/updated coverage for every touched file (`ExternalAuthServiceClient`, `AuthenticatedUser`, `RequireRoleMiddleware`).
+- [x] TS package test suites green (`ngx-stonescriptphp-client`, `stonescriptphp-client-core`). `stonescriptphp-e2e-test-helpers` checked — no change needed, its `User` type never had `role`.
+- [x] Version bumped + tagged: `StoneScriptPHP` composer.json → `7.3.0` (`v7.3.0`), `stonescriptphp-client-core` → `3.3.0` (`v3.3.0`), `ngx-stonescriptphp-client` → `6.5.0` (`v6.5.0`, dependency bumped to `stonescriptphp-client-core@^3.3.0`). Not yet published — publish is a separate, explicit step (owner-only).
 
 **Integration (later, separate step — `aasaanwork-platform`):**
 - [ ] Framework version bumped in `composer.json` / TS `package.json`s.
