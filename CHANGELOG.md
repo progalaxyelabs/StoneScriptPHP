@@ -5,6 +5,24 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.1] - 2026-07-24
+
+### Fixed
+
+- **`TenantGovernanceResolver` now forces MAIN-DB gateway context** for its
+  `get_identity_tenant_memberships` / `resolve_role_id` calls. Those functions
+  live in the platform's main DB, but the resolvers run inside the exchange
+  flow, which can carry a non-null tenant context (a prior tenant-scoped call
+  on the same PHP-FPM worker, or T3 tenant-URL middleware). Without pinning the
+  context to null, the gateway routed the call to a tenant DB where the
+  function doesn't exist — surfacing as `function ...(unknown) does not exist`
+  and a 500 in `tenants_resolver` on the very first real exchange. Both
+  resolvers now route through a `queryMainDb()` helper that pins tenant context
+  to null and restores it (best-effort, and separate from the query itself so
+  fake-mode unit tests still work). Found while integrating the first consuming
+  platform. A platform that had already hand-rolled its resolver to force main
+  context is unaffected.
+
 ## [7.4.0] - 2026-07-24
 
 **Platform-owned tenant governance — the replacement for the role data 7.3.0

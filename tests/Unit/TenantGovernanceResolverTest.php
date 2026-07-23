@@ -29,6 +29,36 @@ final class TenantGovernanceResolverTest extends TestCase
 
     // ── tenants_resolver ────────────────────────────────────────────────
 
+    /**
+     * Regression guard for the 7.4.1 main-DB-context fix: both resolvers route
+     * their governance calls through queryMainDb(), which first tries to force
+     * the gateway tenant context to null. getGatewayClient() throws in fake
+     * mode by design — queryMainDb must swallow that and still issue the query,
+     * so the resolver keeps working under Database::fake() (and, in production,
+     * still forces main-DB context). If queryMainDb ever stopped tolerating a
+     * missing gateway client, every fake-mode test here — and this one
+     * explicitly — would break.
+     */
+    public function test_resolvers_work_in_fake_mode_despite_gateway_client_being_unavailable(): void
+    {
+        Database::fake([
+            'get_identity_tenant_memberships' => [
+                ['o_tenant_id' => 't1', 'o_is_tenant_owner' => true, 'o_is_tenant_admin' => false, 'o_is_tenant_creator' => true, 'o_job_role' => null, 'o_status' => 'active'],
+            ],
+            'resolve_role_id' => [['o_role_id' => 'owner']],
+        ]);
+
+        $resolver = new TenantGovernanceResolver();
+
+        // Neither call throws (queryMainDb swallowed the getGatewayClient()
+        // fake-mode exception) and both return real data.
+        $tenants = ($resolver->tenantsResolver())(['sub' => 'id-1']);
+        $this->assertSame('t1', $tenants[0]['id']);
+
+        $roles = ($resolver->rolesResolver())(['sub' => 'id-1', 'tenant_id' => 't1']);
+        $this->assertSame(['owner'], $roles);
+    }
+
     public function test_tenants_resolver_maps_governance_rows_to_tenant_objects(): void
     {
         Database::fake([

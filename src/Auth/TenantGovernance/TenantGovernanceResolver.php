@@ -78,7 +78,7 @@ final class TenantGovernanceResolver
                 return [];
             }
 
-            $rows = Database::fn('get_identity_tenant_memberships', ['identity_id' => $identityId]);
+            $rows = self::queryMainDb('get_identity_tenant_memberships', ['identity_id' => $identityId]);
             if (!is_array($rows)) {
                 return [];
             }
@@ -132,7 +132,7 @@ final class TenantGovernanceResolver
                 return [];
             }
 
-            $rows = Database::fn('resolve_role_id', [
+            $rows = self::queryMainDb('resolve_role_id', [
                 'identity_id' => $identityId,
                 'tenant_id'   => $tenantId,
             ]);
@@ -144,6 +144,55 @@ final class TenantGovernanceResolver
 
             return ($role === null || $role === '') ? [] : [(string) $role];
         };
+    }
+
+    /**
+     * Call a governance function against the MAIN DB.
+     *
+     * `get_identity_tenant_memberships` / `resolve_role_id` live in the
+     * platform's main DB, but these resolvers run inside the exchange flow,
+     * which can carry a NON-null gateway tenant context (a prior tenant-scoped
+     * call on the same PHP-FPM worker, or T3 tenant-URL middleware). Without
+     * forcing the context to null, the gateway routes the call to a tenant DB
+     * where the function doesn't exist — surfacing as
+     * "function ...(unknown) does not exist" / a 500 in tenants_resolver. So
+     * every call here pins tenant context to null first, then restores the
+     * prior context, exactly as a platform's own main-DB resolvers must
+     * (mirrors the same pattern platforms use for their own tenants tables).
+     *
+     * The context switch is itself best-effort and SEPARATE from the query: if
+     * the gateway client can't be obtained (fake mode in tests, or an
+     * early-boot state), the query is still issued — Database::fn handles its
+     * own routing/fake-mode. This keeps the resolver unit-testable via
+     * Database::fake() without a live gateway.
+     *
+     * @param array<string, mixed> $params
+     * @return array<int, array<string, mixed>>
+     */
+    private static function queryMainDb(string $function, array $params): array
+    {
+        $gw = null;
+        $prev = null;
+        try {
+            $gw = Database::getGatewayClient();
+            $prev = $gw->getTenantId();
+            $gw->setTenantId(null);
+        } catch (\Throwable $e) {
+            $gw = null; // no client available for context management — proceed
+        }
+
+        try {
+            $rows = Database::fn($function, $params);
+            return is_array($rows) ? $rows : [];
+        } finally {
+            if ($gw !== null) {
+                try {
+                    $gw->setTenantId($prev);
+                } catch (\Throwable $e) {
+                    // best-effort restore
+                }
+            }
+        }
     }
 
     /**
