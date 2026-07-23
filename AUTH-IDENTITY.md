@@ -1,4 +1,4 @@
-# AUTH-IDENTITY.md — Identity, Membership & Role-Ownership Contract (task #3204)
+# AUTH-IDENTITY.md — Identity, Membership & Role-Ownership Contract
 
 **Status:** SPEC. Auth-side (`progalaxyelabs-auth`) core removal is already implemented
 as uncommitted local changes (verified by reading the working-tree diff directly,
@@ -8,21 +8,21 @@ piece not yet built (`is_tenant_owner` + the membership-status endpoint). Framew
 `stonescriptphp-client-core`) is NOT yet implemented — this spec is what that
 implementation is built against.
 **Date:** 2026-07-23
-**Author:** app-dev (spec authored after a multi-turn investigation; see task #3204 and
-`docs/ROLE-COLUMN-REMOVAL-DESIGN-3204.md` in `progalaxyelabs-auth` for the earlier,
-broader design doc this supersedes on all points where they disagree — this document
+**Author:** Framework maintainer (spec authored after a multi-turn investigation; supersedes
+an earlier, broader internal design doc on all points where they disagree — this document
 is authoritative).
 **Scope:** The contract between `progalaxyelabs-auth` (identity/membership service) and
 `progalaxyelabs/stonescriptphp` (this repo, including the TypeScript clients
-`ngx-stonescriptphp-client` and `stonescriptphp-client-core`). `aasaanwork-platform` is
-cross-referenced as the first platform expected to adopt it, but is out of scope for
-this document's own implementation — it happens in a later, separate integration step.
+`ngx-stonescriptphp-client` and `stonescriptphp-client-core`). An adopting downstream
+platform is cross-referenced below as the first expected consumer of this contract, but
+its own integration is out of scope for this document — it happens in a later, separate
+integration step.
 
 **Division of labor (so both implementers build against the same target without
 drifting):**
-- `progalaxyelabs-auth` (Rust + SQL) — implemented by the auth-side team/agent.
-- `progalaxyelabs/stonescriptphp` (PHP framework) + its TS clients — implemented by
-  the framework-side agent (app-dev), against this same document.
+- `progalaxyelabs-auth` (Rust + SQL) — implemented on the auth side.
+- `progalaxyelabs/stonescriptphp` (PHP framework) + its TS clients — implemented on
+  the framework side (this repo), against this same document.
 - Neither side should improvise a field name, endpoint shape, or business rule not in
   this document. If something is missing, it gets added here first, not invented
   independently on one side.
@@ -235,7 +235,7 @@ its own future design — not a workaround bolted onto this endpoint.
 though it never carries role data anymore. A rename to something like `stage` would
 be clearer, but nothing reads it programmatically today, so it is not required for
 this spec to be considered complete. Either side may propose the rename separately;
-it is not bundled into #3204.
+it is not bundled into this change.
 
 ---
 
@@ -245,7 +245,7 @@ it is not bundled into #3204.
 |---|---|
 | `src/Auth/ExternalAuth/ExternalAuthServiceClient.php` | **Remove** `inviteMember()` (calls a route auth no longer has — dead code, not merely deprecated). **Remove** `updateMembership()` (calls `PUT /api/memberships/:id`, which no longer exists). **Add** `is_tenant_owner` support to `createMembership()`'s `$data` passthrough (no code change needed beyond documenting the key — it's a plain array passthrough already; just the docblock needs updating to describe the new field and confirm `createMembershipForInvite()` continues to strip it, matching its existing `role`/`roles` stripping). **Add** `setMembershipStatus(string $membershipId, string $status, string $platformSecret): array` wrapping `PUT /api/internal/membership-status`. |
 | `src/Auth/AuthenticatedUser.php` | **Remove** the `$payload['role']` fallback branch inside `fromPayload()`'s `user_role` resolution chain (currently `role_id ?? user_role ?? payload['role'] ?? roles[0] ?? null`). A raw passport's `role` claim is now always the neutral sentinel (§4) and must never be treated as an app role, even accidentally via a fallback chain. |
-| `src/Auth/Middleware/RequireRoleMiddleware.php` | **Fix** (adjacent defect, unrelated in origin to #3204 but touched while working in this area): currently checks `$claims['role']`; every card actually stamps `role_id`. Update to check `role_id` (with `user_role` as the documented legacy alias), matching `AuthenticatedUser`'s own contract. Every current user of this middleware is silently 403ing today — this is a real bug fix, not a behavior change platforms need to opt into. |
+| `src/Auth/Middleware/RequireRoleMiddleware.php` | **Fix** (adjacent defect, unrelated in origin to this change but touched while working in this area): currently checks `$claims['role']`; every card actually stamps `role_id`. Update to check `role_id` (with `user_role` as the documented legacy alias), matching `AuthenticatedUser`'s own contract. Every current user of this middleware is silently 403ing today — this is a real bug fix, not a behavior change platforms need to opt into. |
 | `src/Auth/ExternalAuth/Routes/ExchangeRoute.php`, `src/Auth/TokenExchangeService.php`, `src/Auth/ExternalAuth/Routes/ProfileRoute.php` | **No change** — already compliant (§1.2). |
 | `DESIGN-invitation-system.md` (this repo) | Add a one-line cross-reference to this document, since `create-membership`'s contract (role fields) changed after that doc was written. |
 
@@ -291,7 +291,7 @@ role at all, for either plugin.
    owner suspendable only by themselves. Rejected because implementing "who may act
    on whom" requires threading an `acting_identity_id` through the endpoint and
    having auth re-derive a permission decision from it — i.e., auth doing
-   authorization again, the exact thing #3204 removes. That decision belongs entirely
+   authorization again, the exact thing this change removes. That decision belongs entirely
    to each platform's own (already-necessary) RBAC check, made *before* it calls
    auth's secret-gated endpoint. See §3.4's "does the answer depend on who is asking"
    test — this is why it failed it and `is_tenant_owner` alone passes.
@@ -319,13 +319,13 @@ role at all, for either plugin.
 - [x] TS package test suites green (`ngx-stonescriptphp-client`, `stonescriptphp-client-core`). `stonescriptphp-e2e-test-helpers` checked — no change needed, its `User` type never had `role`.
 - [x] Version bumped + tagged: `StoneScriptPHP` composer.json → `7.3.0` (`v7.3.0`), `stonescriptphp-client-core` → `3.3.0` (`v3.3.0`), `ngx-stonescriptphp-client` → `6.5.0` (`v6.5.0`, dependency bumped to `stonescriptphp-client-core@^3.3.0`). Not yet published — publish is a separate, explicit step (owner-only).
 
-**Integration (later, separate step — `aasaanwork-platform`):**
+**Integration (later, separate step — downstream adopting platform):**
 - [ ] Framework version bumped in `composer.json` / TS `package.json`s.
-- [ ] aasaanwork's `config/auth.php` `roles_resolver` reverted off auth's (now-removed)
+- [ ] The platform's `config/auth.php` `roles_resolver` reverted off auth's (now-removed)
   membership `role` field back onto its own local tenant-DB role source — this is the
-  drift flagged earlier in this same investigation (aasaanwork was rewired *onto*
-  auth's role column on 2026-07-20, the opposite direction from this task).
-- [ ] Live-tested end-to-end (OTP + Mailpit recipe, per `.claude/context.md` §2).
+  drift flagged earlier in this same investigation (it was rewired *onto* auth's role
+  column on 2026-07-20, the opposite direction from this change).
+- [ ] Live-tested end-to-end (OTP + Mailpit recipe).
 
 ---
 
@@ -340,6 +340,6 @@ role at all, for either plugin.
    this document, independent of auth's implementation timeline.
 3. Framework version published (composer/npm), per each package's normal release
    process.
-4. `aasaanwork-platform` (or any platform) updates to the new framework version and
-   does its own integration (§8's integration checklist) — a separate, later step,
-   explicitly not part of this document's scope.
+4. Each downstream platform updates to the new framework version and does its own
+   integration (§8's integration checklist) — a separate, later step, explicitly not
+   part of this document's scope.

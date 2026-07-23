@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.3.0] - 2026-07-23
 
-**Framework-side half of task #3204 ("roles belong to the platform, not
-auth").** progalaxyelabs-auth's `tenant_memberships.role`/`.roles` columns
+**Framework-side half of "roles belong to the platform, not auth."**
+progalaxyelabs-auth's `tenant_memberships.role`/`.roles` columns
 and every endpoint that read/wrote them are being removed on that side (see
 `AUTH-IDENTITY.md`, new in this repo, for the full contract both sides are
 built against). This release makes the framework match. The card-issuing
@@ -20,8 +20,8 @@ platform's own `roles_resolver`, never from auth.
 
 - `ExternalAuthServiceClient::inviteMember()` / `::updateMembership()` —
   both called auth endpoints that no longer exist (`POST /api/auth/invite`,
-  removed 2026-07-21; `PUT /api/memberships/:id`, removed as part of #3204 —
-  it was the one user-curlable membership mutation, authenticated by a bare
+  removed 2026-07-21; `PUT /api/memberships/:id`, removed as part of this
+  release — it was the one user-curlable membership mutation, authenticated by a bare
   passport with no `X-Platform-Secret`). Unlike `acceptInvite()` (kept,
   `@deprecated`, for SemVer compatibility), these two are deleted outright —
   nothing about them was worth preserving a permanently-failing stub for.
@@ -54,7 +54,7 @@ platform's own `roles_resolver`, never from auth.
   (`TokenExchangeService::exchangeCard()`). Every card holder using this
   middleware was unconditionally 403'd regardless of their actual role.
   Now checks `role_id` (falling back to the legacy `user_role` alias).
-  Found while working on #3204; not caused by it.
+  Found while working on the change above; not caused by it.
 
 ### TypeScript clients (`ngx-stonescriptphp-client` / `stonescriptphp-client-core`)
 
