@@ -8,9 +8,20 @@ use StoneScriptPHP\ApiResponse;
 /**
  * RequireRoleMiddleware
  *
- * Checks if the JWT role claim is in the allowed roles list.
- * This middleware should be used AFTER ValidateJwtMiddleware.
+ * Checks the card's active role against an allowed-roles list.
+ * This middleware should be used AFTER ValidateJwtMiddleware/JwtAuthMiddleware.
  * Returns 403 if the user does not have sufficient role permissions.
+ *
+ * FIXED (2026-07-23, found while working on task #3204 — adjacent to it, not
+ * caused by it): this previously checked `$claims['role']`, but every card
+ * this framework mints (TokenExchangeService::exchangeCard()) stamps
+ * `role_id`, never `role` — see AuthenticatedUser's own docblock, which
+ * documents the same card/passport claim contract. The old check meant ANY
+ * card holder using this middleware got an unconditional 403 (the "role
+ * claim exists" check always failed), regardless of their actual role. Now
+ * checks `role_id` (falling back to the legacy `user_role` alias for
+ * non-card token shapes) — matching AuthenticatedUser::fromPayload()'s own
+ * resolution order.
  */
 class RequireRoleMiddleware implements MiddlewareInterface
 {
@@ -34,14 +45,18 @@ class RequireRoleMiddleware implements MiddlewareInterface
 
         $claims = $request['jwt_claims'];
 
-        // Check if role claim exists
-        if (!isset($claims['role'])) {
+        // Card model: role_id is the canonical claim; user_role is the
+        // documented legacy alias for non-card token shapes. Never `role` —
+        // see class docblock.
+        $activeRole = $claims['role_id'] ?? $claims['user_role'] ?? null;
+
+        if ($activeRole === null) {
             http_response_code(403);
             return new ApiResponse('error', 'Forbidden: Insufficient permissions');
         }
 
         // Check if user's role is in the allowed list
-        if (!in_array($claims['role'], $this->allowedRoles, true)) {
+        if (!in_array($activeRole, $this->allowedRoles, true)) {
             http_response_code(403);
             return new ApiResponse('error', 'Forbidden: Insufficient role permissions');
         }

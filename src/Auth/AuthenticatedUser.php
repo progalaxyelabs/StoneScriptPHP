@@ -83,12 +83,23 @@ class AuthenticatedUser
         $issuer_type  = $payload['issuer_type'] ?? null;
 
         // Card model: role_id (single string).
-        // Legacy: roles[] array — read first element; or scalar user_role/role.
+        // Legacy: roles[] array — read first element; or scalar user_role.
+        //
+        // `role` is DELIBERATELY excluded from this fallback chain (task
+        // #3204 / AUTH-IDENTITY.md §4): a passport's `role` claim is now
+        // always a fixed, neutral sentinel (e.g. "authenticated") stamped by
+        // auth for every identity-authenticated token — it never carries an
+        // application-role value and must never be mistaken for one, even
+        // via a permissive fallback. `fromPayload()` is occasionally called
+        // on raw passport claims (not just cards), so silently reading
+        // `role` here would resurrect exactly the coupling this task
+        // removes the moment anyone calls this on a passport instead of a
+        // card. Real cards only ever carry `role_id` (never `role`) — see
+        // TokenExchangeService::exchangeCard().
         $role_id = $payload['role_id'] ?? null;
 
         $user_role = $role_id
             ?? $payload['user_role']
-            ?? $payload['role']
             ?? (is_array($payload['roles'] ?? null) ? ($payload['roles'][0] ?? null) : null)
             ?? null;
 

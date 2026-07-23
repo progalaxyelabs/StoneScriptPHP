@@ -239,6 +239,42 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
     }
 
     /**
+     * The regression proof for the 2026-07-23 fix (see RequireRoleMiddleware's
+     * own docblock): before it, this middleware checked `$claims['role']`,
+     * which no real card ever carries (cards stamp `role_id`) — so EVERY card
+     * holder, including one with a sufficient role, was unconditionally
+     * 403'd. This test would have failed before the fix regardless of the
+     * role_id's value; it must pass now that role_id is checked correctly.
+     */
+    public function test_require_role_middleware_allows_sufficient_role_through(): void
+    {
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer card-token';
+        $_SERVER['REQUEST_URI'] = '/admin/tenant/tenant-1/settings';
+
+        $payload = [
+            'identity_id' => 'id-1',
+            'sub'         => 'id-1',
+            'tenant_id'   => 'tenant-1',
+            'role_id'     => 'owner', // sufficient
+        ];
+
+        $pipeline = new MiddlewarePipeline();
+        $pipeline->pipe(new JwtAuthMiddleware($this->fakeJwtHandler($payload)));
+        $pipeline->pipe(new RequireRoleMiddleware(['owner', 'admin']));
+
+        $handlerReached = false;
+        $request = ['route' => ['is_public' => false]];
+
+        $response = $pipeline->process($request, function ($req) use (&$handlerReached) {
+            $handlerReached = true;
+            return new ApiResponse('ok', 'reached');
+        });
+
+        $this->assertTrue($handlerReached, 'Sufficient role_id must reach the handler, not be 403d');
+        $this->assertSame('ok', $response->status);
+    }
+
+    /**
      * RequireTenantMiddleware (strict per-route variant, 401 on absent claims)
      * also enforces correctly through the real JwtAuthMiddleware chain.
      */

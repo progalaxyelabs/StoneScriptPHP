@@ -311,7 +311,13 @@ class ExternalAuthServiceClient extends AuthServiceClient
      * Does NOT create identities or provision databases — only the membership.
      * Returns JWT tokens with tenant context.
      *
-     * @param array $data Membership data (identity_id, tenant_id, platform_code, tenant_slug, tenant_db_schema, ...)
+     * `$data` may include `is_tenant_owner` (bool, default false) — AUTH-IDENTITY.md
+     * §3.2: set this `true` ONLY when this call is creating a brand-new tenant
+     * (e.g. a self-service "create organization" flow), never for an invited
+     * member. It cannot be changed after creation — there is no update path.
+     * Never include `role`/`roles` — auth does not store them (task #3204).
+     *
+     * @param array $data Membership data (identity_id, tenant_id, platform_code, tenant_slug, tenant_db_schema, is_tenant_owner?, ...)
      * @param string $platformSecret X-Platform-Secret header value
      * @return array Auth service response with membership + tokens
      * @throws AuthServiceException
@@ -326,37 +332,73 @@ class ExternalAuthServiceClient extends AuthServiceClient
 
     /**
      * Create a tenant membership as a result of an invitation being
-     * accepted (design doc §3.4 step 8 / §3.4.1 / §4.2).
+     * accepted (design doc §3.4 step 8 / §3.4.1 / §4.2; AUTH-IDENTITY.md §5).
      *
      * Thin wrapper over {@see createMembership()} that deliberately NEVER
-     * sends a `role` key, even if the caller's `$data` includes one — this
-     * is intentional, not an oversight (design doc §3.4.1): role authority
-     * for invite-driven memberships lives 100% in the platform's own
-     * `platform_invitations.role` column (never in anything auth stores or
-     * returns), so sending it would be a pure write-without-read into a
-     * field this design's own constraint says auth must not own. Auth's
-     * `tenant_memberships.role` will show its own default ("owner") for
-     * invite-created memberships as a result — a known, accepted cosmetic
-     * inaccuracy in auth's storage (design doc §3.4.1 / §6 item 1), not a
-     * bug in this method.
+     * sends a `role`/`roles`/`is_tenant_owner` key, even if the caller's
+     * `$data` includes one — this is intentional, not an oversight:
+     *
+     *   - `role`/`roles`: auth no longer stores these at all (task #3204 —
+     *     `tenant_memberships.role`/`.roles` were dropped, not just ignored).
+     *     Role authority for invite-driven memberships lives 100% in the
+     *     platform's own `platform_invitations.role` column.
+     *   - `is_tenant_owner`: an invite-accepted membership is never the
+     *     tenant's owner by construction (the owner is whoever's
+     *     `createMembership()` call *created* the tenant — a structural
+     *     fact, never something an invitation confers). See
+     *     AUTH-IDENTITY.md §3.2 — this flag is set once, at creation, and
+     *     is never editable afterward.
      *
      * Unlike `createMembership()` (still used, unchanged, by
-     * `ProvisionTenantRoute` with an explicit structural `role: 'owner'` —
-     * that call is a constant, not invitation data, so it is NOT affected
-     * by this omission), this entry point exists specifically so a future
-     * reviewer sees the `role` omission is deliberate.
+     * `ProvisionTenantRoute` with an explicit structural `role: 'owner'`
+     * historically, now `is_tenant_owner: true` — that call is a constant,
+     * not invitation data, so it is NOT affected by this stripping), this
+     * entry point exists specifically so a future reviewer sees the
+     * omission is deliberate.
      *
      * @param array $data Membership data — identity_id, tenant_id,
-     *   platform_code, tenant_db_schema, email, etc. Any `role`/`roles` key
-     *   present is stripped before the call.
+     *   platform_code, tenant_db_schema, email, etc. Any `role`/`roles`/
+     *   `is_tenant_owner` key present is stripped before the call.
      * @param string $platformSecret X-Platform-Secret header value
      * @return array Auth service response with membership + tokens
      * @throws AuthServiceException
      */
     public function createMembershipForInvite(array $data, string $platformSecret): array
     {
-        unset($data['role'], $data['roles']);
+        unset($data['role'], $data['roles'], $data['is_tenant_owner']);
         return $this->createMembership($data, $platformSecret);
+    }
+
+    /**
+     * Change a membership's status (server-to-server, secured by
+     * X-Platform-Secret). AUTH-IDENTITY.md §3.3.
+     *
+     * Auth-side enforcement (not this method's job to duplicate): the
+     * tenant's owner-membership (`is_tenant_owner = true`) can never be
+     * suspended through this endpoint — auth returns
+     * `{error: "cannot_suspend_tenant_owner"}` rather than a 5xx, so callers
+     * should inspect the response body, not just catch
+     * {@see AuthServiceException}. Deciding WHO is allowed to change WHOSE
+     * status is entirely the calling platform's own responsibility (its own
+     * RBAC, before this method is ever invoked) — auth makes no
+     * authorization decision here beyond the owner-protection invariant
+     * above. See AUTH-IDENTITY.md §3.4/§7.3 for why this is deliberately
+     * narrow (no `acting_identity_id` parameter, no admin/member tier).
+     *
+     * @param string $membershipId Membership ID (UUID)
+     * @param string $status One of 'active' | 'suspended'
+     * @param string $platformSecret X-Platform-Secret header value
+     * @return array{id?: string, status?: string, updated_at?: string, error?: string}
+     * @throws AuthServiceException
+     */
+    public function setMembershipStatus(string $membershipId, string $status, string $platformSecret): array
+    {
+        return $this->put('/api/internal/membership-status', [
+            'membership_id' => $membershipId,
+            'status'        => $status,
+        ], [
+            'X-Platform-Secret: ' . $platformSecret,
+        ]);
     }
 
     // ──────────────────────────────────────────────
@@ -378,51 +420,19 @@ class ExternalAuthServiceClient extends AuthServiceClient
         return $this->get('/api/auth/memberships' . $query, $this->buildAuthHeader($authToken));
     }
 
-    /**
-     * Invite a member to a tenant
-     *
-     * @deprecated Since 2026-07-21: `POST /api/auth/invite` no longer
-     *   exists on the auth service — invitation CREATION also moved fully
-     *   platform-side (design doc §0/§1.3/§2). Calling this method will
-     *   always fail. Use `php stone generate invitations`'s generated
-     *   `PostCreateInvitationRoute` (writes to this platform's own
-     *   `platform_invitations` table) instead. Kept for SemVer
-     *   compatibility only — see §4.3/§5 step 4 for removal criteria.
-     *
-     * @param string $email Invitee's email
-     * @param string $tenantId Tenant ID
-     * @param string $role Role to assign
-     * @param string|null $authToken Authorization header value
-     * @return array Auth service response
-     * @throws AuthServiceException
-     */
-    public function inviteMember(string $email, string $tenantId, string $role, ?string $authToken = null): array
-    {
-        return $this->post('/api/auth/invite', [
-            'email' => $email,
-            'tenant_id' => $tenantId,
-            'role' => $role,
-            'platform_code' => $this->platformCode,
-        ], $this->buildAuthHeader($authToken));
-    }
-
-    /**
-     * Update a membership (role or status)
-     *
-     * @param string $membershipId Membership ID
-     * @param array $data Fields to update (role, status)
-     * @param string|null $authToken Authorization header value
-     * @return array Auth service response
-     * @throws AuthServiceException
-     */
-    public function updateMembership(string $membershipId, array $data, ?string $authToken = null): array
-    {
-        return $this->put(
-            '/api/auth/memberships/' . urlencode($membershipId),
-            $data,
-            $this->buildAuthHeader($authToken)
-        );
-    }
+    // inviteMember() and updateMembership() were REMOVED (2026-07-23,
+    // AUTH-IDENTITY.md §5). Both called auth endpoints that no longer exist
+    // — `POST /api/auth/invite` was removed 2026-07-21 (invitations are
+    // platform-owned, see DESIGN-invitation-system.md), and
+    // `PUT /api/auth/memberships/:id` was removed as part of task #3204
+    // (it was the one user-curlable membership mutation, authenticated by a
+    // bare passport with no X-Platform-Secret — see AUTH-IDENTITY.md §1.1).
+    // Neither was merely deprecated-but-kept like acceptInvite() below,
+    // because unlike that method, nothing about these two was ever
+    // SemVer-relied-upon in a way worth preserving a permanently-failing
+    // stub for. Use `php stone generate invitations` for invite creation,
+    // and {@see setMembershipStatus()} for the one membership mutation that
+    // still exists.
 
     /**
      * Change password for authenticated user
@@ -446,7 +456,9 @@ class ExternalAuthServiceClient extends AuthServiceClient
      *
      * The auth service does not have a dedicated /me endpoint.
      * Uses /api/auth/memberships which returns the user's memberships
-     * (including tenant info, role, status) for the current platform.
+     * (tenant info + status only — no `role`, task #3204) for the current
+     * platform. Callers needing the identity's role in a tenant must resolve
+     * it from their OWN roles_resolver, never from this response.
      *
      * @param string|null $authToken Raw JWT token (without "Bearer " prefix)
      * @return array Auth service response

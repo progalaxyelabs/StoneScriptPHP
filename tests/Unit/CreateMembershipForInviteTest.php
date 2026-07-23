@@ -73,6 +73,30 @@ class CreateMembershipForInviteTest extends TestCase
         ], 'secret');
     }
 
+    public function test_strips_is_tenant_owner_key_before_delegating(): void
+    {
+        // AUTH-IDENTITY.md §5: an invite-accepted membership is never the
+        // tenant's owner by construction — this method must never let an
+        // is_tenant_owner=true sneak through, even if a caller supplies it.
+        $client = $this->client();
+        $client->expects($this->once())
+            ->method('createMembership')
+            ->with(
+                $this->callback(function (array $data) {
+                    $this->assertArrayNotHasKey('is_tenant_owner', $data);
+                    return true;
+                }),
+                'secret'
+            )
+            ->willReturn([]);
+
+        $client->createMembershipForInvite([
+            'identity_id'     => 'identity-1',
+            'tenant_id'       => 'tenant-1',
+            'is_tenant_owner' => true, // deliberately included — must be stripped
+        ], 'secret');
+    }
+
     public function test_passes_through_other_fields_unchanged(): void
     {
         $client = $this->client();

@@ -5,6 +5,68 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.3.0] - 2026-07-23
+
+**Framework-side half of task #3204 ("roles belong to the platform, not
+auth").** progalaxyelabs-auth's `tenant_memberships.role`/`.roles` columns
+and every endpoint that read/wrote them are being removed on that side (see
+`AUTH-IDENTITY.md`, new in this repo, for the full contract both sides are
+built against). This release makes the framework match. The card-issuing
+path (`ExchangeRoute`, `TokenExchangeService::exchangeCard()`, `ProfileRoute`)
+required NO change — it already sourced the card's role exclusively from the
+platform's own `roles_resolver`, never from auth.
+
+### Removed
+
+- `ExternalAuthServiceClient::inviteMember()` / `::updateMembership()` —
+  both called auth endpoints that no longer exist (`POST /api/auth/invite`,
+  removed 2026-07-21; `PUT /api/memberships/:id`, removed as part of #3204 —
+  it was the one user-curlable membership mutation, authenticated by a bare
+  passport with no `X-Platform-Secret`). Unlike `acceptInvite()` (kept,
+  `@deprecated`, for SemVer compatibility), these two are deleted outright —
+  nothing about them was worth preserving a permanently-failing stub for.
+
+### Added
+
+- `ExternalAuthServiceClient::createMembership()` now documents (and passes
+  through) an optional `is_tenant_owner` field — set `true` only when the
+  call is creating a brand-new tenant. It's set once, at creation, and there
+  is no update path for it — see `AUTH-IDENTITY.md` §3.2.
+- `ExternalAuthServiceClient::setMembershipStatus()` — wraps the new
+  `PUT /api/internal/membership-status` (`AUTH-IDENTITY.md` §3.3). Auth
+  refuses to suspend a tenant's owner-membership via a typed
+  `{error: "cannot_suspend_tenant_owner"}` response body, not a 5xx —
+  callers should inspect the response, not just catch the exception.
+  Deciding who may change whose status is entirely the calling platform's
+  own RBAC, before this method is invoked — see `AUTH-IDENTITY.md` §3.4 for
+  why this endpoint deliberately takes no `acting_identity_id` parameter.
+
+### Fixed
+
+- `AuthenticatedUser::fromPayload()` no longer falls back to a raw
+  `$payload['role']` claim when resolving `role_id`/`user_role`. A
+  passport's `role` claim is now always a fixed, neutral sentinel (e.g.
+  `"authenticated"`) — it never carries a real application role, and the
+  old fallback chain would have silently treated it as one the moment this
+  method ran on a passport instead of a card.
+- `RequireRoleMiddleware` was checking `$claims['role']`, but no card this
+  framework mints has ever carried that claim — cards stamp `role_id`
+  (`TokenExchangeService::exchangeCard()`). Every card holder using this
+  middleware was unconditionally 403'd regardless of their actual role.
+  Now checks `role_id` (falling back to the legacy `user_role` alias).
+  Found while working on #3204; not caused by it.
+
+### TypeScript clients (`ngx-stonescriptphp-client` / `stonescriptphp-client-core`)
+
+Released alongside as `stonescriptphp-client-core@3.3.0` /
+`ngx-stonescriptphp-client@6.5.0` — see each package's own CHANGELOG.
+Summary: `TenantMembership.role` removed (auth's `GET /api/auth/memberships`
+no longer returns one, for any plugin); `User.role` is **kept** (used by the
+unrelated Model A `StoneScriptPHPAuth` plugin, which reads it from its own
+backend) but `ProgalaxyElabsAuth` never populates it anymore;
+`TenantSelectedEvent.role` removed along with its two emit sites
+(`tenant-select.component.ts`, `tenant-login.component.ts`).
+
 ## [7.2.0] - 2026-07-21
 
 **Real, live-breaking fix + new opt-in feature.** progalaxyelabs-auth removed
