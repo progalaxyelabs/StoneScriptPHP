@@ -307,11 +307,35 @@ role at all, for either plugin.
 ## 8. Acceptance checklist
 
 **Auth side (`progalaxyelabs-auth`):**
-- [ ] §1.1 items committed (currently uncommitted working-tree changes).
-- [ ] `is_tenant_owner` column added (§3.1), never exposed via `GET /api/auth/memberships`.
-- [ ] `PUT /api/internal/membership-status` implemented exactly per §3.3 (no extra fields, no acting-identity parameter).
-- [ ] `cargo test` green.
-- [ ] Tagged per this repo's existing tag convention.
+- [x] §1.1 items committed (commit `5003e57`, auth `5.0.0`).
+- [x] `is_tenant_owner` column added (§3.1), never exposed via `GET /api/auth/memberships`.
+  Migration `038` applied to devvmlocal through the stone CLI (`gateway:migrate-main`,
+  no flags). Read-only catalog: `tenant_memberships.is_tenant_owner` NOT NULL DEFAULT
+  false, `deleted_tenant_memberships.is_tenant_owner` nullable, and exactly ONE
+  `auth_register_account` (the 8-arg `…,p_is_tenant_owner boolean`) owned by
+  `gateway_user`. Exposure boundary verified: absent from `auth_get_memberships`
+  (user-facing), present only in the admin-only `auth_list_memberships`.
+- [x] `PUT /api/internal/membership-status` implemented exactly per §3.3 (no extra fields, no acting-identity parameter).
+  Live-verified: suspend non-owner `200`, reactivate `200`, invalid status `400
+  invalid_status`, unknown id `404 membership_not_found`, bad/missing
+  `X-Platform-Secret` `400`, and suspending an `is_tenant_owner` row `409
+  cannot_suspend_tenant_owner`. `POST /api/auth/register-tenant` returns `201` and
+  persists `is_tenant_owner=true`, satisfying §3's "≥1 owner per tenant" invariant.
+- [x] `cargo test` green — `cargo test --lib`: 145 passed, 0 failed.
+  Caveat (pre-existing, unrelated to this change): `cargo test --test integration`
+  has 3 OTP tests failing on `ZeptoMail not configured` in the local test stack.
+  Confirmed pre-existing by re-running the same suite with this change stashed —
+  identical 3 failures at `HEAD`.
+- [ ] Tagged per this repo's existing tag convention. **Deliberately not done here** —
+  tagging is part of the owner-gated release step, and nothing from this work has been
+  pushed, published, or deployed. Version bumped locally to `5.1.1`.
+- [x] Declarative schema reconciled with migration `035`'s post-rename reality —
+  `tables/006` now declares `invitations_old` (was `invitations`). Prerequisite for
+  ANY further auth migration: while it declared the pre-rename name, the gateway's
+  pre-migration gate #1 saw the live `invitations_old` as undeclared and demanded a
+  DataLoss `DropTable` on every `gateway:migrate-main`. See that file's header for the
+  prod-sequencing caveat (prod is still at `034`; its first `034→038` run trips the
+  mirror-image of that gate once, and must NEVER use `--allow-drop-table`).
 
 **Framework side (`progalaxyelabs/stonescriptphp` + TS clients):**
 - [x] §5 + §6 changes made (§6 expanded during implementation — see that section's correction note re: `TenantMembership.role` vs `User.role`).
