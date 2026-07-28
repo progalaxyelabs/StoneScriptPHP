@@ -5,6 +5,48 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.6.0] - 2026-07-28
+
+### Fixed — invitation acceptance: unrecoverable token burn + guaranteed failure for tenanted invitees
+
+`InvitationCompletionService::complete()` had two defects that, together, made
+invitation acceptance fail permanently for the most common class of invitee.
+Both are fixed. **No platform code changes are required to benefit.**
+
+**1. Missing `idempotency_key` on the auth membership call (step 8).**
+Auth's `auth_register_account` refuses to create a membership when the identity
+already belongs to a *different* tenant on the same platform and no
+`idempotency_key` is supplied — it returns `tenant_already_exists` (409), which
+surfaced here as `MEMBERSHIP_FAILED` (502). Accepting an invitation is exactly
+that shape: the invitee joins the **inviter's** tenant, which is by definition
+not their own. Any platform that auto-provisions a personal workspace at signup
+(the common pattern) therefore broke for **every** invitee who had ever signed
+in before accepting.
+
+Step 8 now sends a stable `idempotency_key` derived from the invitation id
+(`'invite:' . $invitation->id`), so auth dedupes on retry and replays the
+existing membership instead of creating a duplicate. Distinct invitations still
+produce distinct keys, so genuine multi-tenant membership is unaffected.
+
+**2. `markAccepted()` ran before the only step that can fail.**
+Because `markAccepted()` spends a single-use token, a step-8 failure left the
+invitation permanently `status='accepted'` with **no membership granted**. The
+invitee could not retry (`invite_already_used`), and the only recovery was a
+manual DB edit or re-issuing the invitation. Combined with (1), this was not a
+rare edge case — it was the default outcome.
+
+`markAccepted()` is now the **last** operation, after step 8 succeeds, making a
+failed accept safely retryable. The inverse risk (membership created in auth but
+the invitation left `pending` if the final mark fails) is strictly preferable:
+re-accepting is idempotent — auth replays on the stable key, and the platform's
+own membership writer in step 6 is already required to be idempotent — whereas a
+burnt token is not recoverable in-band at all.
+
+**Found live on aasaanwork**, where an invited customer's accept 502'd and
+destroyed the invitation. A unit test was pinning the old ordering as correct
+(`expects($this->once())->method('markAccepted')` in the step-8-failure case); it
+now asserts `never()`.
+
 ## [7.5.0] - 2026-07-24
 
 ### Added — test-domain email routing (Mailpit)

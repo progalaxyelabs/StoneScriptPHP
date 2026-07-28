@@ -99,6 +99,24 @@ class InvitationCompletionServiceTest extends TestCase
                     $this->assertArrayNotHasKey('role', $data);
                     $this->assertSame('identity-123', $data['identity_id']);
                     $this->assertSame('tenant-1', $data['tenant_id']);
+
+                    // REGRESSION (2026-07-28): an idempotency_key is MANDATORY here.
+                    //
+                    // auth's auth_register_account refuses to create a membership when
+                    // the identity already belongs to a DIFFERENT tenant on the same
+                    // platform AND no idempotency_key was supplied — it returns
+                    // `tenant_already_exists` (409), which surfaces here as a 502.
+                    // Accepting an invitation is EXACTLY that shape: the invitee is
+                    // being added to the inviter's tenant, which is by definition not
+                    // their own. So without a key, accept fails for every invitee who
+                    // already has any tenant — the common case, since platforms
+                    // typically auto-provision a personal workspace at signup.
+                    //
+                    // The key must be DERIVED FROM THE INVITATION so a retry replays
+                    // (auth dedupes on the key and returns the existing membership)
+                    // rather than creating a duplicate.
+                    $this->assertArrayHasKey('idempotency_key', $data);
+                    $this->assertStringContainsString('inv-1', (string) $data['idempotency_key']);
                     return true;
                 }),
                 'secret-123'
@@ -365,11 +383,21 @@ class InvitationCompletionServiceTest extends TestCase
     {
         $repository = $this->createMock(InvitationRepositoryInterface::class);
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
-        // markAccepted() must NOT be trusted as the final word — but the
-        // service already called it (step 7) before step 8 fails; this is
-        // the accepted ordering per design doc §3.4 (steps 1-2 and 5-7
-        // never touch auth; step 8 is the only outbound call).
-        $repository->expects($this->once())->method('markAccepted');
+        // REGRESSION (2026-07-28): markAccepted() must NOT run when step 8 fails.
+        //
+        // This assertion previously read `->expects($this->once())` and its comment
+        // called the old ordering "the accepted ordering" — i.e. the test PINNED the
+        // bug as correct behaviour. It is not correct: markAccepted() burns a
+        // single-use invitation token. Running it before the only step that can fail
+        // leaves the invitation permanently `status='accepted'` with NO membership
+        // granted, and a retry then dies on `invite_already_used`. The invitee is
+        // locked out with no recovery path short of a manual DB edit.
+        //
+        // Found live on aasaanwork: an invitee who already had any tenant on the
+        // platform hit auth's `tenant_already_exists` (409) at step 8 -> 502 here ->
+        // invitation destroyed. Marking acceptance is now the LAST thing that
+        // happens, so a failed accept is retryable.
+        $repository->expects($this->never())->method('markAccepted');
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
         $tokenExchange->method('validateIdentityToken')->willReturn($this->passportClaims());

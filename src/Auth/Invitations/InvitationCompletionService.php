@@ -173,13 +173,15 @@ class InvitationCompletionService
             );
         }
 
-        // Step 7 (§3.4): mark accepted. Steps 1-2 and 5-7 never touch auth.
-        $repository->markAccepted($invitation->id, $identityId);
-
         // Step 8 (§3.4): the ONLY outbound call to auth — carries no
         // invitation data, only the resulting membership fact. §3.4.1:
         // role is deliberately never sent (createMembershipForInvite()
         // enforces this even if a caller mistakenly includes it).
+        //
+        // ORDERING CHANGED 2026-07-28: this used to run AFTER step 7
+        // (markAccepted). It now runs BEFORE — see the step 7 block below for
+        // why. Step 8 has no dependency on the invitation being marked, so the
+        // swap is behaviour-preserving on the success path.
         $platformSecret = $platformConfig['platform_secret'] ?? null;
         if (empty($platformSecret)) {
             throw new InvitationException(
@@ -196,6 +198,23 @@ class InvitationCompletionService
                 'platform_code'    => $platformConfig['platform_code'] ?? null,
                 'tenant_db_schema' => $platformConfig['tenant_db_schema'] ?? null,
                 'email'            => $invitation->email,
+                // MANDATORY (added 2026-07-28) — without this, accept fails for
+                // every invitee who already has ANY tenant on this platform.
+                //
+                // auth's auth_register_account refuses to create a membership when
+                // the identity already belongs to a DIFFERENT tenant on the same
+                // platform and no idempotency_key is supplied, returning
+                // `tenant_already_exists` (409) -> AuthServiceException -> the 502
+                // below. Accepting an invitation is precisely that shape: the invitee
+                // joins the INVITER's tenant, which is by definition not their own.
+                // Platforms that auto-provision a personal workspace at signup (the
+                // common pattern) therefore broke for every single invitee.
+                //
+                // Derived from the invitation id so it is STABLE across retries:
+                // auth dedupes on the key and replays the existing membership
+                // instead of creating a duplicate. A different invitation yields a
+                // different key, so genuine multi-tenant membership still works.
+                'idempotency_key'  => 'invite:' . $invitation->id,
             ], $platformSecret);
         } catch (\Throwable $e) {
             throw new InvitationException(
@@ -205,6 +224,26 @@ class InvitationCompletionService
                 $e
             );
         }
+
+        // Step 7 (§3.4): mark accepted — LAST, and only once every step that can
+        // fail has succeeded.
+        //
+        // ORDERING FIX (2026-07-28): this previously ran BEFORE step 8. Because
+        // markAccepted() spends a single-use token, a step-8 failure left the
+        // invitation permanently `status='accepted'` with NO membership granted:
+        // the invitee could not retry (`invite_already_used`), and the only
+        // recovery was a manual DB edit or re-issuing the invitation. Found live
+        // on aasaanwork, where step 8 failed for EVERY invitee who already had a
+        // tenant (see the idempotency_key note above) — so the token-burn was not
+        // a rare edge case but the default outcome.
+        //
+        // Marking last makes a failed accept safely retryable. The cost of the
+        // reverse ordering — a membership created in auth but the invitation left
+        // `pending` if THIS call fails — is strictly better: re-accepting is
+        // idempotent (auth replays on the stable key above; the platform's own
+        // membership writer in step 6 is required to be idempotent too), whereas
+        // an unusable burnt token is not recoverable in-band at all.
+        $repository->markAccepted($invitation->id, $identityId);
 
         $identity = [
             'id'           => $identityId,
