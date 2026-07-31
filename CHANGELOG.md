@@ -5,6 +5,33 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.6.1] - 2026-07-31
+
+### Fixed — require-dev `symfony/mailer` demanded PHP 8.4+, fleet runs PHP 8.3
+
+The framework's own `require-dev.symfony/mailer` was pinned to `^8.1`, which
+(per Symfony's version train) needs PHP >=8.4.1. The whole fleet runs
+`php:8.3-fpm-bookworm`. `require-dev` isn't transitive, so this never broke a
+consuming platform directly — but the framework's own dev/test docs are the
+reference platforms copy from when they add the Mailpit dev-mail path (see
+`MailpitMailer.php` DEPENDENCY NOTE), and `^8.1` was the wrong value to copy:
+any platform that did (medstoreapp did, alert #7364) locked a `symfony/mailer`
+version requiring PHP 8.4+ into its OWN `require`, which then fatals on boot
+under the fleet's actual PHP 8.3 runtime — worse, this reproduces on ANY
+machine whose local PHP happens to be 8.4+ (this workstation runs PHP 8.4.11),
+since without a `config.platform.php` floor, Composer resolves against
+whatever PHP is running `composer update`, not the target runtime.
+
+Changed `require-dev.symfony/mailer` from `^8.1` to `^7.0` — Symfony 7.x
+supports PHP 8.2 through 8.4+ with no upper bound, so this is unconditionally
+safe to resolve on any machine (dev laptop or CI) without needing a platform
+pin. This is the same constraint medstoreapp and aasaanwork already carry in
+their own composer.json as a local workaround; the framework's own reference
+now matches so future platforms copy the right value.
+
+No `require` (production) dependency changed — this is a require-dev-only fix
+with zero autoload/runtime impact for platforms that don't touch email.
+
 ## [7.6.0] - 2026-07-28
 
 ### Fixed — invitation acceptance: unrecoverable token burn + guaranteed failure for tenanted invitees
