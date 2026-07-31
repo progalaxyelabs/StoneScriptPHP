@@ -11,7 +11,7 @@ use StoneScriptPHP\Lib\Email\MailerFactory;
 // TODO: import this platform's own privileged-role authorization helper —
 // e.g. `use App\Lib\AdminScope;`. The framework generator cannot know which
 // roles may invite, or what roles they may grant — that decision is 100%
-// platform-owned, per design doc §0 ("roles belong in api/platform").
+// platform-owned ("roles belong in api/platform").
 
 /**
  * POST {prefix}/invitations

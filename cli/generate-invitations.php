@@ -8,8 +8,8 @@
  * `php stone generate model` wrappers), three route handlers, a generated
  * repository, and a config/invitations.php hook file.
  *
- * progalaxyelabs-auth is NEVER involved in invitation storage — see
- * DESIGN-invitation-system.md §0 (non-negotiable constraint) in this repo.
+ * The external auth service is NEVER involved in invitation storage — this
+ * is a non-negotiable constraint of the design.
  * The framework ships the generic, correctness-sensitive orchestration
  * piece (StoneScriptPHP\Auth\Invitations\InvitationCompletionService) that
  * the generated PostAcceptInvitationRoute calls into; this command only
@@ -25,7 +25,7 @@
  * This will create:
  *   - migrations/{N}_create_platform_invitations.pgsql (or .sql — see
  *     resolveMigrationFilename() below for why the extension/numbering is
- *     dynamic, not the design doc's fixed assumption)
+ *     dynamic, not a fixed assumption)
  *   - src/postgresql/functions/{create,get,mark}_platform_invitation*.pgsql
  *   - src/App/Database/Functions/Fn*.php (via `php stone generate model`)
  *   - src/App/Routes/Invitations/{PlatformInvitationRepository,
@@ -67,7 +67,7 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "============================\n\n";
     echo "Scaffolds a platform-owned invitation system (table + SQL functions +\n";
     echo "routes + repository + config hook) into THIS project. Auth is never\n";
-    echo "involved in invitation storage — see DESIGN-invitation-system.md §0.\n\n";
+    echo "involved in invitation storage.\n\n";
     echo "Usage: php stone generate invitations\n\n";
     echo "This will create:\n";
     echo "  - migrations/{N}_create_platform_invitations.pgsql\n";
@@ -114,20 +114,20 @@ foreach ($dirs as $name => $dir) {
  * Decide the migration's destination filename + a human-readable note
  * about which convention was used.
  *
- * DEVIATION FROM DESIGN DOC §4.2 (documented per this repo's own rule that
- * deviations must be explicit, not silent): the design doc proposed a fixed
+ * DEVIATION FROM THE ORIGINAL DESIGN (documented per this repo's own rule that
+ * deviations must be explicit, not silent): the original design proposed a fixed
  * `{next_number}_create_platform_invitations.pgsql` name, following the
  * `001_create_users_table.sql`-style sequential-numbered convention
  * `src/Templates/Migrations/` (and `cli/generate-auth.php`) use for
- * from-scratch scaffolding. Direct inspection of a real fleet platform
- * (aasaanwork-platform/docker/api/migrations/, 2026-07-21) shows production
- * platforms do NOT use that convention — they use gateway-registration-mode
+ * from-scratch scaffolding. Direct inspection of a real fleet platform's
+ * migrations directory shows production platforms do NOT use that
+ * convention — they use gateway-registration-mode
  * TIMESTAMPED migrations (`YYYY-MM-DD_HH-MM-SS_description.sql`). This
  * function follows whichever convention the TARGET project's own
  * migrations/ directory already uses:
  *   - If sequential-numbered migrations exist (e.g. this project ran
  *     `php stone generate auth:email-password` first, which does use that
- *     convention) → continue the same sequence, matching §4.2 exactly.
+ *     convention) → continue the same sequence exactly.
  *   - Otherwise (no migrations yet, OR the real fleet's timestamp
  *     convention is already in use) → use a timestamped filename, so the
  *     file this command produces is immediately consistent with what
@@ -175,7 +175,7 @@ function resolveMigrationFilename(string $migrationsDir): array
 
     return [
         "{$timestamp}_create_platform_invitations.sql",
-        'no sequential-numbered migrations found — used the real fleet timestamp convention (aasaanwork-platform, 2026-07-21) instead of §4.2\'s from-scratch sequential-number assumption',
+        'no sequential-numbered migrations found — used the real fleet timestamp convention instead of a from-scratch sequential-number assumption',
     ];
 }
 
@@ -291,7 +291,7 @@ if (file_exists($configDestination)) {
 
 // ── 7. Register routes in src/config/routes.php ─────────────────────────
 //
-// NOTE: design doc §4.2 said this "same mechanic generate-auth.php already
+// NOTE: the original design assumed this was the "same mechanic generate-auth.php already
 // uses". On inspection, generate-auth.php's help text CLAIMS to update
 // routes.php but its actual implementation does not — it only prints
 // manual instructions (verified by reading cli/generate-auth.php in full).
@@ -305,7 +305,7 @@ if (file_exists($configDestination)) {
 //
 // Route paths are registered WITHOUT a tenant-prefix (e.g. `/invitations`,
 // not `/portal/tenant/{tenantId}/invitations`) because that prefix varies
-// per platform (T2 vs T3 — see design doc §4.2's own `{prefix}` placeholder)
+// per platform (T2 vs T3 — every platform's own routing convention differs)
 // and this generator has no way to know it. Adjust the paths below in
 // src/config/routes.php for this platform's own routing convention after
 // generation — printed as an explicit next step.

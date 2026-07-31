@@ -5,7 +5,7 @@ namespace Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Gateway CLI option-parsing tests (#2810).
+ * Gateway CLI option-parsing tests.
  *
  * Verifies that parseGatewayOptions() maps the granular --allow-* safety flags
  * to the correct gateway allow-tokens, handles --dangerously-skip-verification,

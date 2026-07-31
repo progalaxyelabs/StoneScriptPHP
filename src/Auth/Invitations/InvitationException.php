@@ -8,14 +8,13 @@ namespace StoneScriptPHP\Auth\Invitations;
  * InvitationException
  *
  * Typed exception raised by {@see InvitationCompletionService}, carrying the
- * error-code taxonomy design doc §1.1/§3.4 defines for accept-invite
+ * error-code taxonomy this design defines for accept-invite
  * failures. The first four codes are the taxonomy inherited from
- * progalaxyelabs-auth's now-removed `accept-invite` handlers (kept
- * byte-for-byte identical so the killed ngx-stonescriptphp-client
- * `accept-invite-logic.ts` salvage work — out of scope for this repo, see
- * design doc §1.3/§5 step 5 — needs zero code-mapping changes for those
- * four). `EMAIL_MISMATCH` is new — see design doc §3.4 step 4 and §6 item 3
- * for why this failure mode did not exist under auth's old atomic accept.
+ * the external auth service's now-removed `accept-invite` handlers (kept
+ * byte-for-byte identical so any client-side salvage work
+ * needs zero code-mapping changes for those
+ * four). `EMAIL_MISMATCH` is new —
+ * this failure mode did not exist under auth's old atomic accept.
  *
  * Mirrors {@see \StoneScriptPHP\Auth\TokenExchangeException}'s shape
  * (message + short string error code + toArray()) rather than
@@ -37,7 +36,7 @@ class InvitationException extends \Exception
     /** Invitation row exists, `status` is not `pending` (already accepted or revoked). */
     public const ALREADY_USED = 'invite_already_used';
 
-    /** Authenticated passport's email does not match the invitation's email (design doc §3.4 step 4). */
+    /** Authenticated passport's email does not match the invitation's email. */
     public const EMAIL_MISMATCH = 'invite_email_mismatch';
 
     /** The Authorization: Bearer passport failed JWKS/issuer/audience validation. */

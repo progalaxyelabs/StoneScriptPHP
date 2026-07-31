@@ -182,7 +182,7 @@ class GenerateInvitationsCommandTest extends TestCase
         $this->assertArrayHasKey('/invitations/{token}/accept', $routes['POST']);
         $this->assertTrue($routes['POST']['/invitations/{token}/accept']['is_public']);
         // PostCreateInvitationRoute must NOT be public — it's the
-        // authenticated "who can invite" route (design doc §4.2).
+        // authenticated "who can invite" route.
         $this->assertArrayNotHasKey('is_public', $routes['POST']['/invitations']);
     }
 
@@ -210,7 +210,7 @@ class GenerateInvitationsCommandTest extends TestCase
     }
 
     /**
-     * DEVIATION FROM DESIGN DOC §4.2 (documented in
+     * DEVIATION FROM THE ORIGINAL DESIGN (documented in
      * cli/generate-invitations.php's resolveMigrationFilename() docblock
      * too): a target with no sequential-numbered migrations falls back to
      * the real fleet's timestamp-based naming convention instead of

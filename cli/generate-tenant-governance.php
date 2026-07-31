@@ -10,15 +10,14 @@
  * public ones, plus an OPTIONAL config/tenant-governance.php holding the
  * display-name enricher hook.
  *
- * See TENANT-GOVERNANCE.md in the progalaxyelabs/stonescriptphp framework
- * repo for the full model. The framework ships the generic resolver
+ * The framework ships the generic resolver
  * (StoneScriptPHP\Auth\TenantGovernance\TenantGovernanceResolver) that a
  * platform wires into config/auth.php; this command only scaffolds the
  * platform-specific storage + SQL layer — same precedent as
  * `php stone generate invitations`.
  *
  * Deliberately does NOT scaffold promote/demote/invite HTTP routes or any
- * admin UI (TENANT-GOVERNANCE.md §6) — those are platform-specific business
+ * admin UI — those are platform-specific business
  * routes, built on top of the generated functions the same way any other
  * feature route is built.
  *
@@ -57,7 +56,7 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "Scaffolds a platform-owned tenant membership + governance model\n";
     echo "(tenant_memberships table + trigger + 14 SQL functions + model\n";
     echo "wrappers + optional config) into THIS project. Roles/governance live\n";
-    echo "in this platform, never in auth — see TENANT-GOVERNANCE.md.\n\n";
+    echo "in this platform, never in auth.\n\n";
     echo "Usage: php stone generate tenant-governance\n\n";
     echo "This will create:\n";
     echo "  - migrations/{N}_create_tenant_memberships.pgsql\n";
@@ -66,7 +65,7 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "  - src/App/Database/Functions/Fn*.php (via php stone generate model, public fns only)\n";
     echo "  - config/tenant-governance.php (optional enricher hook)\n\n";
     echo "Does NOT register HTTP routes — promote/demote/invite endpoints are\n";
-    echo "platform-specific (TENANT-GOVERNANCE.md §6). Wire config/auth.php's\n";
+    echo "platform-specific. Wire config/auth.php's\n";
     echo "tenants_resolver/roles_resolver to TenantGovernanceResolver yourself.\n";
     exit(0);
 }
@@ -83,7 +82,7 @@ if (!is_dir($templatesPath)) {
 
 // ── Layout detection ────────────────────────────────────────────────────
 //
-// tenant_memberships is a MAIN-DB table (TENANT-GOVERNANCE.md §2). Real fleet
+// tenant_memberships is a MAIN-DB table. Real fleet
 // platforms nest main-DB schema under src/postgresql/main/postgresql/{tables,
 // functions,migrations}. A simpler project may use the flat
 // src/postgresql/{tables,functions} + migrations/ layout the invitations

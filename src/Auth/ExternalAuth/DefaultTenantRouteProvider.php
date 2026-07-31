@@ -25,13 +25,12 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\CheckTenantSlugRoute;
  * platform that never touches the new `tenant_route_provider` option gets
  * byte-for-byte identical route registration to pre-Phase-1 StoneScriptPHP.
  *
- * REMOVED 2026-07-21 (real, live-breaking fix — see
- * DESIGN-invitation-system.md §1.3/§4.3/§5 in this repo): `invite-member`
+ * REMOVED (real, live-breaking fix): `invite-member`
  * and `accept-invite` used to be registered here, proxying to
  * `POST /api/auth/invite` / `POST /api/auth/accept-invite` on the auth
  * service. Those auth-service endpoints are gone — the invitation system
- * moved fully platform-side (auth owns zero invitation data, per the design
- * doc's non-negotiable constraint §0). Every platform still on framework
+ * moved fully platform-side (auth owns zero invitation data, by design).
+ * Every platform still on framework
  * defaults had these two routes live and auto-registered, silently pointing
  * at endpoints that now 404/error. Removed entirely rather than left
  * toggled-off-by-default, because there is no configuration under which

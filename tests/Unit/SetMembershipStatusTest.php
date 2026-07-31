@@ -8,8 +8,8 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
 
 /**
- * Unit test for ExternalAuthServiceClient::setMembershipStatus() —
- * AUTH-IDENTITY.md §3.3/§5. No network I/O: the protected `put()` method
+ * Unit test for ExternalAuthServiceClient::setMembershipStatus() — sets a
+ * tenant membership active/suspended. No network I/O: the protected `put()` method
  * (the only one that would actually reach the network via curl) is stubbed
  * via a partial mock, isolating exactly what this method is responsible for
  * — building the right endpoint/body/header shape.
@@ -64,7 +64,7 @@ class SetMembershipStatusTest extends TestCase
 
     public function test_propagates_auth_error_response_body_without_throwing(): void
     {
-        // AUTH-IDENTITY.md §3.5: auth refuses to suspend the tenant owner by
+        // Auth refuses to suspend the tenant owner by
         // returning a typed {error: ...} body, not a 5xx — this method must
         // pass that straight through, never swallow or rethrow it as an
         // exception, since it's a normal (if unsuccessful) response shape.

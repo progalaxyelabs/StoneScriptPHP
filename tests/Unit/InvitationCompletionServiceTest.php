@@ -15,7 +15,7 @@ use StoneScriptPHP\Auth\TokenExchangeService;
 
 /**
  * Unit tests for InvitationCompletionService — the shared, framework-owned
- * accept-invite orchestration piece (design doc §3.4 steps 1-4, 7-9).
+ * accept-invite orchestration piece.
  *
  * Mocks the HTTP boundary (TokenExchangeService::validateIdentityToken()'s
  * JWKS fetch, ExternalAuthServiceClient::createMembershipForInvite()'s
@@ -95,7 +95,7 @@ class InvitationCompletionServiceTest extends TestCase
             ->method('createMembershipForInvite')
             ->with(
                 $this->callback(function (array $data) {
-                    // §3.4.1 — role must NEVER be sent, even though $role below is 'employee'.
+                    // role must NEVER be sent, even though $role below is 'employee'.
                     $this->assertArrayNotHasKey('role', $data);
                     $this->assertSame('identity-123', $data['identity_id']);
                     $this->assertSame('tenant-1', $data['tenant_id']);
@@ -211,7 +211,7 @@ class InvitationCompletionServiceTest extends TestCase
         $this->assertSame('fallback-token', $result['access_token']);
     }
 
-    // ── Taxonomy failures (design doc §3.4 / §1.1) ──────────────────────
+    // ── Taxonomy failures ────────────────────────────────────────────
 
     public function test_complete_throws_not_found_when_repository_returns_null(): void
     {
@@ -293,7 +293,7 @@ class InvitationCompletionServiceTest extends TestCase
     }
 
     /**
-     * Design doc §3.4 step 4 / §6 item 3 — this failure mode did not exist
+     * This failure mode did not exist
      * under auth's old atomic accept; it's an emergent consequence of
      * decoupling identity creation from invitation acceptance.
      */
@@ -393,7 +393,7 @@ class InvitationCompletionServiceTest extends TestCase
         // granted, and a retry then dies on `invite_already_used`. The invitee is
         // locked out with no recovery path short of a manual DB edit.
         //
-        // Found live on aasaanwork: an invitee who already had any tenant on the
+        // Found live in production: an invitee who already had any tenant on the
         // platform hit auth's `tenant_already_exists` (409) at step 8 -> 502 here ->
         // invitation destroyed. Marking acceptance is now the LAST thing that
         // happens, so a failed accept is retryable.

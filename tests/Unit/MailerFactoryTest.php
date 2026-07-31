@@ -11,7 +11,7 @@ use StoneScriptPHP\Lib\Email\MyZeptoMail;
 
 /**
  * Unit tests for the test-domain email routing (MailerFactory + MailpitMailer),
- * the framework port of progalaxyelabs-auth's per-recipient provider routing.
+ * the framework port of the central auth service's per-recipient provider routing.
  *
  * These drive the env vars directly via putenv() (the classes read getenv() at
  * decision time, exactly so this is controllable), and restore them after.

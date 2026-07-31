@@ -9,14 +9,13 @@ use StoneScriptPHP\Database;
 /**
  * TenantGovernanceResolver — the framework-shipped default implementation of
  * the `tenants_resolver`/`roles_resolver` closures that ExchangeRoute
- * (StoneScriptPHP\Auth\ExternalAuth\Routes\ExchangeRoute) expects. See
- * TENANT-GOVERNANCE.md §5.
+ * (StoneScriptPHP\Auth\ExternalAuth\Routes\ExchangeRoute) expects.
  *
  * Ships IN the framework (unlike the table + twelve SQL functions, which are
  * scaffolded per-platform by `php stone generate tenant-governance`) because
  * this logic never varies platform to platform — only the schema it queries
- * does, and that schema is fixed by TENANT-GOVERNANCE.md §2. A platform wires
- * it in config/auth.php with two lines:
+ * does, and that schema is fixed by the generated tenant-governance tables.
+ * A platform wires it in config/auth.php with two lines:
  *
  *   $governance = new TenantGovernanceResolver();
  *   return [
@@ -27,9 +26,9 @@ use StoneScriptPHP\Database;
  *
  * Both closures read from the platform's OWN main DB via
  * `get_identity_tenant_memberships()` / `resolve_role_id()` — zero dependency
- * on progalaxyelabs-auth's membership response beyond the identity id, which
- * is already on the verified passport claims. This is the whole point of
- * TENANT-GOVERNANCE.md: "roles belong to the platform, not auth."
+ * on the external auth service's membership response beyond the identity id,
+ * which is already on the verified passport claims. This is the whole
+ * point of platform-owned governance: roles belong to the platform, not auth.
  *
  * ## Display-name enrichment (why the constructor takes an optional callable)
  *
@@ -197,8 +196,8 @@ final class TenantGovernanceResolver
 
     /**
      * Extract the identity id from passport claims. A passport carries the
-     * identity id as both `sub` and `identity_id` (progalaxyelabs-auth mints
-     * both — see AUTH-IDENTITY.md); prefer `sub` (the JWT-standard subject),
+     * identity id as both `sub` and `identity_id` (the external auth service
+     * mints both); prefer `sub` (the JWT-standard subject),
      * fall back to `identity_id`.
      */
     private static function identityIdFromClaims(array $claims): ?string

@@ -15,10 +15,10 @@ namespace StoneScriptPHP\Auth\Invitations;
  * {@see InvitationCompletionService}.
  *
  * `tenantId` is nullable and NOT populated by the framework-generated
- * `platform_invitations` table by default (see design doc §2 — for T2
+ * `platform_invitations` table by default (for T2
  * platforms, tenant isolation is per-DB via the gateway, so the table has no
- * `tenant_id` column at all). T3 platforms (shared-schema multi-tenancy,
- * e.g. medstoreapp) that add their own `tenant_id` column to the generated
+ * `tenant_id` column at all). T3 platforms (shared-schema multi-tenancy)
+ * that add their own `tenant_id` column to the generated
  * migration should populate this field from their own repository
  * implementation — the framework does not assume either model.
  *

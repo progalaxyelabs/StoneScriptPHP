@@ -19,7 +19,7 @@ declare(strict_types=1);
  *   ];
  *
  * This file exists only to hold the OPTIONAL display-name enricher (see
- * TENANT-GOVERNANCE.md §5). get_identity_tenant_memberships() returns tenant
+ * see get_identity_tenant_memberships()). It returns tenant
  * ids + governance flags but NOT a tenant's human-readable name/slug — those
  * live on THIS platform's own `tenants` table, whose column names the
  * framework can't know. If you want names in the exchange response's

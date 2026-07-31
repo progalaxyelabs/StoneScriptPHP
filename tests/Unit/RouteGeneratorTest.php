@@ -28,7 +28,7 @@ class RouteGeneratorTest extends TestCase
         // Framework\ -> StoneScriptPHP\ rename (e.g. expecting Framework\ApiResponse).
         // Retargeting them would rewrite the tests' intent / fabricate coverage,
         // so they are skipped-with-reason here and belong to the project skeleton
-        // repo. See #2827.
+        // repo.
         $this->markTestSkipped(
             'Asserts scaffolded-project route conventions (App\\Routes, src/config/routes.php, generate-route output) absent in the bare framework lib — covered by the project skeleton repo.'
         );

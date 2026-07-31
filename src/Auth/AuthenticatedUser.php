@@ -85,8 +85,8 @@ class AuthenticatedUser
         // Card model: role_id (single string).
         // Legacy: roles[] array — read first element; or scalar user_role.
         //
-        // `role` is DELIBERATELY excluded from this fallback chain (task
-        // #3204 / AUTH-IDENTITY.md §4): a passport's `role` claim is now
+        // `role` is DELIBERATELY excluded from this fallback chain: a
+        // passport's `role` claim is now
         // always a fixed, neutral sentinel (e.g. "authenticated") stamped by
         // auth for every identity-authenticated token — it never carries an
         // application-role value and must never be mistaken for one, even

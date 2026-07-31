@@ -233,11 +233,10 @@ class ExternalAuthConfig
             'onboarding_status' => $options['onboarding_status'] ?? true,
             'password_reset' => $options['password_reset'] ?? true,
             'change_password' => $options['change_password'] ?? true,
-            // 'invite' / 'accept_invite' REMOVED 2026-07-21 — the auth-service
+            // 'invite' / 'accept_invite' REMOVED — the auth-service
             // endpoints they proxied to (`POST /api/auth/invite`,
             // `POST /api/auth/accept-invite`) no longer exist (see
-            // DefaultTenantRouteProvider's docblock and
-            // DESIGN-invitation-system.md §0/§1.3/§4.3 in this repo).
+            // DefaultTenantRouteProvider's docblock).
             // Invitations are now an opt-in, platform-generated feature via
             // `php stone generate invitations`, not a framework default.
             'oauth' => $options['oauth'] ?? false,

@@ -9,7 +9,7 @@ use StoneScriptPHP\Auth\AuthenticatedUser;
 
 /**
  * Unit tests for AuthenticatedUser::fromPayload() — in particular the
- * task #3204 / AUTH-IDENTITY.md §4 change removing `role` from the
+ * change removing `role` from the
  * role_id/user_role fallback chain. A raw passport's `role` claim is now
  * always a fixed neutral sentinel (e.g. "authenticated"), never a real
  * application role, and must never leak into `role_id`/`user_role` even via
@@ -53,7 +53,7 @@ class AuthenticatedUserTest extends TestCase
     }
 
     /**
-     * The regression test for #3204: a raw passport carrying auth's neutral
+     * The regression test for the auth role-ownership change: a raw passport carrying auth's neutral
      * `role: "authenticated"` sentinel (or ANY value in `role`) must NEVER
      * populate role_id/user_role. Before this fix, `role` sat in the `??`
      * fallback chain and would have silently done exactly that the moment
@@ -63,7 +63,7 @@ class AuthenticatedUserTest extends TestCase
     {
         $user = AuthenticatedUser::fromPayload([
             'sub'  => 'identity-1',
-            'role' => 'authenticated', // auth's fixed post-#3204 sentinel value
+            'role' => 'authenticated', // auth's fixed neutral sentinel value
         ]);
 
         $this->assertNull($user->role_id, 'role_id must NOT be populated from the passport role claim');

@@ -11,7 +11,7 @@ use StoneScriptPHP\Database;
 /**
  * Unit tests for the framework-shipped TenantGovernanceResolver — the default
  * tenants_resolver/roles_resolver implementation platforms wire into
- * config/auth.php (TENANT-GOVERNANCE.md §5).
+ * config/auth.php.
  *
  * Uses Database::fake() to stub get_identity_tenant_memberships /
  * resolve_role_id with the EXACT o_-prefixed row shape the gateway returns

@@ -2,7 +2,7 @@
 -- Looks up an invitation by the sha256 hex hash of its raw token — never
 -- the raw token itself. Called by PlatformInvitationRepository::findByTokenHash()
 -- (via the `php stone generate model` wrapper FnGetPlatformInvitationByTokenHash),
--- which InvitationCompletionService::complete() depends on (design doc §3.4 step 1).
+-- which InvitationCompletionService::complete() depends on.
 CREATE OR REPLACE FUNCTION get_platform_invitation_by_token_hash(
     i_token_hash TEXT
 )

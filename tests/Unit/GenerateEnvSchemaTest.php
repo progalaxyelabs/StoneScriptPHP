@@ -23,7 +23,7 @@ class FixtureEnv
 
 /**
  * Unit coverage for cli/generate-env.php::buildSchemaFromReflection() — the
- * reflection-based replacement for the removed Env::getSchema() (#2873).
+ * reflection-based replacement for the removed Env::getSchema().
  *
  * Guards against the exact regression that sat undetected since v2.3.0: the
  * generator silently drifting from the Env class's actual API.

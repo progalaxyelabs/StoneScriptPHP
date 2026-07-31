@@ -38,7 +38,7 @@ StoneScriptPHP is a **thin routing + DTO + PG-function-binding layer** for PHP A
 - **Not a full-stack framework**: No ORM, no templating, no asset pipeline, no queue system.
 - **Not database-agnostic**: PostgreSQL only, with specific PL/pgSQL conventions.
 - **Not standalone**: Requires [stonescriptphp-server](https://github.com/progalaxyelabs/StoneScriptPHP-Server) skeleton for project setup.
-- **Not auth-complete**: JWT validation is built-in; token issuance is delegated to external auth services (progalaxyelabs-auth).
+- **Not auth-complete**: JWT validation is built-in; token issuance is delegated to external auth services.
 
 ### Related Packages
 
@@ -464,7 +464,7 @@ StoneScriptPHP provides:
 
 Token issuance is NOT handled by StoneScriptPHP. It is delegated to:
 
-- **progalaxyelabs-auth**: Centralized auth service for all platforms
+- **A centralized external auth service**: shared identity/auth microservice for all platforms
 - **Self-contained mode**: Project generates own JWTs using RSA keys in `keys/`
 
 ### JWT Validation

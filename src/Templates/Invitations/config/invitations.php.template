@@ -8,11 +8,11 @@ declare(strict_types=1);
  * Mirrors config/auth.php's existing pattern: this is where THIS platform
  * wires its own role model and tenant-membership storage into the
  * framework-shipped InvitationCompletionService, via the two closures
- * below. Edit freely — everything here is platform-owned, per design doc §0.
+ * below. Edit freely — everything here is platform-owned.
  */
 return [
     // Base URL of this platform's Angular app, used to build the invite
-    // link emailed to invitees, e.g. https://app.medstoreapp.in
+    // link emailed to invitees, e.g. https://app.example.com
     'portal_base_url' => getenv('PORTAL_BASE_URL') ?: '',
 
     // How long a created invitation stays valid, in days.
@@ -25,7 +25,7 @@ return [
     //
     // Decides the role actually granted on accept. Default below simply
     // trusts the role stored on the invitation row at creation time
-    // (design doc §3.4 step 5 — role authority lives in
+    // (role authority lives in
     // platform_invitations.role, never an auth claim). Override this if
     // this platform needs to re-validate or re-map roles at accept time.
     'role_resolver' => function (\StoneScriptPHP\Auth\Invitations\InvitationRecord $invitation): string {
@@ -35,9 +35,9 @@ return [
     // fn(InvitationRecord $invitation, array $passportClaims, string $role): array
     //
     // Writes THIS platform's own tenant-membership record — whatever
-    // table/shape this platform already uses (e.g. aasaanwork's
-    // customers/vendors tables with an auth_identity_id column,
-    // medstoreapp's own membership model, or a fresh table for a new
+    // table/shape this platform already uses (e.g. a customers/vendors
+    // pair of tables with an auth_identity_id column, a bespoke
+    // membership model, or a fresh table for a new
     // platform). MUST return an array containing at least a `tenant_id`
     // string key; every other key is passed through as-is into the
     // accept-invite response's `membership` field.
@@ -72,9 +72,9 @@ return [
 
         // T2 (card-model) platforms: leave true to mint a local card on
         // accept, same pattern as ProvisionTenantRoute::mintProvisionCard().
-        // T3 platforms (medstoreapp-style, tenant-less identity JWT +
+        // T3 platforms (shared-schema-style, tenant-less identity JWT +
         // explicit tenant_id): set false to get the passthrough
-        // identity-token + tenant_id contract instead (design doc §3.4.2).
+        // identity-token + tenant_id contract instead.
         'card' => true,
         'signing_private_key_path'       => getenv('JWT_PRIVATE_KEY_PATH') ?: '',
         'signing_private_key_passphrase' => getenv('JWT_PRIVATE_KEY_PASSPHRASE') ?: null,

@@ -279,9 +279,9 @@ class DatabaseTest extends TestCase
      * Test that array_to_class_object converts a native JSON boolean `true`
      * (StoneScriptDB Gateway mode, post json_decode) to true.
      *
-     * Regression guard for alert #5418: gateway-mode boolean output columns
-     * were always coerced to false because the mapper only matched libpq text
-     * 't'. Native PHP `true` from json_decode must map to true.
+     * Regression guard: gateway-mode boolean output columns were always
+     * coerced to false because the mapper only matched libpq text 't'.
+     * Native PHP `true` from json_decode must map to true.
      */
     public function test_array_to_class_object_converts_native_json_bool_true(): void
     {
@@ -432,7 +432,7 @@ class DatabaseTest extends TestCase
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // o_ output-column resolution (SPEC §5, Output Column Naming) — #2825
+    // o_ output-column resolution (SPEC §5, Output Column Naming)
     // Regression guard: clean (unprefixed) model properties MUST map gateway
     // output whether the result keys are o_-prefixed or not, across all mappers,
     // WITHOUT the legacy $as_out_param flag. This is the cat-and-mouse killer:
@@ -495,7 +495,7 @@ class DatabaseTest extends TestCase
 
     /**
      * result_as_table maps o_-prefixed rows to clean-props models — the exact
-     * #2811 BLOCKER 1 scenario (RETURNS TABLE function output).
+     * RETURNS TABLE function output scenario that previously blocked this path.
      */
     public function test_result_as_table_maps_o_prefixed_rows(): void
     {

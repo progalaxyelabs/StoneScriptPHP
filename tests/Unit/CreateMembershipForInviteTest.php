@@ -9,7 +9,7 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
 
 /**
  * Unit test for ExternalAuthServiceClient::createMembershipForInvite() —
- * design doc §3.4.1/§4.2's deliberate "never send role" wrapper around
+ * the deliberate "never send role" wrapper around
  * createMembership(). No network I/O: createMembership() (the only method
  * that would actually reach the network via AuthServiceClient::post()) is
  * stubbed via a partial mock, isolating exactly the behavior this method
@@ -75,7 +75,7 @@ class CreateMembershipForInviteTest extends TestCase
 
     public function test_strips_is_tenant_owner_key_before_delegating(): void
     {
-        // AUTH-IDENTITY.md §5: an invite-accepted membership is never the
+        // An invite-accepted membership is never the
         // tenant's owner by construction — this method must never let an
         // is_tenant_owner=true sneak through, even if a caller supplies it.
         $client = $this->client();

@@ -15,7 +15,7 @@ The framework's own `require-dev.symfony/mailer` was pinned to `^8.1`, which
 consuming platform directly — but the framework's own dev/test docs are the
 reference platforms copy from when they add the Mailpit dev-mail path (see
 `MailpitMailer.php` DEPENDENCY NOTE), and `^8.1` was the wrong value to copy:
-any platform that did (medstoreapp did, alert #7364) locked a `symfony/mailer`
+any platform that did locked a `symfony/mailer`
 version requiring PHP 8.4+ into its OWN `require`, which then fatals on boot
 under the fleet's actual PHP 8.3 runtime — worse, this reproduces on ANY
 machine whose local PHP happens to be 8.4+ (this workstation runs PHP 8.4.11),
@@ -25,7 +25,7 @@ whatever PHP is running `composer update`, not the target runtime.
 Changed `require-dev.symfony/mailer` from `^8.1` to `^7.0` — Symfony 7.x
 supports PHP 8.2 through 8.4+ with no upper bound, so this is unconditionally
 safe to resolve on any machine (dev laptop or CI) without needing a platform
-pin. This is the same constraint medstoreapp and aasaanwork already carry in
+pin. This is the same constraint some fleet platforms already carry in
 their own composer.json as a local workaround; the framework's own reference
 now matches so future platforms copy the right value.
 
@@ -69,7 +69,7 @@ re-accepting is idempotent — auth replays on the stable key, and the platform'
 own membership writer in step 6 is already required to be idempotent — whereas a
 burnt token is not recoverable in-band at all.
 
-**Found live on aasaanwork**, where an invited customer's accept 502'd and
+**Found live in production**, where an invited customer's accept 502'd and
 destroyed the invitation. A unit test was pinning the old ordering as correct
 (`expects($this->once())->method('markAccepted')` in the step-8-failure case); it
 now asserts `never()`.
@@ -128,11 +128,11 @@ now asserts `never()`.
 ## [7.4.0] - 2026-07-24
 
 **Platform-owned tenant governance — the replacement for the role data 7.3.0
-took out of auth.** AUTH-IDENTITY.md (7.3.0) correctly removed role/RBAC data
+took out of auth.** The 7.3.0 release correctly removed role/RBAC data
 from the auth service, but left a gap: nothing gave platforms a durable,
 cross-tenant-queryable membership ledger of their own to put in its place.
 This release ships that primitive, once, in the framework — so no platform
-hand-rolls it (and diverges) again. Full model in `TENANT-GOVERNANCE.md`.
+hand-rolls it (and diverges) again.
 
 ### Added
 
@@ -145,7 +145,7 @@ hand-rolls it (and diverges) again. Full model in `TENANT-GOVERNANCE.md`.
   nested `src/postgresql/main/postgresql/` layout real platforms use and
   places files there, else falls back to the flat layout. Deliberately
   registers NO HTTP routes — promote/demote/invite endpoints are
-  platform-specific (`TENANT-GOVERNANCE.md` §6). Mirrors the existing
+  platform-specific. Mirrors the existing
   `php stone generate invitations` precedent (scaffold into the consuming
   repo; the platform owns and edits from there).
 - **`StoneScriptPHP\Auth\TenantGovernance\TenantGovernanceResolver`** — a
@@ -156,7 +156,7 @@ hand-rolls it (and diverges) again. Full model in `TENANT-GOVERNANCE.md`.
   Wire it into `config/auth.php` in two lines; pass an optional enricher
   closure for human-readable tenant names in `available_tenants`.
 
-### Governance model (`TENANT-GOVERNANCE.md`)
+### Governance model
 
 - Tiered flags per identity × tenant: `is_tenant_creator` (permanent
   provenance marker, row never hard-deletable — DB-trigger enforced),
@@ -174,10 +174,9 @@ hand-rolls it (and diverges) again. Full model in `TENANT-GOVERNANCE.md`.
 ## [7.3.0] - 2026-07-23
 
 **Framework-side half of "roles belong to the platform, not auth."**
-progalaxyelabs-auth's `tenant_memberships.role`/`.roles` columns
-and every endpoint that read/wrote them are being removed on that side (see
-`AUTH-IDENTITY.md`, new in this repo, for the full contract both sides are
-built against). This release makes the framework match. The card-issuing
+The external auth service's `tenant_memberships.role`/`.roles` columns
+and every endpoint that read/wrote them are being removed on that side (a
+contract both sides are built against). This release makes the framework match. The card-issuing
 path (`ExchangeRoute`, `TokenExchangeService::exchangeCard()`, `ProfileRoute`)
 required NO change — it already sourced the card's role exclusively from the
 platform's own `roles_resolver`, never from auth.
@@ -197,15 +196,15 @@ platform's own `roles_resolver`, never from auth.
 - `ExternalAuthServiceClient::createMembership()` now documents (and passes
   through) an optional `is_tenant_owner` field — set `true` only when the
   call is creating a brand-new tenant. It's set once, at creation, and there
-  is no update path for it — see `AUTH-IDENTITY.md` §3.2.
+  is no update path for it.
 - `ExternalAuthServiceClient::setMembershipStatus()` — wraps the new
-  `PUT /api/internal/membership-status` (`AUTH-IDENTITY.md` §3.3). Auth
+  `PUT /api/internal/membership-status`. Auth
   refuses to suspend a tenant's owner-membership via a typed
   `{error: "cannot_suspend_tenant_owner"}` response body, not a 5xx —
   callers should inspect the response, not just catch the exception.
   Deciding who may change whose status is entirely the calling platform's
-  own RBAC, before this method is invoked — see `AUTH-IDENTITY.md` §3.4 for
-  why this endpoint deliberately takes no `acting_identity_id` parameter.
+  own RBAC, before this method is invoked — this endpoint deliberately takes
+  no `acting_identity_id` parameter.
 
 ### Fixed
 
@@ -235,14 +234,13 @@ backend) but `ProgalaxyElabsAuth` never populates it anymore;
 
 ## [7.2.0] - 2026-07-21
 
-**Real, live-breaking fix + new opt-in feature.** progalaxyelabs-auth removed
-its invitation system entirely (`POST /api/memberships/invite`,
+**Real, live-breaking fix + new opt-in feature.** The external auth service
+removed its invitation system entirely (`POST /api/memberships/invite`,
 `POST /api/memberships/accept-invite`, `POST /api/auth/accept-invite`,
 `POST /api/internal/invite-member` are gone in every environment as of
 2026-07-21). This framework's `invite-member`/`accept-invite` proxy routes
 were pointing at those now-dead endpoints for every platform still on
-framework defaults. See `DESIGN-invitation-system.md` in this repo for the
-full design rationale.
+framework defaults.
 
 ### Removed — `invite`/`accept_invite` framework defaults
 
@@ -264,7 +262,7 @@ full design rationale.
   migration, 3 SQL functions + their `php stone generate model` wrappers,
   3 route handlers, a generated repository, `config/invitations.php`) into
   the CONSUMING platform's own repo — same precedent as
-  `php stone generate auth:*`. progalaxyelabs-auth owns zero invitation
+  `php stone generate auth:*`. The external auth service owns zero invitation
   data; its only involvement is the pre-existing, unchanged
   `POST /api/internal/create-membership` server-to-server call.
 - New framework-shipped `StoneScriptPHP\Auth\Invitations\InvitationCompletionService`
@@ -285,7 +283,7 @@ full design rationale.
 register with the correct typed access (`authentication`) so the 7.x typed-auth
 `AccessTokenMiddleware` admits a passport on them. Required to make an
 external/card-model platform actually WORK under 7.x (not just boot) — surfaced
-by the first external-mode 7.x adoption (medstoreapp).
+by the first external-mode 7.x adoption in the fleet.
 
 ### Fixed — external tier-2 routes were mis-typed as `authorization`
 

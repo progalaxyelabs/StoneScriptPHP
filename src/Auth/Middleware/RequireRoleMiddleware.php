@@ -12,8 +12,8 @@ use StoneScriptPHP\ApiResponse;
  * This middleware should be used AFTER ValidateJwtMiddleware/JwtAuthMiddleware.
  * Returns 403 if the user does not have sufficient role permissions.
  *
- * FIXED (2026-07-23, found while working on task #3204 — adjacent to it, not
- * caused by it): this previously checked `$claims['role']`, but every card
+ * FIXED (found while working on a related auth role-ownership change —
+ * adjacent to it, not caused by it): this previously checked `$claims['role']`, but every card
  * this framework mints (TokenExchangeService::exchangeCard()) stamps
  * `role_id`, never `role` — see AuthenticatedUser's own docblock, which
  * documents the same card/passport claim contract. The old check meant ANY

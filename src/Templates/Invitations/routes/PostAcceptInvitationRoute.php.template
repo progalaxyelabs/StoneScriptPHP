@@ -20,7 +20,7 @@ use StoneScriptPHP\IRouteHandler;
  * presents an auth-issued PASSPORT in `Authorization: Bearer`, never a
  * platform card, so the normal card-auth middleware must NOT gate this
  * route — it mirrors ExchangeRoute's own public+JWKS-validated pattern
- * (design doc §3.4/§3.5 step 7). The passport proves identity; the invite
+ * The passport proves identity; the invite
  * token (path param) proves invitation ownership. Both are validated inside
  * InvitationCompletionService::complete() below.
  *
@@ -31,7 +31,7 @@ use StoneScriptPHP\IRouteHandler;
  * src/Auth/Invitations/InvitationCompletionService.php. This route supplies
  * only the two platform-specific decisions the service deliberately does
  * NOT make itself: the granted role, and the tenant-side membership write
- * (design doc §3.4/§4.2 — "roles belong in api/platform"), both wired via
+ * ("roles belong in api/platform"), both wired via
  * config/invitations.php.
  */
 class PostAcceptInvitationRoute implements IRouteHandler

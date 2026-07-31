@@ -66,10 +66,10 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
      * default, provision_tenant explicitly enabled), the exact tier-2 route set
      * used to fix the 2026-07-05 fleet incident (RequireCardMiddleware) must be present.
      *
-     * `/api/auth/invite-member` was part of this set until 2026-07-21, when
+     * `/api/auth/invite-member` was part of this set until
      * `invite`/`accept_invite` were removed from DefaultTenantRouteProvider
      * (the auth-service endpoints they proxied to no longer exist — see that
-     * class's docblock and DESIGN-invitation-system.md §1.3/§4.3). Asserting
+     * class's own docblock). Asserting
      * its ABSENCE now, deliberately — a regression that silently re-adds a
      * proxy to a dead auth endpoint should fail this test.
      */

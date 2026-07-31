@@ -12,7 +12,7 @@ use StoneScriptPHP\Auth\TokenExchangeService;
  * InvitationCompletionService
  *
  * The generic, correctness-sensitive accept-invite orchestration piece —
- * design doc §3.4 steps 1-4 and 7-9. Ships IN the framework (unlike the
+ * the accept-invite sequence. Ships IN the framework (unlike the
  * table/routes/repository, which are generated per-platform by
  * `php stone generate invitations`) because this logic — token-hash lookup,
  * expiry/status checks, passport JWKS validation, the email-match guard, the
@@ -21,8 +21,8 @@ use StoneScriptPHP\Auth\TokenExchangeService;
  * correctness-sensitive plumbing that should not be re-implemented (and
  * re-audited) per platform.
  *
- * What this class deliberately does NOT do, per the constraint in design doc
- * §0 ("roles belong in api/platform") and §4.2's own framing — it never
+ * What this class deliberately does NOT do, per the constraint that
+ * "roles belong in api/platform" — it never
  * decides a role, and it never writes tenant-side membership data itself.
  * Both are supplied by the caller as closures (`$roleResolver`,
  * `$membershipWriter`), generated per-platform in `config/invitations.php`.
@@ -40,7 +40,7 @@ class InvitationCompletionService
     }
 
     /**
-     * Run the full accept-invite sequence (design doc §3.4).
+     * Run the full accept-invite sequence.
      *
      * @param string $rawToken Raw invite token from the URL/path param —
      *   NEVER the hash. Hashed internally before any repository lookup.
@@ -53,7 +53,7 @@ class InvitationCompletionService
      * @param InvitationRepositoryInterface $repository Platform's generated
      *   repository, backed by the `platform_invitations` table.
      * @param callable $roleResolver `fn(InvitationRecord $invitation): string`
-     *   — decides the role actually granted. Design doc §3.4 step 5: role
+     *   — decides the role actually granted. Role
      *   authority lives in `platform_invitations.role`, never an auth claim
      *   — the generated default simply returns `$invitation->role` as-is;
      *   this seam exists so a platform can re-validate/re-map at accept
@@ -77,14 +77,13 @@ class InvitationCompletionService
      *   signing_issuer?: string|null,
      *   ttl?: int
      * } $platformConfig
-     *   `card` selects T2 (mint a local card, design doc §3.4.2) vs T3
-     *   (passthrough identity token + tenant_id, unchanged per §3.4.2's own
-     *   conclusion that the existing T3 contract already matches this
-     *   design). Defaults to T2 (`card` => true) when omitted.
+     *   `card` selects T2 (mint a local card) vs T3
+     *   (passthrough identity token + tenant_id, matching the existing T3
+     *   contract unchanged). Defaults to T2 (`card` => true) when omitted.
      * @return array Response envelope — see class docblock's two shapes
      *   under "Response shapes" below.
-     * @throws InvitationException On any of the taxonomy failures (design
-     *   doc §3.4 steps 1, 2, 4) or on a downstream failure calling auth
+     * @throws InvitationException On any of the taxonomy failures
+     *   (token/status/expiry/email-match) or on a downstream failure calling auth
      *   (`MEMBERSHIP_FAILED`) / missing config (`CONFIG_ERROR`).
      *
      * Response shapes:
@@ -102,14 +101,14 @@ class InvitationCompletionService
         array $authConfig,
         array $platformConfig
     ): array {
-        // Step 1 (§3.4): look up by sha256(token) — never the raw token.
+        // Step 1: look up by sha256(token) — never the raw token.
         $tokenHash = hash('sha256', $rawToken);
         $invitation = $repository->findByTokenHash($tokenHash);
         if ($invitation === null) {
             throw new InvitationException('Invitation not found', InvitationException::NOT_FOUND, 404);
         }
 
-        // Step 2 (§3.4): status + expiry.
+        // Step 2: status + expiry.
         if ($invitation->status !== 'pending') {
             throw new InvitationException('Invitation has already been used', InvitationException::ALREADY_USED, 409);
         }
@@ -117,7 +116,7 @@ class InvitationCompletionService
             throw new InvitationException('Invitation has expired', InvitationException::EXPIRED, 410);
         }
 
-        // Step 3 (§3.4): validate the passport via JWKS. Read-only — no
+        // Step 3: validate the passport via JWKS. Read-only — no
         // auth DB write, no auth DB read even (JWKS is a published key set).
         try {
             $passportClaims = $this->tokenExchangeService->validateIdentityToken(
@@ -135,9 +134,9 @@ class InvitationCompletionService
             );
         }
 
-        // Step 4 (§3.4): email-match guard. This failure mode is a direct
+        // Step 4: email-match guard. This failure mode is a direct
         // emergent consequence of decoupling identity creation from
-        // invitation acceptance (design doc §6 item 3) — it did not exist
+        // invitation acceptance — it did not exist
         // when auth owned both sides of accept-invite.
         $claimedEmail = strtolower(trim((string) ($passportClaims['email'] ?? '')));
         $invitedEmail = strtolower(trim($invitation->email));
@@ -158,10 +157,10 @@ class InvitationCompletionService
             );
         }
 
-        // Step 5 (§3.4): role decision — platform-owned, never this service.
+        // Step 5: role decision — platform-owned, never this service.
         $role = $roleResolver($invitation);
 
-        // Step 6 (§3.4): platform's own tenant-membership write — also
+        // Step 6: platform's own tenant-membership write — also
         // platform-owned. Must return at least ['tenant_id' => string].
         $membershipData = $membershipWriter($invitation, $passportClaims, $role);
         $tenantId = (string) ($membershipData['tenant_id'] ?? '');
@@ -173,9 +172,9 @@ class InvitationCompletionService
             );
         }
 
-        // Step 8 (§3.4): the ONLY outbound call to auth — carries no
-        // invitation data, only the resulting membership fact. §3.4.1:
-        // role is deliberately never sent (createMembershipForInvite()
+        // Step 8: the ONLY outbound call to auth — carries no
+        // invitation data, only the resulting membership fact. Role
+        // is deliberately never sent (createMembershipForInvite()
         // enforces this even if a caller mistakenly includes it).
         //
         // ORDERING CHANGED 2026-07-28: this used to run AFTER step 7
@@ -225,7 +224,7 @@ class InvitationCompletionService
             );
         }
 
-        // Step 7 (§3.4): mark accepted — LAST, and only once every step that can
+        // Step 7: mark accepted — LAST, and only once every step that can
         // fail has succeeded.
         //
         // ORDERING FIX (2026-07-28): this previously ran BEFORE step 8. Because
@@ -233,7 +232,7 @@ class InvitationCompletionService
         // invitation permanently `status='accepted'` with NO membership granted:
         // the invitee could not retry (`invite_already_used`), and the only
         // recovery was a manual DB edit or re-issuing the invitation. Found live
-        // on aasaanwork, where step 8 failed for EVERY invitee who already had a
+        // in production, where step 8 failed for EVERY invitee who already had a
         // tenant (see the idempotency_key note above) — so the token-burn was not
         // a rare edge case but the default outcome.
         //
@@ -255,7 +254,7 @@ class InvitationCompletionService
             'id'   => $membershipData['id'] ?? ($membershipResult['membership_id'] ?? null),
         ]);
 
-        // Step 9 (§3.4 / §3.4.2): T2 mints a local card (same pattern as
+        // Step 9: T2 mints a local card (same pattern as
         // ProvisionTenantRoute::mintProvisionCard()); T3 passes through the
         // identity token + explicit tenant_id, matching AUTH-SPEC §6b's
         // existing T3 response shape unchanged.
@@ -301,7 +300,7 @@ class InvitationCompletionService
     /**
      * Mint a platform card token, mirroring
      * ProvisionTenantRoute::mintProvisionCard() verbatim (same config keys,
-     * same null-on-not-configured fallback condition) — design doc §3.4.2.
+     * same null-on-not-configured fallback condition).
      *
      * @param array{id: string, email: string|null, display_name: string|null} $identity
      */
