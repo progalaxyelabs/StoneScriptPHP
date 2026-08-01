@@ -31,8 +31,15 @@ final class DirectTransport implements DbTransport
      * unreachable" rather than "the query failed against a live connection".
      * Mirrors the distinction GatewayException::getGatewayError() ===
      * 'connection_failed' draws for gateway mode.
+     *
+     * Public (not private) so other DbTransport implementations that also
+     * need SQLSTATE-based classification (currently: PgandroidTransport) can
+     * reuse this exact table instead of maintaining a parallel copy that
+     * could drift. This is the single source of truth for "which Postgres
+     * SQLSTATEs mean the connection/engine is unusable" across the
+     * framework — do not duplicate this list elsewhere.
      */
-    private const CONNECTION_FAILURE_SQLSTATES = [
+    public const CONNECTION_FAILURE_SQLSTATES = [
         '08000', '08001', '08003', '08004', '08006', '08007', '08P01',
         '57P01', '57P02', '57P03',
     ];
