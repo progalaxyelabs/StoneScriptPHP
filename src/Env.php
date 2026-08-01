@@ -16,6 +16,21 @@ class Env
     public string $APP_ENV = 'development';
     public int $APP_PORT = 9100;
 
+    // Database transport mode: gateway (default) | direct | pgandroid.
+    // Selects the DbTransport implementation Database::fn() dispatches
+    // through — see src/Db/DbTransport.php. Validated at boot (constructor,
+    // below); an unrecognized value fails loud rather than surfacing as a
+    // confusing error deep inside Database::initConnection().
+    public string $DB_MODE = 'gateway';
+
+    // Database - Direct Connection (DB_MODE=direct only). Needs the
+    // pdo_pgsql PHP extension. Ignored in gateway/pgandroid mode.
+    public string $DB_HOST = 'localhost';
+    public int $DB_PORT = 5432;
+    public string $DB_NAME = '';
+    public string $DB_USER = 'postgres';
+    public ?string $DB_PASSWORD = null;
+
     // Database - Gateway Connection (Required in v3+)
     public string $DB_GATEWAY_URL;
     public string $DB_GATEWAY_PLATFORM;
@@ -125,11 +140,17 @@ class Env
 
     /**
      * Config keys that MUST be present and non-empty for the framework to
-     * boot. A missing one fails fast at construction time with a clear
-     * message rather than surfacing as a silent runtime 500.
+     * boot WHEN DB_MODE=gateway (the default). A missing one fails fast at
+     * construction time with a clear message rather than surfacing as a
+     * silent runtime 500.
      *
      * Note: these are also covered by the typed properties above; they are
      * listed here so the boot-time validation is explicit and auditable.
+     * DB_MODE=direct / pgandroid have no eager entry here — their own
+     * required config (DB_NAME for direct; nothing for pgandroid, whose
+     * bridge is host-provided) is validated lazily inside
+     * Database::initConnection(), the same pattern DB_GATEWAY_SCHEMA_NAME
+     * already uses for gateway mode (see Database.php).
      *
      * @var string[]
      */
@@ -221,21 +242,40 @@ class Env
             // If nothing resolved, property keeps its default value
         }
 
+        // DB_MODE selects the database transport (gateway | direct |
+        // pgandroid). Fail loud at boot on an unrecognized value — same
+        // discipline as the required-secret checks below — instead of
+        // deferring to a confusing failure deep inside
+        // Database::initConnection().
+        $validDbModes = ['gateway', 'direct', 'pgandroid'];
+        if (!in_array($this->DB_MODE, $validDbModes, true)) {
+            throw new Exception(sprintf(
+                "Invalid DB_MODE '%s'. Must be one of: %s.",
+                $this->DB_MODE,
+                implode(', ', $validDbModes)
+            ));
+        }
+
         // Validate required secrets/config are present and non-empty.
         // Fail fast at boot with a clear message instead of a silent runtime 500.
-        foreach ($this->requiredSecrets as $required) {
-            $value = $this->resolved[$required] ?? $this->resolveRaw($required);
-            if ($value === null || trim($value) === '') {
-                throw new Exception(sprintf(
-                    "Required configuration '%s' is missing or empty. "
-                    . "Set the %s env var, the %s_FILE env var pointing at a file, "
-                    . "or mount a Docker secret at /run/secrets/%s. "
-                    . "(StoneScriptPHP v3+ uses gateway-only mode. Run: php stone setup)",
-                    $required,
-                    $required,
-                    $required,
-                    strtolower($required)
-                ));
+        // Only DB_MODE=gateway (the default) has eager requirements here —
+        // direct/pgandroid validate their own connection config lazily in
+        // Database::initConnection() (see requiredSecrets docblock above).
+        if ($this->DB_MODE === 'gateway') {
+            foreach ($this->requiredSecrets as $required) {
+                $value = $this->resolved[$required] ?? $this->resolveRaw($required);
+                if ($value === null || trim($value) === '') {
+                    throw new Exception(sprintf(
+                        "Required configuration '%s' is missing or empty. "
+                        . "Set the %s env var, the %s_FILE env var pointing at a file, "
+                        . "or mount a Docker secret at /run/secrets/%s. "
+                        . "(StoneScriptPHP v3+ uses gateway-only mode. Run: php stone setup)",
+                        $required,
+                        $required,
+                        $required,
+                        strtolower($required)
+                    ));
+                }
             }
         }
     }

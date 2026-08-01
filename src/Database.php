@@ -11,13 +11,24 @@ use ReflectionProperty;
 use ReflectionUnionType;
 use StoneScriptDB\GatewayClient;
 use StoneScriptDB\GatewayException;
+use StoneScriptPHP\Db\DbTransport;
+use StoneScriptPHP\Db\DbTransportException;
+use StoneScriptPHP\Db\DirectTransport;
+use StoneScriptPHP\Db\GatewayTransport;
+use StoneScriptPHP\Db\PgandroidTransport;
 use Throwable;
 
 class Database
 {
     private static ?Database $_instance = null;
 
-    private ?GatewayClient $client = null;
+    /**
+     * The active database transport, resolved once per process from
+     * Env::$DB_MODE (gateway | direct | pgandroid — default gateway). Every
+     * Database::fn() call dispatches through this. See
+     * src/Db/DbTransport.php and initConnection() below.
+     */
+    private ?DbTransport $transport = null;
 
     /**
      * Fake-mode response registry. Null = live gateway mode (default,
@@ -42,16 +53,41 @@ class Database
     }
 
     /**
-     * Initialize the gateway client from environment configuration.
+     * Resolve the active DbTransport from Env::$DB_MODE (gateway | direct |
+     * pgandroid — default gateway). Resolved once and cached for the life
+     * of the process, same as the old single-GatewayClient behavior.
      */
     private function initConnection(): void
     {
-        if ($this->client !== null) {
+        if ($this->transport !== null) {
             return;
         }
 
         $env = Env::get_instance();
 
+        // Env::__construct() already fails loud at boot on an unrecognized
+        // DB_MODE (see Env.php) — this match() has no `default` arm on
+        // purpose so a value that somehow slips past that check (e.g. a
+        // hand-built Env test double) still fails loud here instead of
+        // silently resolving to null.
+        $this->transport = match ($env->DB_MODE) {
+            'gateway' => $this->buildGatewayTransport($env),
+            'direct' => $this->buildDirectTransport($env),
+            'pgandroid' => new PgandroidTransport(),
+            default => throw new Exception(
+                "Unknown DB_MODE '{$env->DB_MODE}'. Must be one of: gateway, direct, pgandroid."
+            ),
+        };
+    }
+
+    /**
+     * Build the gateway transport. Validation + GatewayClient construction
+     * is UNCHANGED from the pre-transport-refactor initConnection() body —
+     * byte-identical messages and behavior, since gateway is the default
+     * transport every existing platform already depends on.
+     */
+    private function buildGatewayTransport(Env $env): GatewayTransport
+    {
         // Validate gateway configuration
         if (empty($env->DB_GATEWAY_URL)) {
             throw new Exception('DB_GATEWAY_URL is required. StoneScriptPHP v3+ uses gateway-only mode. Run: php stone setup');
@@ -70,7 +106,7 @@ class Database
             );
         }
 
-        $this->client = new GatewayClient(
+        $client = new GatewayClient(
             $env->DB_GATEWAY_URL,
             $env->DB_GATEWAY_PLATFORM,
             $env->DB_GATEWAY_SCHEMA_NAME,
@@ -82,21 +118,48 @@ class Database
 
         $elapsed_time = microtime(true) - $start_time;
         log_debug(__METHOD__ . " Connection initialized in " . ($elapsed_time * 1000) . "ms");
+
+        return new GatewayTransport($client);
     }
 
     /**
-     * Get the gateway client instance.
-     *
-     * @return GatewayClient
+     * Build the direct (PDO) transport. DB_NAME is validated lazily here —
+     * same pattern DB_GATEWAY_SCHEMA_NAME already uses for gateway mode —
+     * rather than eagerly in Env, so booting with DB_MODE=direct doesn't
+     * require every direct-mode var to be set until a Database::fn() call
+     * actually happens.
      */
-    private function getClient(): GatewayClient
+    private function buildDirectTransport(Env $env): DirectTransport
+    {
+        if (empty($env->DB_NAME)) {
+            throw new Exception(
+                'DB_NAME is required for DB_MODE=direct. ' .
+                'Add it to your .env file (e.g. DB_NAME=myapp_main).'
+            );
+        }
+
+        return new DirectTransport(
+            $env->DB_HOST,
+            $env->DB_PORT,
+            $env->DB_NAME,
+            $env->DB_USER,
+            $env->DB_PASSWORD
+        );
+    }
+
+    /**
+     * Get the active transport, initializing the connection on first use.
+     *
+     * @return DbTransport
+     */
+    private function getTransport(): DbTransport
     {
         $this->initConnection();
-        return $this->client;
+        return $this->transport;
     }
 
     /**
-     * Check if gateway client is initialized.
+     * Check if the active transport is initialized/connected.
      *
      * @return bool
      */
@@ -110,18 +173,17 @@ class Database
         }
 
         $instance = self::get_instance();
-        $instance->initConnection();
-        return $instance->client !== null && $instance->client->isConnected();
+        return $instance->getTransport()->isConnected();
     }
 
     /**
-     * Get the gateway client for advanced operations.
+     * Get the gateway client for advanced operations (tenant-schema
+     * routing via setTenantId(), provisioning). Only usable when
+     * DB_MODE=gateway — direct/pgandroid have no equivalent concept.
      *
      * @return GatewayClient
-     * @throws Exception If Database::fake() is active — there is no real
-     *   client in fake mode. This method is for tenant-routing against a
-     *   live gateway connection (see GatewayTenantMiddleware); it is not
-     *   usable with fake mode.
+     * @throws Exception If Database::fake() is active (no real client in
+     *   fake mode), or if the active transport is not the gateway transport.
      */
     public static function getGatewayClient(): GatewayClient
     {
@@ -134,7 +196,17 @@ class Database
         }
 
         $instance = self::get_instance();
-        return $instance->getClient();
+        $transport = $instance->getTransport();
+
+        if (!$transport instanceof GatewayTransport) {
+            throw new Exception(
+                'Database::getGatewayClient() is only usable when DB_MODE=gateway (current transport: ' .
+                get_class($transport) . '). Tenant-schema routing via setTenantId() and provisioning ' .
+                '(createDatabase/migrateV2/...) are gateway-specific concepts with no direct/pgandroid equivalent.'
+            );
+        }
+
+        return $transport->getClient();
     }
 
     /**
@@ -245,14 +317,30 @@ class Database
                 return self::resolveFakeResponse($function_name, $params);
             }
 
-            $client = self::get_instance()->getClient();
-            return $client->callFunction($function_name, $params);
+            $transport = self::get_instance()->getTransport();
+            return $transport->callFunction($function_name, $params);
         } catch (GatewayException $e) {
             log_debug(__METHOD__ . " Gateway error: " . $e->getMessage());
 
             // connection_failed means the tenant DB is unreachable (dropped, deprovisioned, or temporarily unavailable).
             // Throw a typed exception so the Router returns 503 instead of leaking a 500 to the client.
             if ($e->getGatewayError() === 'connection_failed') {
+                throw new TenantDatabaseUnavailableException(
+                    "Tenant database unavailable: " . $e->getMessage(),
+                    503,
+                    $e
+                );
+            }
+
+            throw new Exception("Database function call failed: " . $e->getMessage(), $e->getCode(), $e);
+        } catch (DbTransportException $e) {
+            // Transport-agnostic equivalent of the GatewayException handling
+            // above — DB_MODE=direct/pgandroid get the exact same
+            // "connection failure -> 503, else -> wrapped 500" translation
+            // gateway mode already has. See DbTransportException's docblock.
+            log_debug(__METHOD__ . " Transport error: " . $e->getMessage());
+
+            if ($e->isConnectionFailure()) {
                 throw new TenantDatabaseUnavailableException(
                     "Tenant database unavailable: " . $e->getMessage(),
                     503,

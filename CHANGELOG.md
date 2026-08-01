@@ -5,6 +5,41 @@ All notable changes to StoneScriptPHP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — pluggable DB transport mode (DB_MODE = gateway | direct | pgandroid)
+
+`src/Database.php`'s `_fn()` used to hardcode `GatewayClient::callFunction()` —
+gateway was the only possible transport. Extracted a `DbTransport` interface
+(`src/Db/DbTransport.php`, core method `callFunction(string $fn, array
+$params): array`) with three implementations:
+
+- `GatewayTransport` — wraps the existing `GatewayClient`, behavior-identical
+  to before this change (same validation, same error messages, same
+  `GatewayException` propagation — `Database::_fn()`'s existing
+  `catch(GatewayException)` handling is completely untouched).
+- `DirectTransport` — (re)introduced: talks to PostgreSQL directly via PDO
+  (`SELECT * FROM fn($1, ...)`), env `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/
+  `DB_PASSWORD`. Needs `ext-pdo_pgsql`. Reuses the framework's existing (and,
+  until now, dormant) `StoneScriptPHP\Database\DbConnectionPool` for
+  connection reuse.
+- `PgandroidTransport` — new: dispatches to on-device PostgreSQL via the
+  android-server C++ embed host's bridge function `androidserver_db_exec(string
+  $fn, string $params_json): string /* JSON */`. No PHP PG extension involved
+  — the bridge is mockable in unit tests without a device.
+
+Selected via `Env::$DB_MODE` (`gateway` | `direct` | `pgandroid`, default
+`gateway`), validated fail-loud at boot on an unrecognized value. `DB_MODE`
+unset/`gateway` is byte-identical to pre-refactor behavior — zero change for
+the 8 live platforms that ride it today. `DbTransportException` generalizes
+the "connection failure -> 503 `TenantDatabaseUnavailableException`" mapping
+`GatewayException`'s `connection_failed` already had, so `direct`/`pgandroid`
+get the same behavior without a parallel error-handling path.
+
+Route handlers and generated model wrappers are unaffected — they only ever
+call `Database::fn($name, $params)`; the transport underneath is invisible to
+them.
+
 ## [7.6.1] - 2026-07-31
 
 ### Fixed — require-dev `symfony/mailer` demanded PHP 8.4+, fleet runs PHP 8.3

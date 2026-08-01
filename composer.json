@@ -42,6 +42,7 @@
     },
     "suggest": {
         "ext-redis": "Required for Redis caching support",
+        "ext-pdo_pgsql": "Required for DB_MODE=direct (pluggable database transport — talks to PostgreSQL directly via PDO instead of the gateway)",
         "google/apiclient": "Required for Google OAuth authentication (install via: php stone generate auth:google)",
         "phpoffice/phpspreadsheet": "Required for Excel/CSV export features"
     },
