@@ -97,6 +97,19 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         return new ProvisionTenantRoute($client, $config->hooks, $config, $provisioner);
     }
 
+    private function routeWithBeforeProvisionHook(
+        FakeExternalAuthServiceClient $client,
+        ?SpyTenantProvisioner $provisioner,
+        callable $beforeProvision
+    ): ProvisionTenantRoute {
+        $config = new ExternalAuthConfig([
+            'provision_tenant' => true,
+            'platform_secret'  => 'test-secret',
+            'before_provision'  => $beforeProvision,
+        ]);
+        return new ProvisionTenantRoute($client, $config->hooks, $config, $provisioner);
+    }
+
     private function authenticatedUser(): void
     {
         AuthContext::setUser(new AuthenticatedUser(user_id: 'identity-1', email: 'owner@example.com'));
@@ -254,6 +267,98 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         $this->assertNotSame('existing-tenant-99', $provisioner->lastData['tenant_id'] ?? null);
     }
 
+    // ── before_provision + provisioner sequencing (2026-08-12 fix) ────────
+    //
+    // Was `elseif ($provisioner) {} elseif ($hook) {}` — mutually exclusive,
+    // so before_provision was dead code for any real platform (every
+    // platform on the modern path sets a provisioner). This is the seam a
+    // platform COMPOSING this route (an IRouteHandler holding its own
+    // `new ProvisionTenantRoute(...)` and delegating to process(), instead
+    // of reimplementing the whole method) uses to merge its own
+    // platform-specific fields into $data before the provisioner's
+    // seedData() runs.
+
+    public function test_before_provision_hook_and_provisioner_both_run_hook_data_reaches_provisioner(): void
+    {
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $provisioner = new SpyTenantProvisioner();
+        $route = $this->routeWithBeforeProvisionHook(
+            $client,
+            $provisioner,
+            fn(array $data): array => ['state_id' => 12, 'biz_type' => 'medical_store']
+        );
+        $route->tenant_name = 'Acme Store';
+        $route->idempotency_key = 'idem-1';
+
+        $res = $route->process();
+
+        $this->assertSame('ok', $res->status);
+        $this->assertTrue($provisioner->provisionCalled, 'provisioner must still run after the hook');
+        $this->assertNotNull($provisioner->lastData);
+        $this->assertSame(12, $provisioner->lastData['state_id'] ?? null, 'hook-merged field must reach the provisioner');
+        $this->assertSame('medical_store', $provisioner->lastData['biz_type'] ?? null);
+    }
+
+    public function test_before_provision_hook_returning_false_blocks_provisioner(): void
+    {
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $provisioner = new SpyTenantProvisioner();
+        $route = $this->routeWithBeforeProvisionHook(
+            $client,
+            $provisioner,
+            fn(array $data) => false
+        );
+        $route->tenant_name = 'Acme Store';
+        $route->idempotency_key = 'idem-1';
+
+        $res = $route->process();
+
+        $this->assertSame('error', $res->status);
+        $this->assertFalse($provisioner->provisionCalled, 'provisioner must not run when the hook rejects');
+    }
+
+    public function test_before_provision_hook_exception_blocks_provisioner(): void
+    {
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $provisioner = new SpyTenantProvisioner();
+        $route = $this->routeWithBeforeProvisionHook(
+            $client,
+            $provisioner,
+            function (array $data): array {
+                throw new \RuntimeException('hook blew up');
+            }
+        );
+        $route->tenant_name = 'Acme Store';
+        $route->idempotency_key = 'idem-1';
+
+        $res = $route->process();
+
+        $this->assertSame('error', $res->status);
+        $this->assertSame(500, $res->httpStatusCode);
+        $this->assertFalse($provisioner->provisionCalled);
+    }
+
+    public function test_provisioner_only_no_hook_unchanged_behavior(): void
+    {
+        // Regression guard: the common case (provisioner set, no hook at all)
+        // must behave exactly as before this fix.
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $provisioner = new SpyTenantProvisioner();
+        $route = $this->route($client, $provisioner);
+        $route->tenant_name = 'Acme Store';
+        $route->idempotency_key = 'idem-1';
+
+        $res = $route->process();
+
+        $this->assertSame('ok', $res->status);
+        $this->assertSame(201, $res->httpStatusCode);
+        $this->assertTrue($provisioner->provisionCalled);
+    }
+
     public function test_membership_lookup_failure_fails_open_and_still_provisions(): void
     {
         $this->authenticatedUser();
@@ -304,6 +409,33 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         $this->assertSame('error', $res->status);
         $this->assertSame(500, $res->httpStatusCode);
         $this->assertFalse($provisioner->provisionCalled, 'must not provision a tenant when OAuth promote fails');
+    }
+
+    /**
+     * AuthServiceClient::executeCurl() only throws on a non-2xx HTTP status —
+     * it never inspects the response body. A promote call that returns HTTP
+     * 200 with {success:false} (a real, defensible response shape for a bad/
+     * expired oauth_state, not a hypothetical — a downstream platform's own
+     * hand-rolled version of this call already checked for it) must be
+     * treated as a failure too, or a tenant gets provisioned with an orphaned
+     * OAuth connection. Fixed 2026-08-12.
+     */
+    public function test_oauth_promote_returns_success_false_without_throwing_still_blocks_provisioning(): void
+    {
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $client->promoteResult = ['success' => false, 'message' => 'oauth_state expired'];
+        $provisioner = new SpyTenantProvisioner();
+        $route = $this->route($client, $provisioner);
+        $route->tenant_name = 'Acme Store';
+        $route->idempotency_key = 'idem-1';
+        $route->oauth_state = 'oauth-state-token-abc';
+
+        $res = $route->process();
+
+        $this->assertSame('error', $res->status);
+        $this->assertSame(500, $res->httpStatusCode);
+        $this->assertFalse($provisioner->provisionCalled, 'must not provision when promote body reports success:false');
     }
 
     public function test_oauth_state_skipped_on_existing_tenant_replay(): void
@@ -382,13 +514,16 @@ final class FakeExternalAuthServiceClient extends ExternalAuthServiceClient
         ];
     }
 
+    /** @var array Overridable success/failure body — see promoteReturnsFailureBody test. */
+    public array $promoteResult = ['success' => true];
+
     public function promoteOAuthConnection(string $oauthState, string $authToken): array
     {
         $this->lastPromoteOauthState = $oauthState;
         if ($this->throwOnPromote) {
             throw new \RuntimeException('promote failed');
         }
-        return ['success' => true];
+        return $this->promoteResult;
     }
 }
 

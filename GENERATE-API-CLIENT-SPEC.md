@@ -36,6 +36,42 @@ The `php stone generate client` command generates a type-safe TypeScript API cli
 3. **Developer Experience**: Simple `npm install` workflow
 4. **Auto-generation**: Regenerate when backend changes
 5. **Framework Agnostic**: Works with Angular, React, Vue, vanilla JS
+6. **The generated client is the only sanctioned way to talk to the API** — see the hard rule below.
+
+---
+
+### Hard rule: no hand-rolled `fetch`/`curl`/XHR calls to the API
+
+A client (Angular app, mobile WebView bridge, any other frontend) MUST NEVER call the
+API directly via a hand-rolled `fetch()`, `XMLHttpRequest`, `curl`, or any other raw
+HTTP call. The only sanctioned way to talk to the API is through the client this
+generator produces (`php stone generate client --scope=<scope>`), consumed via
+`@progalaxyelabs/ngx-stonescriptphp-client`'s HTTP transport.
+
+Why this is non-negotiable, not a style preference:
+
+- **The API is the source of truth for its own contract.** A route's `validation_rules()`,
+  its DTO, and its `RouteAccess` (public/authentication/authorization — which token the
+  call needs, see §7/Type Generation and the access-aware `tokenMode` the generator
+  emits) all live in the PHP route. The generated client mirrors that contract exactly.
+  A hand-rolled fetch call has no way to stay in sync with it — every backend change
+  becomes a silent frontend footgun instead of a TypeScript compile error.
+- **Token selection is contract-driven, not guessed.** The generated client picks the
+  right token (`public` → none, `authentication` → the identity/auth token,
+  `authorization` → the tenant-scoped API token, with 401-refresh-retry scoped
+  correctly) based on what the route actually declares. A hand-rolled call has to
+  reimplement or guess this per call site — exactly the kind of drift that has
+  independently caused real bugs across the fleet (routes that run before a tenant
+  context exists, like provision-tenant, silently sent the wrong token type).
+- **One regeneration, fleet-wide correctness.** When a route's shape changes,
+  `php stone generate client` regenerates the contract everywhere it's consumed. Code
+  that bypassed the client has to be found and fixed by hand, one hand-rolled call at a
+  time, with no compiler to catch the ones that were missed.
+
+If a generated client method doesn't exist yet for an endpoint you need, the fix is to
+add/regenerate the route (`php stone generate route`, `php stone generate client`), not
+to reach for `fetch()` as a shortcut. See "Adding a New Route" in the consuming
+platform's `DEVELOPER.md` for the full loop.
 
 ---
 

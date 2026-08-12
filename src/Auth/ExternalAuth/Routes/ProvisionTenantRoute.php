@@ -278,58 +278,90 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         if (!$isReplay && $this->oauth_state !== '') {
             $rawToken = $this->getBearerToken() ?? '';
             try {
-                $this->client->promoteOAuthConnection($this->oauth_state, $rawToken);
+                $promoteResult = $this->client->promoteOAuthConnection($this->oauth_state, $rawToken);
             } catch (\Throwable $e) {
                 log_error('ProvisionTenantRoute: OAuth promote failed for state=' . $this->oauth_state . ': ' . $e->getMessage());
                 return res_error('Failed to complete OAuth sign-in. Please try again.', 500);
             }
+            // AuthServiceClient::executeCurl() only throws on a non-2xx HTTP
+            // status — it never inspects the response body. If the auth
+            // service ever answers 200 with {success:false} for a bad/expired
+            // oauth_state (a real, defensible response shape — not a
+            // hypothetical: a downstream platform's own hand-rolled version of
+            // this exact call already checked for it), a bare try/catch alone
+            // would silently treat that as success and provision a tenant with
+            // an orphaned OAuth connection. Fixed 2026-08-12.
+            if (!($promoteResult['success'] ?? false)) {
+                $promoteErr = $promoteResult['message'] ?? 'unknown error';
+                log_error('ProvisionTenantRoute: OAuth promote failed for state=' . $this->oauth_state . ': ' . $promoteErr);
+                return res_error('Failed to complete OAuth sign-in. Please try again.', 500);
+            }
         }
 
-        // 3. Run provisioning — prefer class-based provisioner over legacy hooks.
-        // Skipped entirely on replay: the tenant record + database already
-        // exist (that's what makes it a replay), re-running provision() would
-        // at best no-op (createDatabase() 409s) and at worst re-run seedData()
-        // against live data.
+        // 3. Run provisioning. Skipped entirely on replay: the tenant record +
+        // database already exist (that's what makes it a replay), re-running
+        // provision() would at best no-op (createDatabase() 409s) and at worst
+        // re-run seedData() against live data.
+        //
+        // before_provision then provisioner, NOT either/or (fixed 2026-08-12):
+        // this used to be `elseif ($provisioner) {} elseif ($hook) {}` — mutually
+        // exclusive, so before_provision was unreachable dead code for any
+        // platform using a real TenantProvisioner (i.e. every modern platform;
+        // hooks were a pre-provisioner-class mechanism). That mattered because
+        // before_provision is exactly the seam a platform COMPOSING this route
+        // (holding its own IRouteHandler that builds `new ProvisionTenantRoute(...)`
+        // and delegates to process(), instead of duplicating this whole method to
+        // get its own extra fields into the provisioner) needs: extra request
+        // fields the composing wrapper reads off its OWN public properties
+        // (fields this base class never declared, e.g. a platform-specific
+        // biz_type or state_id) have to reach $data BEFORE provision($data) runs,
+        // or seedData() never sees them. Running the hook first — on every call
+        // that reaches this branch, provisioner or not — makes that possible
+        // without reimplementing provisioning, the auth call, or the
+        // response-building below. Both null: same no-op as before.
         if ($isReplay) {
             // No-op — see above.
-        } elseif ($this->provisioner !== null) {
-            try {
-                $data = $this->provisioner->provision($data);
-            } catch (\Throwable $e) {
-                log_error("TenantProvisioner::provision failed: " . $e->getMessage());
-
-                // Return structured validation errors for ValidationException (422)
-                if ($e instanceof ValidationException) {
-                    return new ApiResponse(
-                        'error',
-                        $e->getMessage(),
-                        null,
-                        $e->getHttpStatusCode(),
-                        $e->getValidationErrors()
-                    );
+        } else {
+            if (isset($this->hooks['before_provision']) && is_callable($this->hooks['before_provision'])) {
+                try {
+                    $hookResult = ($this->hooks['before_provision'])($data);
+                    if ($hookResult === false) {
+                        return res_error('Tenant provisioning failed');
+                    }
+                    if (is_array($hookResult)) {
+                        $data = array_merge($data, $hookResult);
+                    }
+                } catch (\Throwable $e) {
+                    log_error("before_provision hook failed: " . $e->getMessage());
+                    return res_error('Tenant provisioning failed: ' . $e->getMessage());
                 }
-
-                // Return structured error with proper status code for other FrameworkExceptions
-                if ($e instanceof FrameworkException) {
-                    return res_error($e->getMessage(), $e->getHttpStatusCode());
-                }
-
-                // Generic 500 for unexpected errors
-                return res_error('Tenant provisioning failed: ' . $e->getMessage());
             }
-        } elseif (isset($this->hooks['before_provision']) && is_callable($this->hooks['before_provision'])) {
-            // Legacy hook path (backward compatibility)
-            try {
-                $hookResult = ($this->hooks['before_provision'])($data);
-                if ($hookResult === false) {
-                    return res_error('Tenant provisioning failed');
+
+            if ($this->provisioner !== null) {
+                try {
+                    $data = $this->provisioner->provision($data);
+                } catch (\Throwable $e) {
+                    log_error("TenantProvisioner::provision failed: " . $e->getMessage());
+
+                    // Return structured validation errors for ValidationException (422)
+                    if ($e instanceof ValidationException) {
+                        return new ApiResponse(
+                            'error',
+                            $e->getMessage(),
+                            null,
+                            $e->getHttpStatusCode(),
+                            $e->getValidationErrors()
+                        );
+                    }
+
+                    // Return structured error with proper status code for other FrameworkExceptions
+                    if ($e instanceof FrameworkException) {
+                        return res_error($e->getMessage(), $e->getHttpStatusCode());
+                    }
+
+                    // Generic 500 for unexpected errors
+                    return res_error('Tenant provisioning failed: ' . $e->getMessage());
                 }
-                if (is_array($hookResult)) {
-                    $data = array_merge($data, $hookResult);
-                }
-            } catch (\Throwable $e) {
-                log_error("before_provision hook failed: " . $e->getMessage());
-                return res_error('Tenant provisioning failed: ' . $e->getMessage());
             }
         }
 

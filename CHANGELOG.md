@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.2.0] - 2026-08-12
+
+### Fixed — `ProvisionTenantRoute`: `before_provision` hook was dead code whenever a provisioner was set
+
+`process()`'s provisioning step used to be `if ($isReplay) {} elseif ($provisioner)
+{} elseif ($hook) {}` — mutually exclusive. Every real platform uses a
+`TenantProvisioner`, so `before_provision` (the seam for merging extra,
+platform-specific fields into `$data` before it reaches the provisioner's
+`seedData()`) was unreachable for anyone who actually needed it; it only ever
+ran for the legacy no-provisioner path. This mattered specifically for a
+platform that **composes** this route — holding its own `IRouteHandler` that
+builds `new ProvisionTenantRoute(...)` and delegates to `process()` instead of
+duplicating the whole method to get its own extra fields (e.g. a
+platform-specific `state_id`/`biz_type`) into the provisioner. Now the hook
+runs first (when present) to augment `$data`, then the provisioner runs on the
+augmented data — both, in sequence, not either/or. A platform that never sets
+both is unaffected; this only enables a combination that was previously
+silently ignored.
+
+### Fixed — `ProvisionTenantRoute`: OAuth promote failure only detected via thrown exceptions, not response body
+
+`ExternalAuthServiceClient`/`AuthServiceClient::executeCurl()` only throws on a
+non-2xx HTTP status — it never inspects the response body. A `promoteOAuthConnection()`
+call that legitimately returns HTTP 200 with `{success: false, message: '...'}`
+(a real, defensible shape for a bad/expired `oauth_state` — not hypothetical; a
+downstream platform's own hand-rolled version of this call already guarded
+against it) was silently treated as success, provisioning a tenant with an
+orphaned OAuth connection (the identity can't log in via that provider next
+time). `process()` now also checks the response body's `success` field, not
+just whether the call threw.
+
 ## [9.1.0] - 2026-08-12
 
 ### Changed — `ProvisionTenantRoute` existing-tenant guard now compares `tenant_name` before replaying
