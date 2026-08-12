@@ -823,48 +823,100 @@ function verbatimTokensTs(): string
 //
 // 2026-07-06 storage redesign: this TokenStore is used ONLY for calling THIS
 // platform's own business API (never the shared auth server) — it always
-// wants the API (card) token, the same one AuthService (ngx-stonescriptphp-client)
-// stores under `ssp_api_access_token` in sessionStorage. Deliberately
-// sessionStorage, NOT localStorage: the card is tenant+role-scoped and must be
-// per-tab. A user in N tenants can hold N tabs, each acting as a different
-// tenant (the "Gmail account-switcher" model) — a shared localStorage key
-// would mean any tab that exchanged into a new tenant silently overwrote
-// every other tab's active session (found 2026-07-06 building a "Switch Org"
-// UI that opens a tenant picker in a new tab of the same origin).
+// wants the API token, the same one AuthService (ngx-stonescriptphp-client)
+// stores under `ssp_api_access_token`. Deliberately sessionStorage for the
+// standard (tenancy='multi') case, NOT localStorage: the API token is tenant+role-
+// scoped and must be per-tab. A user in N tenants can hold N tabs, each acting
+// as a different tenant (the "Gmail account-switcher" model) — a shared
+// localStorage key would mean any tab that exchanged into a new tenant
+// silently overwrote every other tab's active session (found 2026-07-06
+// building a "Switch Org" UI that opens a tenant picker in a new tab of the
+// same origin).
+//
+// 2026-08-01 single-token-mode fix (real bug, found live on medstoreapp's
+// offline Android build, root-caused in two passes):
+//
+// Pass 1 (WRONG — storage location only): assumed TokenService just moved
+// `ssp_api_access_token` from sessionStorage to localStorage in single-token
+// mode (`apiUsesSession = tenancy === 'multi'`). Checking both storages for
+// that same key still found nothing.
+//
+// Pass 2 (the REAL cause, confirmed by reading TokenService.setApiAccessToken()
+// directly): in single-token mode TokenService does not write the
+// `ssp_api_access_token` key AT ALL — `setApiAccessToken()` redirects to
+// `setAuthAccessToken()`, i.e. the API token is stored ALIASED under
+// `ssp_auth_access_token` (localStorage), because in that mode there is
+// only ever one token for the life of the install and it IS the auth
+// token. This generated TokenStore had no idea that key even existed, so
+// `get()` always returned null, every business-API request went out with NO
+// Authorization header, and the real android-server route correctly 401'd
+// ("Unauthorized: Missing authentication token") — masked by the client's
+// own generic "unexpected error" retry-exhaustion message, which is why this
+// took a live device trace (Network domain + storage dump) to actually find.
+//
+// This class has no visibility into the platform's chosen tenancy mode at
+// generation time (routes.php introspection doesn't carry that config), so
+// the robust, mode-agnostic fix checks, in priority order: sessionStorage
+// api-token (standard per-tab multi-tenant case) → localStorage api-token
+// (defensive) → localStorage auth-token (the single-token-mode alias,
+// last resort — never wins over a real api-token if one is genuinely
+// present). Inert and correct regardless of which mode a given platform
+// runs, without this file needing to know which one it is.
 //
 // Key names are owned by AUTH-SPEC §token-contract. Do not rename.
-const ACCESS_KEY  = 'ssp_api_access_token';
-const REFRESH_KEY = 'ssp_api_refresh_token';
+const ACCESS_KEY      = 'ssp_api_access_token';
+const REFRESH_KEY     = 'ssp_api_refresh_token';
+const AUTH_ACCESS_KEY = 'ssp_auth_access_token';
+const AUTH_REFRESH_KEY = 'ssp_auth_refresh_token';
 
 export class TokenStore {
   get(): string | null {
-    return typeof sessionStorage !== 'undefined'
-      ? sessionStorage.getItem(ACCESS_KEY)
-      : null;
+    if (typeof sessionStorage !== 'undefined') {
+      const v = sessionStorage.getItem(ACCESS_KEY);
+      if (v) return v;
+    }
+    if (typeof localStorage !== 'undefined') {
+      const v = localStorage.getItem(ACCESS_KEY);
+      if (v) return v;
+      // Single-token-mode alias — see the 2026-08-01 note above.
+      const auth = localStorage.getItem(AUTH_ACCESS_KEY);
+      if (auth) return auth;
+    }
+    return null;
   }
 
   set(token: string): void {
-    if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.setItem(ACCESS_KEY, token);
-    }
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(ACCESS_KEY, token);
+    if (typeof localStorage !== 'undefined') localStorage.setItem(ACCESS_KEY, token);
   }
 
   getRefresh(): string | null {
-    return typeof sessionStorage !== 'undefined'
-      ? sessionStorage.getItem(REFRESH_KEY)
-      : null;
+    if (typeof sessionStorage !== 'undefined') {
+      const v = sessionStorage.getItem(REFRESH_KEY);
+      if (v) return v;
+    }
+    if (typeof localStorage !== 'undefined') {
+      const v = localStorage.getItem(REFRESH_KEY);
+      if (v) return v;
+      const auth = localStorage.getItem(AUTH_REFRESH_KEY);
+      if (auth) return auth;
+    }
+    return null;
   }
 
   setRefresh(token: string): void {
-    if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.setItem(REFRESH_KEY, token);
-    }
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(REFRESH_KEY, token);
+    if (typeof localStorage !== 'undefined') localStorage.setItem(REFRESH_KEY, token);
   }
 
   clear(): void {
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(ACCESS_KEY);
       sessionStorage.removeItem(REFRESH_KEY);
+    }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(ACCESS_KEY);
+      localStorage.removeItem(REFRESH_KEY);
     }
   }
 

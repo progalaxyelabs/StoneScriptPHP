@@ -11,6 +11,25 @@ if (!defined('ROOT_PATH')) {
     define('ROOT_PATH', dirname(__DIR__) . DIRECTORY_SEPARATOR);
 }
 
+// Framework package root — deliberately NOT the (possibly different) ROOT_PATH
+// constant. `stone`, in vendor-installed mode, pre-defines ROOT_PATH as the
+// consuming PROJECT's root (for SRC_PATH/CONFIG_PATH) before requiring this
+// file; ROOT_PATH is intentionally left untouched here so nothing else that
+// already relies on that meaning breaks. But every path in $generators below
+// points at a FRAMEWORK-package file, always co-located with this script
+// itself — dirname(__DIR__) (this file lives at <frameworkRoot>/cli/) is the
+// only value that is correct in every context: standalone framework dev
+// (dirname(__DIR__) IS the framework root, same value ROOT_PATH falls back to
+// above) AND vendor mode via `stone` (dirname(__DIR__) resolves inside
+// vendor/progalaxyelabs/stonescriptphp/, i.e. still the framework root, even
+// though ROOT_PATH itself now means something else). Confirmed live: before
+// this fix, any subcommand that fell through to this dispatcher's own
+// $generators map (e.g. 'android-server', the first to ever reach this code
+// path — see the 2026-08-12 stone arg-stripping fix) resolved
+// $generatorFile against the PROJECT root and 404'd ("Generator file not
+// found"), even after that other bug was fixed.
+$frameworkRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR;
+
 // Use $_SERVER['argv'] which may be modified by stone binary
 $argv = $_SERVER['argv'];
 $argc = $_SERVER['argc'];
@@ -31,12 +50,14 @@ if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))
     echo "  auth:linkedin                Generate LinkedIn OAuth authentication\n";
     echo "  auth:apple                   Generate Apple OAuth authentication\n";
     echo "  auth:api-key                 Generate API key authentication\n";
-    echo "  cache:redis                  Generate Redis caching support\n\n";
+    echo "  cache:redis                  Generate Redis caching support\n";
+    echo "  android-server                Generate offline-embeddable android-server tree\n\n";
     echo "Examples:\n";
     echo "  php stone generate route post /login\n";
     echo "  php stone generate contract\n";
     echo "  php stone generate auth:email-password\n";
     echo "  php stone generate cache:redis\n";
+    echo "  php stone generate android-server\n";
     exit(0);
 }
 
@@ -56,6 +77,7 @@ $generators = [
     'auth:apple' => 'cli/generate-auth.php',
     'auth:api-key' => 'cli/generate-auth.php',
     'cache:redis' => 'cli/generate-cache-redis.php',
+    'android-server' => 'cli/generate-android-server.php',
 ];
 
 // Check if subcommand exists
@@ -66,7 +88,7 @@ if (!isset($generators[$subcommand])) {
 }
 
 // Get the generator file
-$generatorFile = ROOT_PATH . $generators[$subcommand];
+$generatorFile = $frameworkRoot . $generators[$subcommand];
 
 if (!file_exists($generatorFile)) {
     echo "Error: Generator file not found: $generatorFile\n";

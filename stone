@@ -134,6 +134,27 @@ $command = $argv[1] ?? 'help';
 $args = array_slice($argv, 2);
 
 // Special handling for 'generate' with sub-commands
+//
+// $generateFellThrough tracks whether $subCommand matched none of the
+// special cases below and is therefore about to fall through to the generic
+// cli/generate-dispatcher.php (its default file, set in $commands['generate']
+// above). That file has its OWN $generators map keyed by subcommand (e.g.
+// 'android-server') and reads $argv[1] itself to look up the right generator
+// — so unlike the special-cased subcommands below (which ARE redirected to a
+// specific file and whose *own* argv parsing starts at the NEXT token), the
+// fallthrough case must NOT have its subcommand token stripped. See the
+// $scriptArgs computation below, which this flag feeds.
+//
+// Bug fixed 2026-08-12: prior to this, $scriptArgs stripped $args[0]
+// unconditionally whenever $command === 'generate', regardless of whether a
+// special case matched. Every subcommand added to generate-dispatcher.php's
+// $generators map WITHOUT also adding a special case here (first hit:
+// 'android-server') silently lost its subcommand token before
+// generate-dispatcher.php ever saw it, so `php stone generate android-server`
+// printed generic dispatcher help instead of running anything — confirmed
+// live. Fixing the flag here fixes every current and future such subcommand,
+// not just this one instance.
+$generateFellThrough = false;
 if ($command === 'generate' && !empty($args)) {
     $subCommand = $args[0];
 
@@ -161,6 +182,10 @@ if ($command === 'generate' && !empty($args)) {
         $commands['generate']['file'] = 'cli/generate-env.php';
     } elseif ($subCommand === 'jwt') {
         $commands['generate']['file'] = 'cli/generate-jwt-keys.php';
+    } else {
+        // No special case matched (e.g. 'android-server') — falls through to
+        // the generic cli/generate-dispatcher.php default.
+        $generateFellThrough = true;
     }
 }
 
@@ -243,8 +268,16 @@ if (isset($cmdInfo['file'])) {
     }
 
     // Pass arguments to the script
-    // For 'generate' commands, skip the sub-command name (route, model, client, etc.)
-    $scriptArgs = ($command === 'generate' && !empty($args)) ? array_slice($args, 1) : $args;
+    // For 'generate' commands redirected to a SPECIFIC generator file above
+    // (route, model, client, etc.), skip the sub-command name — that
+    // generator's own argv parsing starts at the next token. When generate
+    // fell through to the generic cli/generate-dispatcher.php instead (see
+    // $generateFellThrough above), the sub-command name must be PRESERVED —
+    // that dispatcher reads $argv[1] itself to look up its own $generators
+    // map (e.g. 'android-server').
+    $scriptArgs = ($command === 'generate' && !empty($args) && !$generateFellThrough)
+        ? array_slice($args, 1)
+        : $args;
     $_SERVER['argv'] = array_merge([$scriptPath], $scriptArgs);
     $_SERVER['argc'] = count($_SERVER['argv']);
 
