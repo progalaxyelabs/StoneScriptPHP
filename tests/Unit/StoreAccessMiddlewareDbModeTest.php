@@ -27,8 +27,8 @@ use StoneScriptPHP\ApiResponse;
  * beneficiary before this file's fix actually landed it).
  *
  * Uses a test subclass that overrides the protected fetchMemberships() seam
- * instead of hitting a real auth service — same pattern as
- * AasaanworkProvisionTenantRoute's getAuthClient()/getProvisioner() overrides.
+ * instead of hitting a real auth service — same pattern as a downstream
+ * platform's ProvisionTenantRoute override (getAuthClient()/getProvisioner()).
  */
 final class StoreAccessMiddlewareDbModeTest extends TestCase
 {

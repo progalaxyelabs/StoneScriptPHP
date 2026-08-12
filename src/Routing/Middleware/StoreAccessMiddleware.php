@@ -163,8 +163,8 @@ class StoreAccessMiddleware implements MiddlewareInterface
      *
      * Protected (not private) — test seam so a test subclass can inject a canned
      * membership list without a live auth service, matching the override pattern
-     * already used elsewhere in this codebase (e.g. AasaanworkProvisionTenantRoute's
-     * getAuthClient()/getProvisioner()).
+     * already used elsewhere in this codebase (e.g. a downstream platform's
+     * ProvisionTenantRoute override — getAuthClient()/getProvisioner()).
      *
      * @return array<array{tenant_id: string, role: string, status: string, ...}>
      * @throws \RuntimeException on HTTP failure or invalid response
