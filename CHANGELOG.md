@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.1.0] - 2026-08-12
+
+### Changed — `ProvisionTenantRoute` existing-tenant guard now compares `tenant_name` before replaying
+
+Refines the existing-tenant guard shipped in 9.0.0: that release replayed an
+existing tenant purely because the identity had ANY membership, without
+checking whether the submitted name matched the existing one. An identity
+that already owns "ABC Medicals" and submits "XYZ Pharmacy" is not retrying
+a request; silently logging them into ABC Medicals with no indication XYZ
+Pharmacy was never created is worse than an explicit error.
+
+`findExistingTenantId()` (returned only a `tenant_id`) is now
+`findExistingMembership()` (returns `tenant_id` + `tenant_name` — both
+already present on every row `ExternalAuthServiceClient::getMemberships()`
+returns per AUTH-SPEC's `MembershipObject`, so this needed no extra network
+round trip). The existing membership's `tenant_name` is now compared against
+the current request's `tenant_name`, normalized (trim + casefold, so trivial
+whitespace/case drift between two rapid-fire submits of a genuine retry
+doesn't false-409):
+
+- Same name → genuine retry → replay the existing tenant (200), as in 9.0.0.
+- Different name → NOT a retry → 409 `tenant_already_exists`, matching the
+  exact error code downstream platforms independently converged on for this
+  same "one identity, one tenant" business rule.
+
+`allow_additional_tenant=true` still bypasses this entire guard unchanged.
+
+### Added — access-aware token selection in the generated TypeScript client
+
+`RouteAccess` (`public | authentication | authorization`, since 6.2.0,
+enforced at runtime by `AccessTokenMiddleware`) was invisible to
+`php stone generate client` — every generated method attached whatever the
+`TokenStore`'s single API-token slot held, regardless of what the route
+actually required. A route declaring `access: RouteAccess::AUTHENTICATION`
+(e.g. `provision-tenant`, which runs *before* a tenant-scoped API token
+exists) had no way to get the right token from a generated client at all;
+downstream platforms independently hand-rolled raw-`fetch` bypasses for
+exactly this gap.
+
+The generator now reads each route's `access` value and threads it through
+to the generated call site as a `tokenMode` option:
+
+- `authorization` (default, unset routes unchanged) → the API token, exactly
+  as before — **every existing generated client is byte-identical for this
+  case**, confirmed by the full existing test suite passing unmodified.
+- `authentication` → the identity/auth token, via a new
+  `TokenStore.getAuthToken()` reading `ssp_auth_access_token` (the same key
+  `ngx-stonescriptphp-client`'s `AuthService` already writes — no new storage
+  convention).
+- `public` → no `Authorization` header at all, even if a token happens to be
+  in storage (previously every generated call attached whatever existed,
+  regardless of the route's actual requirement).
+
+The built-in 401 refresh-and-retry cycle (`MinimalHttp`) is now scoped to
+`authorization` calls only — a 401 on an `authentication`/`public` call
+surfaces directly as an `ApiError` instead of attempting an API-token
+refresh unrelated to the credential that was actually sent.
+
+Also: routes tagged `service: 'infra'`/`'webhook'` (unconditionally excluded
+from generation, A3) are no longer excluded when they declare
+`access: authentication` — 'infra' was designed for genuinely
+unauthenticated infrastructure probes (health, JWKS), which never plausibly
+need an identity token; real identity-scoped endpoints like
+`provision-tenant` get registered under `service: 'infra'` too purely
+because they don't belong to a specific portal/admin business service, and
+that tagging choice should not also make them permanently ungeneratable.
+
 ## [9.0.0] - 2026-08-12
 
 ### Changed — BREAKING: `ProvisionTenantRoute` — `tenant_name` is now the only accepted field name
@@ -33,21 +100,10 @@ brand-new, orphaned tenant database every time, even though the auth-layer
 `idempotency_key` handling correctly deduplicated the resulting membership
 row. Two independent downstream platforms hit this in production and each
 built their own guard around it. This release generalizes that pattern into
-the framework via `findExistingMembership()`: before provisioning, the route
-checks whether the calling identity already has a membership on this
-platform, and — critically — compares that membership's `tenant_name`
-against the name on the current request (normalized: trim + casefold):
-
-- **Same name** → treated as a genuine retry of the same request. Replays
-  the existing tenant (200) instead of creating a new one.
-- **Different name** → NOT treated as a retry. Returns 409
-  `tenant_already_exists` instead of silently replaying — an identity that
-  already owns "ABC Medicals" and submits "XYZ Pharmacy" is not retrying
-  anything; silently logging them into ABC Medicals with no indication XYZ
-  Pharmacy was never created would be worse than an explicit error. This
-  error code was independently converged on by the downstream platforms
-  that built their own guards, so the framework adopts it rather than
-  inventing a new one.
+the framework: before provisioning, the route now checks whether the calling
+identity already has a membership on this platform
+(`findExistingTenantId()`), and if so, replays that existing tenant instead
+of creating a new one.
 
 **This changes default behavior** for any platform whose provisioning flow
 relies on always creating a brand-new tenant regardless of existing

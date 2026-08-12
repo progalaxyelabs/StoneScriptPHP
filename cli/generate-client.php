@@ -340,8 +340,19 @@ function exclusionReason(array $route): ?string
 {
     $service = $route['service'] ?? 'shared';
 
-    // A3: infra / webhook services
-    if (in_array(strtolower($service), EXCLUDED_SERVICES)) {
+    // A3: infra / webhook services — EXCEPT a route that declares
+    // access: RouteAccess::AUTHENTICATION (v4.8, see the access-aware
+    // token-selection feature below). 'infra' was designed for genuinely
+    // unauthenticated infrastructure probes (health, JWKS) and 'webhook' for
+    // inbound signed/public callbacks — neither plausibly declares
+    // access=authentication. Real-world identity-scoped endpoints
+    // (provision-tenant, select-tenant, memberships) get registered by
+    // platforms under service:'infra' too, purely because they don't belong
+    // to a specific portal/admin business service — that tagging choice
+    // should not also make them permanently ungeneratable. A route that
+    // explicitly asks for an identity/auth token is, by definition, not a
+    // pure infra probe.
+    if (in_array(strtolower($service), EXCLUDED_SERVICES) && ($route['access'] ?? null) !== 'authentication') {
         return "service:$service (excluded)";
     }
 
@@ -622,6 +633,27 @@ export interface HttpParams {
 }
 
 /**
+ * v4.8 (access-aware token selection). Mirrors RouteAccess's three values
+ * (StoneScriptPHP\Routing\RouteAccess — public|authentication|authorization)
+ * exactly, rather than a derived boolean, so a 4th value can never silently
+ * fall through a stale true/false split. Defaults to 'authorization' (the
+ * tenant-scoped API token) — today's only behavior, unchanged for every
+ * route that doesn't declare `access:` or declares `authorization`.
+ *
+ *   - 'authorization'  — API token (TokenStore.get()). Default.
+ *   - 'authentication' — identity/auth token (TokenStore.getAuthToken()) —
+ *     for routes like provision-tenant that run BEFORE a tenant-scoped card
+ *     exists, so there is no API token yet to send.
+ *   - 'public'         — no token attached at all, even if one happens to be
+ *     in storage. Previously EVERY generated call attached whatever the
+ *     TokenStore held regardless of the route's actual access requirement;
+ *     a public route now genuinely sends no Authorization header.
+ */
+export interface HttpRequestOptions {
+  tokenMode?: 'public' | 'authentication' | 'authorization';
+}
+
+/**
  * Injected refresh strategy (CLIENT-SDK-SPEC §12/§14). Resolves true if a fresh
  * access token is now present in the TokenStore (the handler is responsible for
  * performing the refresh AND writing the new token into the same TokenStore this
@@ -653,25 +685,25 @@ export class MinimalHttp {
     this.refreshHandler = handler;
   }
 
-  async get<T = unknown>(path: string, params?: HttpParams): Promise<T> {
-    return this.request<T>('GET', path, undefined, params);
+  async get<T = unknown>(path: string, params?: HttpParams, options?: HttpRequestOptions): Promise<T> {
+    return this.request<T>('GET', path, undefined, params, options);
   }
 
-  async post<T = unknown>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>('POST', path, body);
+  async post<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
+    return this.request<T>('POST', path, body, undefined, options);
   }
 
-  async put<T = unknown>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>('PUT', path, body);
+  async put<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
+    return this.request<T>('PUT', path, body, undefined, options);
   }
 
-  async patch<T = unknown>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>('PATCH', path, body);
+  async patch<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
+    return this.request<T>('PATCH', path, body, undefined, options);
   }
 
   // DELETE may carry an optional body (e.g. bulk-delete payloads). Mirrors post().
-  async delete<T = unknown>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>('DELETE', path, body);
+  async delete<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
+    return this.request<T>('DELETE', path, body, undefined, options);
   }
 
   /**
@@ -699,6 +731,7 @@ export class MinimalHttp {
     path: string,
     body?: unknown,
     params?: HttpParams,
+    options?: HttpRequestOptions,
     isRetry = false,
   ): Promise<T> {
     const url = new URL(MinimalHttp.joinUrl(this.baseUrl, path));
@@ -710,9 +743,19 @@ export class MinimalHttp {
       }
     }
 
+    // v4.8 access-aware token selection — see HttpRequestOptions. Defaults to
+    // 'authorization' (the API token), today's only behavior, unchanged.
+    const tokenMode = options?.tokenMode ?? 'authorization';
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const token = this.tokens.get();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (tokenMode === 'authentication') {
+      const token = this.tokens.getAuthToken();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    } else if (tokenMode === 'authorization') {
+      const token = this.tokens.get();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    }
+    // tokenMode === 'public' -> no Authorization header, even if a token
+    // happens to be in storage.
 
     let res: Response;
     try {
@@ -725,10 +768,16 @@ export class MinimalHttp {
       throw new ApiError('Network error — check your connection', 0, networkErr, null);
     }
 
-    if (res.status === 401 && !isRetry) {
+    // The built-in refresh-and-retry cycle is scoped to the API token
+    // (tokenMode 'authorization') — it's the only mode with a refresh token
+    // in this TokenStore at all (see tokens.ts). A 401 on an 'authentication'
+    // or 'public' call surfaces directly as an ApiError instead of attempting
+    // an API-token refresh that has nothing to do with the credential (or
+    // lack of one) that was actually sent.
+    if (res.status === 401 && !isRetry && tokenMode === 'authorization') {
       const refreshed = await this.attemptRefresh();
       if (refreshed) {
-        return this.request<T>(method, path, body, params, true);
+        return this.request<T>(method, path, body, params, options, true);
       }
       this.tokens.clear();
       throw new ApiError('Session expired. Please log in again.', 401, null, null);
@@ -888,6 +937,24 @@ export class TokenStore {
   set(token: string): void {
     if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(ACCESS_KEY, token);
     if (typeof localStorage !== 'undefined') localStorage.setItem(ACCESS_KEY, token);
+  }
+
+  /**
+   * v4.8 (access-aware token selection). Reads the identity/auth token —
+   * `ssp_auth_access_token`, always localStorage, never per-tab sessionStorage
+   * (unlike the API token: the auth token is the SAME across every tab for
+   * one logged-in user — it's the API/card token that's tenant-scoped and
+   * needs per-tab isolation, see get()'s own docblock above). Used by
+   * generated methods for routes declaring access: RouteAccess::AUTHENTICATION
+   * (e.g. provision-tenant) — calls that run BEFORE a tenant-scoped API token
+   * exists yet, so there is nothing in ACCESS_KEY to send. This is the exact
+   * same key ngx-stonescriptphp-client's AuthService already writes — no new
+   * storage convention introduced, just a second accessor for a key this
+   * class could already partially see (as the single-token-mode alias in
+   * get()) but had no direct, honestly-named way to read on its own terms.
+   */
+  getAuthToken(): string | null {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem(AUTH_ACCESS_KEY) : null;
   }
 
   getRefresh(): string | null {
@@ -1230,8 +1297,17 @@ function buildGroupMethods(
         // Resolve typed return (CLIENT-SDK-SPEC §10). null → ApiResponse fallback.
         $responseTs = routeResponseTsType($route);
 
+        // v4.8: access-aware token selection. Threads the route's actual
+        // RouteAccess value (public|authentication|authorization) through
+        // rather than collapsing it to a boolean — 'public' legitimately
+        // means "send no token at all", distinct from "send the auth token"
+        // (authentication) and today's only behavior, "send the API token"
+        // (authorization, the default for unset/legacy routes). See
+        // verbatimHttpTs()/verbatimTokensTs().
+        $accessType = $route['access'] ?? null;
+
         // Build method signature and call
-        $methodTs = buildMethodTs($action, $method, $urlTemplate, $needsIdParam, $responseTs);
+        $methodTs = buildMethodTs($action, $method, $urlTemplate, $needsIdParam, $responseTs, $accessType);
         $lines[] = $methodTs;
     }
 
@@ -1314,6 +1390,18 @@ function buildUrlTemplate(string $path, bool $isTenantScoped, string $serviceNam
  *                                   (replaces $tailId — see templateNeedsIdParam()).
  * @param string|null $responseTs   Resolved TS return-payload type ('T.Warehouse[]'),
  *                                   or null for the ApiResponse fallback.
+ * @param string|null $accessType   v4.8: the route's RouteAccess value —
+ *                                   'public' | 'authentication' | 'authorization' | null.
+ *                                   Threaded through as the actual value (not a
+ *                                   derived boolean) so 'public' can mean "send no
+ *                                   token at all", distinct from 'authentication'
+ *                                   (identity/auth token). null/'authorization'
+ *                                   (unset routes default to authorization) both
+ *                                   mean today's only behavior — the API token —
+ *                                   and emit no extra call-site argument, so every
+ *                                   existing generated client is byte-identical to
+ *                                   before this feature for the common case. See
+ *                                   verbatimHttpTs()/verbatimTokensTs().
  * @return string TypeScript source for one method entry (including trailing comma)
  */
 function buildMethodTs(
@@ -1322,9 +1410,19 @@ function buildMethodTs(
     string  $urlTemplate,
     bool    $needsIdParam,
     ?string $responseTs = null,
+    ?string $accessType = null,
 ): string {
     // Return-payload generic: typed DTO when declared, else ApiResponse (unknown).
     $ret = $responseTs ?? 'T.ApiResponse';
+
+    // v4.8: emitted as a trailing options object only when it deviates from
+    // today's only behavior (authorization / the API token) — see the
+    // $accessType docblock above for why this keeps the common case byte-identical.
+    $optionsArg = match ($accessType) {
+        'public'         => ", { tokenMode: 'public' }",
+        'authentication' => ", { tokenMode: 'authentication' }",
+        default          => '', // null or 'authorization' — today's default, unchanged
+    };
 
     $isGet  = $httpMethod === 'GET';
     // POST/PUT/PATCH all carry a body and share the same signature shape.
@@ -1339,16 +1437,20 @@ function buildMethodTs(
 
     if ($isGet) {
         if ($needsIdParam) {
-            // GET with path id — e.g. inventory.get(id) or routes.shipments(id)
+            // GET with path id — e.g. inventory.get(id) or routes.shipments(id).
+            // No `params` slot here, so an `undefined` placeholder is only
+            // inserted when $optionsArg is actually non-empty — the common
+            // (unset access) case stays byte-identical to before this feature.
+            $getIdArgs = $optionsArg !== '' ? ", undefined{$optionsArg}" : '';
             return <<<TS
     {$action}: (id: string | number) =>
-      this.http.get<{$ret}>({$urlTemplate}),
+      this.http.get<{$ret}>({$urlTemplate}{$getIdArgs}),
 TS;
         } else {
             // GET list / search / action — e.g. inventory.list(params?)
             return <<<TS
     {$action}: (params?: HttpParams) =>
-      this.http.get<{$ret}>({$urlTemplate}, params),
+      this.http.get<{$ret}>({$urlTemplate}, params{$optionsArg}),
 TS;
         }
     }
@@ -1358,13 +1460,13 @@ TS;
             // Body verb with path id — e.g. inventory.update(id, data?) / routes.start(id, data?)
             return <<<TS
     {$action}: (id: string | number, data?: T.ApiRequestBody) =>
-      this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data),
+      this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data{$optionsArg}),
 TS;
         } else {
             // Body verb without path id — e.g. inventory.create(data?)
             return <<<TS
     {$action}: (data?: T.ApiRequestBody) =>
-      this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data),
+      this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data{$optionsArg}),
 TS;
         }
     }
