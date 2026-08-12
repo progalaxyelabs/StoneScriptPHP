@@ -20,28 +20,88 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  *
  * Flow:
  *   1. Decode JWT — extract identity_id
- *   2. Generate tenant_id, slug, db_schema
- *   3. Call provisioner->provision($data) — sequential platform steps:
+ *   2. Resolve tenant_name (AUTH-SPEC §5a — canonical field, store_name
+ *      accepted as a backward-compat alias); reject if neither is present.
+ *   3. Existing-tenant guard (AUTH-SPEC §5a/S9, 2026-08-12): unless
+ *      allow_additional_tenant=true, check whether this identity already has
+ *      a membership on this platform (findExistingTenantId()) — if so, REPLAY
+ *      that tenant instead of generating a new uuid and provisioning a new
+ *      (orphaned, on a retry) database. Fixes a real bug: this used to run
+ *      unconditionally, so a double-click/network retry physically
+ *      provisioned a new, orphaned tenant database every time, even though
+ *      step 5's idempotency_key handling correctly deduped the MEMBERSHIP.
+ *   4. Generate tenant_id (or reuse the existing one from step 3), slug, db_schema.
+ *   5. AUTH-SPEC §3d: if oauth_state is present (and this is NOT a replay),
+ *      call ExternalAuthServiceClient::promoteOAuthConnection() to commit the
+ *      OAuth connection linkage before provisioning.
+ *   6. Call provisioner->provision($data) — sequential platform steps
+ *      (skipped entirely on replay — the tenant + database already exist):
  *        a. createTenantRecord()  — write tenant to main DB
  *        b. createDatabase()      — provision tenant DB via gateway
  *        c. runMigrations()       — run migrations (default no-op)
  *        d. seedData()            — platform-specific seeding (default no-op)
- *   4. Call auth's POST /api/internal/create-membership
- *   5. Return full platform JWT envelope (AUTH-SPEC §5a):
- *      access_token, refresh_token, token_type, expires_in,
- *      tenant {id, name, slug, db_schema}, identity {id, email, display_name},
- *      membership {id, tenant_id, role, roles}
+ *   7. Call auth's POST /api/internal/create-membership — idempotent on
+ *      (identity_id, tenant_id); reports is_new_tenant=false on replay.
+ *   8. Return full platform JWT envelope (AUTH-SPEC §5a / TENANCY-IDENTITY-MODEL.md §6):
+ *      access_token, token_type, expires_in, active_tenant, available_tenants[],
+ *      active_role, available_roles[], identity {id, email, display_name},
+ *      membership {id, tenant_id, role}
  *
  * Falls back to legacy before_provision / after_provision hooks when no
  * provisioner instance is provided (backward compatibility).
+ *
+ * A platform needing different idempotency/field/response-shape/OAuth
+ * behavior than the above can now extend this class and register the
+ * subclass via `ExternalAuthConfig`'s `provision_tenant_route_class` option
+ * (see that property's docblock) — the constructor stays a normal 3+1-arg
+ * DI constructor (for testability, same as every other ExternalAuth route),
+ * and mintProvisionApiToken()/slugify()/generateUuid()/findExistingTenantId()
+ * are protected, not private, specifically so a subclass can override just
+ * the piece it needs instead of reimplementing this whole class.
  *
  * @package StoneScriptPHP\Auth\ExternalAuth\Routes
  */
 class ProvisionTenantRoute extends BaseExternalAuthRoute
 {
+    /**
+     * AUTH-SPEC §5a: canonical field name. `store_name` (below) is accepted
+     * as a backward-compatible alias — either satisfies the requirement,
+     * process() resolves `$this->tenant_name ?: $this->store_name`. Both are
+     * declared `optional` in validation_rules() (neither alone can be
+     * `required` without rejecting the other's callers); process() enforces
+     * "at least one" manually. Added 2026-08-12 — previously ONLY
+     * `store_name` existed, which silently dropped `tenant_name` on any
+     * spec-compliant client (reflection-based property injection ignores
+     * unmatched input keys — no error, just a blank tenant name).
+     */
+    public string $tenant_name      = '';
+    /** Backward-compatible alias for tenant_name — see its docblock. */
     public string $store_name       = '';
     /** AUTH-SPEC §5a S9 — required, client-generated UUID. Prevents double-creates on retry. */
     public string $idempotency_key  = '';
+    /**
+     * AUTH-SPEC §3d. Optional. Present when this call follows an OAuth
+     * confirm-signup — the Bearer token at this point is the short-lived
+     * oauth_pending JWT confirm-signup issued. When set, process() calls
+     * ExternalAuthServiceClient::promoteOAuthConnection() to commit the
+     * OAuth connection linkage (oauth_pending_connections -> oauth_connections)
+     * before creating the tenant membership. Added 2026-08-12 — medstoreapp
+     * needed this for its OAuth-signup-then-provision handoff and the
+     * framework had no equivalent, one of the reasons it reimplemented this
+     * whole route instead of extending it.
+     */
+    public string $oauth_state      = '';
+    /**
+     * When true, skip the existing-tenant guard below and always provision a
+     * genuinely new tenant even if the identity already has one for this
+     * platform. Mirrors aasaanwork's own `allow_additional` field — its
+     * docblock: "the Switch-Org 'Add New Organization' flow needs exactly
+     * this: skip Layer 1 entirely". Default false: the SAFE default is
+     * "prevent duplicate-tenant creation on a double-click or network
+     * retry" — see the guard's own comment in process() for the bug this
+     * fixes. Added 2026-08-12.
+     */
+    public bool $allow_additional_tenant = false;
     public string $display_name     = '';
     public string $email        = '';
     public string $phone        = '';          // preferred field name
@@ -70,8 +130,15 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     public function validation_rules(): array
     {
         return array_merge([
-            'store_name'      => 'required|string|max:255',
+            // tenant_name/store_name: individually optional here — "at least one
+            // required" can't be expressed as a single-field rule without
+            // rejecting whichever alias the caller didn't use. Enforced manually
+            // in process(). See tenant_name's own property docblock.
+            'tenant_name'     => 'optional|string|max:255',
+            'store_name'      => 'optional|string|max:255',
             'idempotency_key' => 'required|string|max:64',   // AUTH-SPEC §5a S9
+            'oauth_state'     => 'optional|string|max:512',
+            'allow_additional_tenant' => 'optional|boolean',
             'display_name'    => 'optional|string|max:255',
             'email'        => 'optional|string|max:255',
             'phone'        => 'optional|string|max:50',
@@ -96,11 +163,58 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         }
         $identityId = (string) $user->user_id;
 
-        // 2. Generate tenant identifiers
-        // tenant_slug is intentionally not generated here — it is optional and not used
-        // for routing on shared-portal platforms. Platforms that need subdomain routing
-        // should generate their own slug and set it in the provisioner's createTenantRecord().
-        $tenantId       = $this->generateUuid();
+        // AUTH-SPEC §5a: resolve canonical tenant_name, falling back to the
+        // store_name alias — see tenant_name's own property docblock. Neither
+        // is `required` individually in validation_rules() (that would reject
+        // whichever alias the caller didn't send), so "at least one" is
+        // enforced here, manually — same pattern medstoreapp's/aasaanwork's
+        // own overrides already used for this exact reason.
+        $resolvedName = $this->tenant_name ?: $this->store_name;
+        if (!$resolvedName) {
+            return new ApiResponse('error', 'Validation failed', null, 422, [
+                ['field' => 'tenant_name', 'message' => 'Tenant name is required (tenant_name or store_name)'],
+            ]);
+        }
+
+        // AUTH-SPEC §5a/S9 — existing-tenant guard (2026-08-12 fix for a real,
+        // confirmed bug, not a hypothetical): generateUuid() +
+        // provisioner->provision() used to run UNCONDITIONALLY on every call,
+        // before idempotency_key was ever checked against anything — a
+        // double-click or network retry generated a BRAND NEW random uuid and
+        // physically provisioned a real, orphaned tenant database for it every
+        // single time, even though createMembership() (step 4 below) correctly
+        // deduped the MEMBERSHIP row afterward via idempotency_key. The
+        // orphaned database was never cleaned up — createDatabase() is only
+        // idempotent BY uuid, and each retry used a different one.
+        //
+        // Both platforms that hit this in production built their own app-level
+        // guard (medstoreapp: a Redis-based 24h idempotency cache; aasaanwork:
+        // this exact "does the identity already have a membership" check,
+        // called "Layer 1" in its docblock). This generalizes aasaanwork's
+        // version into the framework. Bypassable via allow_additional_tenant
+        // for platforms/flows that legitimately create >1 tenant per identity
+        // (TENANCY-IDENTITY-MODEL.md §4.3 "add a second business").
+        //
+        // Fail-open on lookup error: this guard is a best-effort optimization
+        // to avoid the orphaned-DB waste, not the dedup authority — auth's
+        // createMembership() (idempotency_key-keyed) remains the real
+        // correctness guarantee against duplicate MEMBERSHIPS either way.
+        $existingTenantId = null;
+        if (!$this->allow_additional_tenant) {
+            $existingTenantId = $this->findExistingTenantId();
+        }
+
+        $isReplay = $existingTenantId !== null;
+
+        // 2. Resolve tenant identifiers — a genuinely NEW uuid, or the
+        // EXISTING tenant's id when the guard above found one. The db_schema
+        // naming convention is deterministic ({platform}_{uuid}), so it's
+        // recomputable for an existing tenant without an extra lookup.
+        // tenant_slug is intentionally not generated here — it is optional and
+        // not used for routing on shared-portal platforms. Platforms that need
+        // subdomain routing should generate their own slug and set it in the
+        // provisioner's createTenantRecord().
+        $tenantId       = $isReplay ? $existingTenantId : $this->generateUuid();
         $tenantDbSchema = $this->config->platformCode . '_' . str_replace('-', '_', $tenantId);
 
         $phone = $this->phone ?: $this->phone_number; // accept either field name
@@ -109,7 +223,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             'identity_id'      => $identityId,
             'tenant_id'        => $tenantId,
             'platform_code'    => $this->config->platformCode,
-            'tenant_name'      => $this->store_name,
+            'tenant_name'      => $resolvedName,
             'tenant_slug'      => null,  // Optional — not generated by default
             'tenant_db_schema' => $tenantDbSchema,
             'display_name'     => $this->display_name ?: ($user->display_name ?? ''),
@@ -127,8 +241,32 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             'idempotency_key'  => $this->idempotency_key,
         ];
 
-        // 3. Run provisioning — prefer class-based provisioner over legacy hooks
-        if ($this->provisioner !== null) {
+        // AUTH-SPEC §3d — OAuth promote. Only on the genuinely-new-tenant path:
+        // a replay means this identity already has a tenant, so any OAuth
+        // connection linkage for it was already promoted on the ORIGINAL call
+        // that created that tenant — repeating it here would be redundant, not
+        // wrong, but there is nothing new to commit. Fatal if it fails on the
+        // new-tenant path: without it, the OAuth connection is orphaned and the
+        // identity cannot log in via that provider next time (see
+        // ExternalAuthServiceClient::promoteOAuthConnection()'s docblock).
+        if (!$isReplay && $this->oauth_state !== '') {
+            $rawToken = $this->getBearerToken() ?? '';
+            try {
+                $this->client->promoteOAuthConnection($this->oauth_state, $rawToken);
+            } catch (\Throwable $e) {
+                log_error('ProvisionTenantRoute: OAuth promote failed for state=' . $this->oauth_state . ': ' . $e->getMessage());
+                return res_error('Failed to complete OAuth sign-in. Please try again.', 500);
+            }
+        }
+
+        // 3. Run provisioning — prefer class-based provisioner over legacy hooks.
+        // Skipped entirely on replay: the tenant record + database already
+        // exist (that's what makes it a replay), re-running provision() would
+        // at best no-op (createDatabase() 409s) and at worst re-run seedData()
+        // against live data.
+        if ($isReplay) {
+            // No-op — see above.
+        } elseif ($this->provisioner !== null) {
             try {
                 $data = $this->provisioner->provision($data);
             } catch (\Throwable $e) {
@@ -247,6 +385,39 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     }
 
     /**
+     * Best-effort check: does this identity already have ANY membership for
+     * this platform? Used by the existing-tenant guard in process() (see its
+     * comment for the real, confirmed bug this fixes — orphaned tenant
+     * databases from unconditional provisioning on retry). Returns the first
+     * membership's tenant_id, or null if none found, no Bearer token is
+     * present, or the lookup itself failed — every null case is treated as
+     * fail-open by process() (proceed to provision), never fail-closed, since
+     * this guard is a best-effort optimization, not the dedup authority
+     * (createMembership()'s idempotency_key handling is).
+     *
+     * Protected — override seam for a platform wanting different
+     * existing-tenant resolution (e.g. filtering by membership status, or by
+     * a specific tenant_id rather than "the first one found").
+     */
+    protected function findExistingTenantId(): ?string
+    {
+        $rawToken = $this->getBearerToken();
+        if ($rawToken === null) {
+            return null;
+        }
+
+        try {
+            $response = $this->client->getMemberships($rawToken);
+        } catch (\Throwable $e) {
+            log_warning('ProvisionTenantRoute: existing-tenant guard lookup failed (proceeding to provision): ' . $e->getMessage());
+            return null;
+        }
+
+        $tenantId = $response['memberships'][0]['tenant_id'] ?? null;
+        return ($tenantId !== null && $tenantId !== '') ? (string) $tenantId : null;
+    }
+
+    /**
      * Mint a platform API token immediately after provisioning.
      *
      * This gives the client a usable API token without requiring a separate exchange call.
@@ -255,8 +426,18 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      *
      * Returns null if the signing key is not configured (e.g. during unit tests),
      * in which case the caller falls back to the auth service's access_token.
+     *
+     * Protected (not private) — a platform substituted via
+     * `provision_tenant_route_class` (see ExternalAuthConfig::$provisionTenantRouteClass)
+     * can override just this customization point (e.g. to mint a different
+     * token shape) without reimplementing all of process(). Was private until
+     * 2026-08-12; confirmed via `git log --all -p` that no platform ever
+     * attempted `extends ProvisionTenantRoute` before this fix — both
+     * medstoreapp and aasaanwork instead reimplemented the entire route from
+     * scratch as a standalone IRouteHandler, in part because this and the two
+     * methods below were unreachable from a subclass either way.
      */
-    private function mintProvisionApiToken(
+    protected function mintProvisionApiToken(
         string $identityId,
         string $tenantId,
         string $role,
@@ -291,8 +472,11 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
 
     /**
      * Generate a URL-safe slug from a store name.
+     *
+     * Protected (not private) — same override-seam rationale as
+     * mintProvisionApiToken() above.
      */
-    private function slugify(string $name): string
+    protected function slugify(string $name): string
     {
         $slug = mb_strtolower(trim($name));
         $slug = preg_replace('/[^a-z0-9\s-]/', '', $slug);
@@ -303,8 +487,12 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
 
     /**
      * Generate a UUID v4 string.
+     *
+     * Protected (not private) — same override-seam rationale as
+     * mintProvisionApiToken() above (e.g. a platform needing deterministic
+     * UUIDs in tests, or a different generation strategy).
      */
-    private function generateUuid(): string
+    protected function generateUuid(): string
     {
         $bytes = random_bytes(16);
         $bytes[6] = chr(ord($bytes[6]) & 0x0f | 0x40);

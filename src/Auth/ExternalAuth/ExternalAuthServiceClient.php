@@ -299,6 +299,32 @@ class ExternalAuthServiceClient extends AuthServiceClient
         ]);
     }
 
+    /**
+     * Commit an OAuth connection linkage (AUTH-SPEC §3d) — moves
+     * `oauth_pending_connections` -> `oauth_connections`. Called by
+     * ProvisionTenantRoute when `oauth_state` is present on the request,
+     * i.e. this provision-tenant call follows an OAuth confirm-signup.
+     *
+     * Fatal if this fails and the caller doesn't handle it: without a
+     * committed connection the identity cannot log in via that OAuth
+     * provider again (the linkage never got promoted out of "pending").
+     *
+     * @param string $oauthState The oauth_state value from confirm-signup
+     * @param string $authToken The short-lived oauth_pending JWT issued by
+     *   confirm-signup (raw token, no "Bearer " prefix — buildAuthHeader()
+     *   adds it)
+     * @return array Auth service response
+     * @throws AuthServiceException
+     */
+    public function promoteOAuthConnection(string $oauthState, string $authToken): array
+    {
+        return $this->post(
+            '/api/oauth/promote',
+            ['oauth_state' => $oauthState],
+            $this->buildAuthHeader($authToken)
+        );
+    }
+
     // ──────────────────────────────────────────────
     // Internal (server-to-server) endpoints
     // ──────────────────────────────────────────────
