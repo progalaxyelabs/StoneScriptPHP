@@ -186,7 +186,7 @@ class ApplicationResolverThreadingTest extends TestCase
 }
 
 /**
- * Testable subclass that overrides external seams (JWKS + card signing) so
+ * Testable subclass that overrides external seams (JWKS + API-token signing) so
  * ExchangeRoute::process() can run without network or real RSA keys.
  */
 class TestableExchangeRouteForResolver extends ExchangeRoute
@@ -200,12 +200,12 @@ class TestableExchangeRouteForResolver extends ExchangeRoute
         return $this->stubToken;
     }
 
-    protected function validateIdentity(string $passportToken): array
+    protected function validateIdentity(string $authToken): array
     {
         return $this->stubClaims;
     }
 
-    protected function signCard(array $claimsWithTenant, string $activeRoleId): string
+    protected function signApiToken(array $claimsWithTenant, string $activeRoleId): string
     {
         return $this->stubCard;
     }

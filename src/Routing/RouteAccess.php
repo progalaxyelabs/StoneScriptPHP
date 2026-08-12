@@ -11,8 +11,8 @@ namespace StoneScriptPHP\Routing;
  *
  *   - `access` ∈ {public, authentication, authorization} — what a request needs.
  *       * public         → no token required.
- *       * authentication → an identity/passport token (`purpose=authentication`).
- *       * authorization  → a card/API token (`purpose=authorization`).
+ *       * authentication → an identity/auth token (`purpose=authentication`).
+ *       * authorization  → an API token (`purpose=authorization`).
  *     The access value equals the token `purpose` the framework asserts.
  *
  *   - `token_type` ∈ {access, refresh} — WHICH credential the route consumes.

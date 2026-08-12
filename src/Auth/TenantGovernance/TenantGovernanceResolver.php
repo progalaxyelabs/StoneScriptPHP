@@ -27,7 +27,7 @@ use StoneScriptPHP\Database;
  * Both closures read from the platform's OWN main DB via
  * `get_identity_tenant_memberships()` / `resolve_role_id()` — zero dependency
  * on the external auth service's membership response beyond the identity id,
- * which is already on the verified passport claims. This is the whole
+ * which is already on the verified auth-token claims. This is the whole
  * point of platform-owned governance: roles belong to the platform, not auth.
  *
  * ## Display-name enrichment (why the constructor takes an optional callable)
@@ -38,7 +38,7 @@ use StoneScriptPHP\Database;
  * vs store_name, biz_slug vs slug, ...). The framework can't universally JOIN
  * to fetch them. So the default `tenantsResolver()` returns each tenant as
  * `{id, role, is_tenant_creator, is_tenant_owner, is_tenant_admin, job_role}`
- * — functionally complete for access control and card issuance, but with no
+ * — functionally complete for access control and API-token issuance, but with no
  * human-readable name. A platform that wants names in `available_tenants`
  * passes a `$tenantEnricher` closure to the constructor; it receives the
  * governance rows (each already carrying `id`) and returns them enriched with
@@ -61,7 +61,7 @@ final class TenantGovernanceResolver
     }
 
     /**
-     * fn(array $passportClaims): array<int, array{id: string, role: string, ...}>
+     * fn(array $authClaims): array<int, array{id: string, role: string, ...}>
      *
      * Every tenant the identity holds an ACTIVE membership in, on this
      * platform. Shape matches ExchangeRoute's contract: each entry MUST carry
@@ -71,8 +71,8 @@ final class TenantGovernanceResolver
      */
     public function tenantsResolver(): callable
     {
-        return function (array $passportClaims): array {
-            $identityId = self::identityIdFromClaims($passportClaims);
+        return function (array $authClaims): array {
+            $identityId = self::identityIdFromClaims($authClaims);
             if ($identityId === null) {
                 return [];
             }
@@ -115,12 +115,12 @@ final class TenantGovernanceResolver
      * The identity's single derived role in the requested tenant, as a
      * one-element list (ExchangeRoute's roles_resolver contract — an empty
      * list means "no roles in this tenant" → 403 `no_roles_in_tenant`).
-     * `$claimsWithTenant` is the passport claims with `tenant_id` merged in
+     * `$claimsWithTenant` is the auth-token claims with `tenant_id` merged in
      * (ExchangeRoute does that merge before calling this).
      *
      * A suspended/removed membership resolves to NULL in SQL
      * (resolve_role_id → _tenant_membership_tier), which becomes an empty
-     * list here — so a suspended member correctly cannot exchange for a card.
+     * list here — so a suspended member correctly cannot exchange for an API token.
      */
     public function rolesResolver(): callable
     {
@@ -195,7 +195,7 @@ final class TenantGovernanceResolver
     }
 
     /**
-     * Extract the identity id from passport claims. A passport carries the
+     * Extract the identity id from auth-token claims. An auth token carries the
      * identity id as both `sub` and `identity_id` (the external auth service
      * mints both); prefer `sub` (the JWT-standard subject),
      * fall back to `identity_id`.
@@ -226,7 +226,7 @@ final class TenantGovernanceResolver
 
     /**
      * The governance-tier → role-string mapping ExchangeRoute stamps onto the
-     * card's `role_id` claim. Mirrors resolve_role_id.pgsql /
+     * API token's `role_id` claim. Mirrors resolve_role_id.pgsql /
      * _tenant_membership_tier exactly (owner > admin > member) so the two
      * derivation sites can never disagree.
      */

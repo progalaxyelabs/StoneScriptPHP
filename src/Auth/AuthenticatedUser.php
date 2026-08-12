@@ -9,15 +9,15 @@ namespace StoneScriptPHP\Auth;
  *
  * Represents the context extracted from a validated JWT token.
  *
- * ## Passport vs Card (framework-spec.md §6)
+ * ## Auth token vs API token (framework-spec.md §6)
  *
- * - **Passport** (identity JWT from auth service): has user_id/identity_id, email.
- *   tenant_id and role_id are NULL — a passport is always tenant-less.
- * - **Card** (platform JWT issued by exchange): has user_id/identity_id, tenant_id,
+ * - **Auth token** (identity JWT from auth service): has user_id/identity_id, email.
+ *   tenant_id and role_id are NULL — an auth token is always tenant-less.
+ * - **API token** (platform JWT issued by exchange): has user_id/identity_id, tenant_id,
  *   AND role_id (a single active role). All three are present together.
  *
  * Code that needs tenant context should check `$user->tenant_id !== null` to confirm
- * it has a card, not a passport.
+ * it has an API token, not an auth token.
  *
  * Identity IDs are always UUID strings (from external auth service).
  */
@@ -30,9 +30,9 @@ class AuthenticatedUser
         public readonly ?string $display_name = null,
 
         /**
-         * Active role on the card (single string, e.g. 'owner', 'cashier').
-         * NULL for passport tokens — they carry no role.
-         * Use role_id for card-model checks; user_role is a legacy alias.
+         * Active role on the API token (single string, e.g. 'owner', 'cashier').
+         * NULL for auth tokens — they carry no role.
+         * Use role_id for API-token-model checks; user_role is a legacy alias.
          */
         public readonly ?string $role_id = null,
 
@@ -42,7 +42,7 @@ class AuthenticatedUser
          */
         public readonly ?string $user_role = null,
 
-        /** Tenant ID — present on cards, NULL on passports. */
+        /** Tenant ID — present on API tokens, NULL on auth tokens. */
         public readonly ?string $tenant_id = null,
         public readonly ?string $tenant_slug = null,
         public readonly ?string $platform_code = null,
@@ -54,7 +54,7 @@ class AuthenticatedUser
     /**
      * Create from JWT payload array.
      *
-     * Supports both the card model (role_id claim, single string) and the
+     * Supports both the API-token model (role_id claim, single string) and the
      * legacy platform token (roles[] array, reads first element as user_role).
      *
      * @param array $payload JWT token payload
@@ -82,20 +82,20 @@ class AuthenticatedUser
         $platform_code = $payload['platform_code'] ?? null;
         $issuer_type  = $payload['issuer_type'] ?? null;
 
-        // Card model: role_id (single string).
+        // API-token model: role_id (single string).
         // Legacy: roles[] array — read first element; or scalar user_role.
         //
-        // `role` is DELIBERATELY excluded from this fallback chain: a
-        // passport's `role` claim is now
+        // `role` is DELIBERATELY excluded from this fallback chain: an
+        // auth token's `role` claim is now
         // always a fixed, neutral sentinel (e.g. "authenticated") stamped by
         // auth for every identity-authenticated token — it never carries an
         // application-role value and must never be mistaken for one, even
         // via a permissive fallback. `fromPayload()` is occasionally called
-        // on raw passport claims (not just cards), so silently reading
+        // on raw auth-token claims (not just API tokens), so silently reading
         // `role` here would resurrect exactly the coupling this task
-        // removes the moment anyone calls this on a passport instead of a
-        // card. Real cards only ever carry `role_id` (never `role`) — see
-        // TokenExchangeService::exchangeCard().
+        // removes the moment anyone calls this on an auth token instead of an
+        // API token. Real API tokens only ever carry `role_id` (never `role`) — see
+        // TokenExchangeService::exchangeApiToken().
         $role_id = $payload['role_id'] ?? null;
 
         $user_role = $role_id
@@ -146,10 +146,10 @@ class AuthenticatedUser
     }
 
     /**
-     * Check if this token is a card (has tenant + role context).
-     * Returns false for passports (tenant-less identity tokens).
+     * Check if this token is an API token (has tenant + role context).
+     * Returns false for auth tokens (tenant-less identity tokens).
      */
-    public function isCard(): bool
+    public function isApiToken(): bool
     {
         return $this->tenant_id !== null;
     }

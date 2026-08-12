@@ -423,7 +423,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
     // platform-owned), and
     // `PUT /api/auth/memberships/:id` was removed as part of the same
     // auth role-ownership change (it was the one user-curlable membership mutation, authenticated by a
-    // bare passport with no X-Platform-Secret).
+    // bare auth token with no X-Platform-Secret).
     // Neither was merely deprecated-but-kept like acceptInvite() below,
     // because unlike that method, nothing about these two was ever
     // SemVer-relied-upon in a way worth preserving a permanently-failing

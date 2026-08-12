@@ -13,34 +13,34 @@ use StoneScriptPHP\Auth\TokenExchangeException;
 /**
  * POST {prefix}/exchange  (PUBLIC — see note on auth)
  *
- * Exchanges a passport (identity JWT, issued by the central auth service) plus a
- * chosen tenant for a **card token** (platform JWT carrying identity_id, tenant_id,
+ * Exchanges an auth token (identity JWT, issued by the central auth service) plus a
+ * chosen tenant for an **API token** (platform JWT carrying identity_id, tenant_id,
  * and a single active role_id). Implements §4 of the Tenancy & Identity Model.
  *
- * ## Passport / Card model (framework-spec.md §6)
+ * ## Auth token / API token model (framework-spec.md §6)
  *
- * - **Passport** = identity JWT issued by the auth service. Tenant-less. Proves *who
+ * - **Auth token** = identity JWT issued by the auth service. Tenant-less. Proves *who
  *   you are* across all platforms.
- * - **Card** = platform JWT issued HERE. Carries identity_id + tenant_id + single
+ * - **API token** = platform JWT issued HERE. Carries identity_id + tenant_id + single
  *   active role_id. Authorises *all tenant-scoped transactions* on this platform.
  *
  * ## Why this route is PUBLIC (excluded from JwtAuthMiddleware)
- * The inbound Authorization token is a *passport* signed by the auth service — NOT a
- * platform card. JwtAuthMiddleware validates platform cards (different issuer/key) and
- * would reject it. This route validates the passport itself via JWKS.
+ * The inbound Authorization token is an *auth token* signed by the auth service — NOT a
+ * platform API token. JwtAuthMiddleware validates platform API tokens (different issuer/key) and
+ * would reject it. This route validates the auth token itself via JWKS.
  *
  * ## Flow
- *   1. Extract passport from Authorization: Bearer header
+ *   1. Extract the auth token from the Authorization: Bearer header
  *   2. Validate against auth service JWKS (TokenExchangeService::validateIdentityToken)
- *   3. Read tenant_id (and optional role_id) from the request **body** — the passport is
+ *   3. Read tenant_id (and optional role_id) from the request **body** — the auth token is
  *      always tenant-less; the tenant is the user's choice at entry time.
  *   4. Resolve available_tenants via the injected tenants_resolver (platform-specific).
  *      Verify the requested tenant_id is in the available set.
  *   5. Resolve available_roles in that tenant via the injected roles_resolver.
  *      Verify access (non-empty roles list = membership exists).
  *   6. Pick active_role_id: use role_id from body if valid, else first in available_roles.
- *   7. Sign a card (TokenExchangeService::exchangeCard) using the platform's JWT keypair.
- *   8. Return the card envelope (§6 session contract).
+ *   7. Sign an API token (TokenExchangeService::exchangeApiToken) using the platform's JWT keypair.
+ *   8. Return the API-token envelope (§6 session contract).
  *
  * ## Switching tenant or role
  * Re-call this endpoint with the new tenant_id / role_id — that is the canonical
@@ -54,13 +54,13 @@ class ExchangeRoute extends BaseExternalAuthRoute
 
     /**
      * The tenant the identity wants to enter (required).
-     * Verified against available_tenants before minting the card.
+     * Verified against available_tenants before minting the API token.
      */
     public string $tenant_id = '';
 
     /**
      * Optional active role hint. When supplied and the identity holds that role
-     * in the requested tenant, it becomes the card's active role. Otherwise the
+     * in the requested tenant, it becomes the API token's active role. Otherwise the
      * first role returned by roles_resolver is used.
      */
     public string $role_id = '';
@@ -70,7 +70,7 @@ class ExchangeRoute extends BaseExternalAuthRoute
     /**
      * Platform-specific tenants resolver.
      *
-     * Signature: fn(array $passportClaims): array
+     * Signature: fn(array $authClaims): array
      *   Returns a list of tenant objects the identity has access to on this platform.
      *   Each element: [ 'id' => string, 'name' => string, ... ]
      *
@@ -86,7 +86,7 @@ class ExchangeRoute extends BaseExternalAuthRoute
      * Platform-specific roles resolver.
      *
      * Signature: fn(array $claimsWithTenant): array
-     *   $claimsWithTenant includes all passport claims + 'tenant_id' from the request body.
+     *   $claimsWithTenant includes all auth-token claims + 'tenant_id' from the request body.
      *   Returns a list of role strings the identity holds in that tenant (e.g. ['owner']).
      *
      * A missing resolver is a configuration error — never guess roles.
@@ -110,7 +110,7 @@ class ExchangeRoute extends BaseExternalAuthRoute
     /**
      * {@inheritdoc}
      *
-     * tenant_id is required in the body — the passport is always tenant-less.
+     * tenant_id is required in the body — the auth token is always tenant-less.
      * role_id is optional; defaults to the first role in the identity's membership.
      */
     public function validation_rules(): array
@@ -126,41 +126,41 @@ class ExchangeRoute extends BaseExternalAuthRoute
      */
     public function process(): ApiResponse
     {
-        // 1. Extract passport from Authorization header.
-        $passportToken = $this->extractIdentityToken();
-        if ($passportToken === null || $passportToken === '') {
+        // 1. Extract the auth token from the Authorization header.
+        $authToken = $this->extractIdentityToken();
+        if ($authToken === null || $authToken === '') {
             return new ApiResponse(
                 'error',
-                'Authorization header with Bearer passport token required',
+                'Authorization header with Bearer auth token required',
                 ['error' => 'invalid_identity_token'],
                 401
             );
         }
 
-        // 2. Validate the passport against the auth service JWKS.
+        // 2. Validate the auth token against the auth service JWKS.
         try {
-            $passportClaims = $this->validateIdentity($passportToken);
+            $authClaims = $this->validateIdentity($authToken);
         } catch (TokenExchangeException $e) {
-            log_error('ExchangeRoute: passport validation failed: ' . $e->getMessage());
+            log_error('ExchangeRoute: auth token validation failed: ' . $e->getMessage());
             return new ApiResponse(
                 'error',
-                'Invalid or expired passport',
+                'Invalid or expired auth token',
                 ['error' => 'invalid_identity_token'],
                 401
             );
         }
 
-        $identityId = $passportClaims['identity_id'] ?? $passportClaims['sub'] ?? null;
+        $identityId = $authClaims['identity_id'] ?? $authClaims['sub'] ?? null;
         if (!$identityId) {
             return new ApiResponse(
                 'error',
-                'Passport missing identity_id claim',
+                'Auth token missing identity_id claim',
                 ['error' => 'invalid_identity_token'],
                 401
             );
         }
 
-        // 3. Read tenant_id from the request body (not from the token — passports are tenant-less).
+        // 3. Read tenant_id from the request body (not from the token — auth tokens are tenant-less).
         $requestedTenantId = $this->tenant_id;
         $requestedRoleId   = $this->role_id !== '' ? $this->role_id : null;
 
@@ -170,7 +170,7 @@ class ExchangeRoute extends BaseExternalAuthRoute
 
         if ($this->tenantsResolver !== null) {
             try {
-                $availableTenants = ($this->tenantsResolver)($passportClaims);
+                $availableTenants = ($this->tenantsResolver)($authClaims);
             } catch (\Throwable $e) {
                 log_error('ExchangeRoute: tenants_resolver threw: ' . $e->getMessage());
                 return res_error('Failed to resolve tenant memberships', 500);
@@ -206,7 +206,7 @@ class ExchangeRoute extends BaseExternalAuthRoute
 
         // 5. Resolve roles. A missing resolver is a configuration error — never guess.
         if ($this->rolesResolver === null) {
-            log_error('ExchangeRoute: no roles_resolver configured — cannot issue card token');
+            log_error('ExchangeRoute: no roles_resolver configured — cannot issue API token');
             return res_error(
                 'Token exchange is not configured on this platform (missing roles_resolver)',
                 501
@@ -214,7 +214,7 @@ class ExchangeRoute extends BaseExternalAuthRoute
         }
 
         // Merge tenant_id into claims so roles_resolver can use it.
-        $claimsWithTenant = array_merge($passportClaims, ['tenant_id' => $requestedTenantId]);
+        $claimsWithTenant = array_merge($authClaims, ['tenant_id' => $requestedTenantId]);
 
         try {
             $availableRoles = ($this->rolesResolver)($claimsWithTenant);
@@ -247,30 +247,30 @@ class ExchangeRoute extends BaseExternalAuthRoute
             $activeRoleId = $availableRoles[0];
         }
 
-        // 7. Sign the card — a platform JWT carrying identity_id + tenant_id + single role_id.
+        // 7. Sign the API token — a platform JWT carrying identity_id + tenant_id + single role_id.
         try {
-            $cardToken = $this->signCard($claimsWithTenant, $activeRoleId);
+            $apiToken = $this->signApiToken($claimsWithTenant, $activeRoleId);
         } catch (TokenExchangeException $e) {
-            log_error('ExchangeRoute: card signing failed: ' . $e->getMessage());
-            return res_error('Failed to issue card token', 500);
+            log_error('ExchangeRoute: API token signing failed: ' . $e->getMessage());
+            return res_error('Failed to issue API token', 500);
         }
 
         // 8. Return the §6 session contract.
         return res_ok([
-            'access_token'       => $cardToken,
+            'access_token'       => $apiToken,
             'token_type'         => 'Bearer',
             'expires_in'         => $this->config->exchangeTtl,
             'active_tenant'      => $activeTenant,
             'available_tenants'  => $availableTenants,
             'active_role'        => $activeRoleId,
             'available_roles'    => $availableRoles,
-        ], 'Card issued');
+        ], 'API token issued');
     }
 
     // ── Seams (overridable for unit testing without real JWKS / keys) ─────────
 
     /**
-     * Extract the raw passport JWT from the Authorization header.
+     * Extract the raw auth-token JWT from the Authorization header.
      */
     protected function extractIdentityToken(): ?string
     {
@@ -278,38 +278,38 @@ class ExchangeRoute extends BaseExternalAuthRoute
     }
 
     /**
-     * Validate the passport against the auth service JWKS.
+     * Validate the auth token against the auth service JWKS.
      *
      * @throws TokenExchangeException on any validation failure
-     * @return array Decoded passport claims
+     * @return array Decoded auth-token claims
      */
-    protected function validateIdentity(string $passportToken): array
+    protected function validateIdentity(string $authToken): array
     {
         $service = new TokenExchangeService();
         return $service->validateIdentityToken(
-            $passportToken,
+            $authToken,
             $this->config->jwksUrl,
             $this->config->authIssuer
         );
     }
 
     /**
-     * Sign a card token from passport claims + chosen tenant + active role.
+     * Sign an API token from auth-token claims + chosen tenant + active role.
      *
      * Uses the platform's existing JWT keypair (JWT_PRIVATE_KEY_PATH / JWT_ISSUER)
-     * so the card is validated by this platform's JwtAuthMiddleware — no second keypair.
+     * so the API token is validated by this platform's JwtAuthMiddleware — no second keypair.
      *
-     * @param array  $claimsWithTenant Passport claims + tenant_id merged in
-     * @param string $activeRoleId     The single active role to stamp on the card
+     * @param array  $claimsWithTenant Auth-token claims + tenant_id merged in
+     * @param string $activeRoleId     The single active role to stamp on the API token
      * @throws TokenExchangeException on signing failure
      */
-    protected function signCard(array $claimsWithTenant, string $activeRoleId): string
+    protected function signApiToken(array $claimsWithTenant, string $activeRoleId): string
     {
         $service = new TokenExchangeService();
 
         $platformCode = $claimsWithTenant['platform_code'] ?? $this->config->platformCode;
 
-        return $service->exchangeCard($claimsWithTenant, $activeRoleId, [
+        return $service->exchangeApiToken($claimsWithTenant, $activeRoleId, [
             'private_key_path'       => $this->config->signingPrivateKeyPath,
             'private_key_passphrase' => $this->config->signingPrivateKeyPassphrase,
             'issuer'                 => $this->config->signingIssuer,
@@ -321,12 +321,12 @@ class ExchangeRoute extends BaseExternalAuthRoute
     }
 
     /**
-     * @deprecated Use signCard() instead. Kept for backward-compatible subclasses.
+     * @deprecated Use signApiToken() instead. Kept for backward-compatible subclasses.
      */
     protected function signPlatformToken(array $claims, array $roles): string
     {
         // Derive role_id from the first role in the array (legacy path).
         $roleId = $roles[0] ?? 'member';
-        return $this->signCard($claims, $roleId);
+        return $this->signApiToken($claims, $roleId);
     }
 }

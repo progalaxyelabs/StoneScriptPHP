@@ -10,7 +10,7 @@ use StoneScriptPHP\Auth\AuthenticatedUser;
 /**
  * Unit tests for AuthenticatedUser::fromPayload() — in particular the
  * change removing `role` from the
- * role_id/user_role fallback chain. A raw passport's `role` claim is now
+ * role_id/user_role fallback chain. A raw auth token's `role` claim is now
  * always a fixed neutral sentinel (e.g. "authenticated"), never a real
  * application role, and must never leak into `role_id`/`user_role` even via
  * a permissive `??` fallback — see the class's own inline comment for why.
@@ -53,11 +53,11 @@ class AuthenticatedUserTest extends TestCase
     }
 
     /**
-     * The regression test for the auth role-ownership change: a raw passport carrying auth's neutral
+     * The regression test for the auth role-ownership change: a raw auth token carrying auth's neutral
      * `role: "authenticated"` sentinel (or ANY value in `role`) must NEVER
      * populate role_id/user_role. Before this fix, `role` sat in the `??`
      * fallback chain and would have silently done exactly that the moment
-     * fromPayload() was called on a passport rather than a card.
+     * fromPayload() was called on an auth token rather than an API token.
      */
     public function test_role_claim_is_never_used_as_a_role_id_or_user_role_fallback(): void
     {
@@ -66,13 +66,13 @@ class AuthenticatedUserTest extends TestCase
             'role' => 'authenticated', // auth's fixed neutral sentinel value
         ]);
 
-        $this->assertNull($user->role_id, 'role_id must NOT be populated from the passport role claim');
-        $this->assertNull($user->user_role, 'user_role must NOT be populated from the passport role claim');
+        $this->assertNull($user->role_id, 'role_id must NOT be populated from the auth token role claim');
+        $this->assertNull($user->user_role, 'user_role must NOT be populated from the auth token role claim');
     }
 
     public function test_role_claim_present_alongside_real_role_id_does_not_get_used_either(): void
     {
-        // Even when role_id IS present (a real card), `role` (if it somehow
+        // Even when role_id IS present (a real API token), `role` (if it somehow
         // also arrived) must never override or be consulted at all.
         $user = AuthenticatedUser::fromPayload([
             'sub'       => 'identity-1',
@@ -92,13 +92,13 @@ class AuthenticatedUserTest extends TestCase
         $this->assertNull($user->user_role);
     }
 
-    public function test_is_card_true_only_when_tenant_id_present(): void
+    public function test_is_api_token_true_only_when_tenant_id_present(): void
     {
-        $passport = AuthenticatedUser::fromPayload(['sub' => 'identity-1']);
-        $card     = AuthenticatedUser::fromPayload(['sub' => 'identity-1', 'tenant_id' => 'tenant-1']);
+        $authToken = AuthenticatedUser::fromPayload(['sub' => 'identity-1']);
+        $apiToken  = AuthenticatedUser::fromPayload(['sub' => 'identity-1', 'tenant_id' => 'tenant-1']);
 
-        $this->assertFalse($passport->isCard());
-        $this->assertTrue($card->isCard());
+        $this->assertFalse($authToken->isApiToken());
+        $this->assertTrue($apiToken->isApiToken());
     }
 
     public function test_role_is_excluded_from_custom_claims_bag_too(): void

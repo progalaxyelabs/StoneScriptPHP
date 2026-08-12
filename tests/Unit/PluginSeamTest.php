@@ -60,8 +60,8 @@ class PluginSeamTest extends TestCase
         $user = new AuthenticatedUser(user_id: 'u-1', tenant_id: 't-1');
         $this->assertSame('t-1', $strategy->resolveTenantId(['input' => []], $user));
 
-        $passportUser = new AuthenticatedUser(user_id: 'u-1', tenant_id: null);
-        $this->assertNull($strategy->resolveTenantId(['input' => []], $passportUser));
+        $authTokenUser = new AuthenticatedUser(user_id: 'u-1', tenant_id: null);
+        $this->assertNull($strategy->resolveTenantId(['input' => []], $authTokenUser));
 
         $this->assertNull($strategy->resolveTenantId(['input' => []], null));
     }

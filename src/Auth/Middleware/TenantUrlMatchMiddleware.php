@@ -15,7 +15,7 @@ use StoneScriptPHP\ApiResponse;
  *    url.tenantId === card.tenant_id — the URL is routing/echo only,
  *    never the authority."
  *
- * The **card token** is the authority. The URL parameter is merely an echo that
+ * The **API token** is the authority. The URL parameter is merely an echo that
  * confirms which resource the client is addressing. If they diverge, the request
  * is rejected — it indicates the client is either confused or attempting to access
  * another tenant's data by manipulating the URL.
@@ -87,13 +87,13 @@ class TenantUrlMatchMiddleware implements MiddlewareInterface
         $claims = $request['jwt_claims'] ?? [];
 
         // card.tenant_id is the authority (§5.2)
-        $cardTenantId = $claims['tenant_id'] ?? null;
+        $apiTokenTenantId = $claims['tenant_id'] ?? null;
 
-        if ($cardTenantId === null) {
+        if ($apiTokenTenantId === null) {
             http_response_code(403);
             return new ApiResponse(
                 'error',
-                'Card token does not carry a tenant context',
+                'API token does not carry a tenant context',
                 ['error' => 'tenant_context_required'],
                 403
             );
@@ -117,12 +117,12 @@ class TenantUrlMatchMiddleware implements MiddlewareInterface
             );
         }
 
-        // §5.2 — URL tenantId must equal card tenantId
-        if ($urlTenantId !== $cardTenantId) {
+        // §5.2 — URL tenantId must equal API-token tenantId
+        if ($urlTenantId !== $apiTokenTenantId) {
             http_response_code(403);
             return new ApiResponse(
                 'error',
-                'URL tenant does not match the card tenant context',
+                'URL tenant does not match the API token tenant context',
                 ['error' => 'tenant_mismatch'],
                 403
             );

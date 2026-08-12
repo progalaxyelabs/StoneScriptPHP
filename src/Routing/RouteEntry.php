@@ -99,7 +99,7 @@ class RouteEntry
          *
          * When null, it is DERIVED for backward compatibility: `$isPublic === true`
          * ⇒ `public`, otherwise `authorization` (the historical "protected" default —
-         * a card-token business route). Declare it explicitly to opt a route into the
+         * an API-token business route). Declare it explicitly to opt a route into the
          * typed access/refresh middleware.
          */
         public readonly ?string $access = null,

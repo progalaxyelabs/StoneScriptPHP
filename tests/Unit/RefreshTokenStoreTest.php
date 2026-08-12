@@ -9,7 +9,7 @@ use StoneScriptPHP\Auth\InMemoryRefreshTokenStore;
 use StoneScriptPHP\Auth\TokenClaims;
 
 /**
- * RefreshTokenStore contract — persist ALL refresh tokens (identity + card, keyed
+ * RefreshTokenStore contract — persist ALL refresh tokens (identity + API token, keyed
  * by purpose) and REVOKE = DELETE the row (hard, no soft revoked_at).
  *
  * @covers \StoneScriptPHP\Auth\InMemoryRefreshTokenStore
@@ -53,16 +53,16 @@ class RefreshTokenStoreTest extends TestCase
         $this->assertSame(0, $this->store->count(), 'No soft-deleted rows may linger');
     }
 
-    public function test_both_identity_and_card_refresh_tokens_persist_with_purpose_discriminator(): void
+    public function test_both_identity_and_api_token_refresh_tokens_persist_with_purpose_discriminator(): void
     {
         $identity = $this->hash('identity-refresh');
-        $card     = $this->hash('card-refresh');
+        $apiToken = $this->hash('api-token-refresh');
 
         $this->store->store($identity, 'subject-1', TokenClaims::PURPOSE_AUTHENTICATION, time() + 1000);
-        $this->store->store($card, 'subject-1', TokenClaims::PURPOSE_AUTHORIZATION, time() + 1000);
+        $this->store->store($apiToken, 'subject-1', TokenClaims::PURPOSE_AUTHORIZATION, time() + 1000);
 
         $this->assertTrue($this->store->exists($identity));
-        $this->assertTrue($this->store->exists($card));
+        $this->assertTrue($this->store->exists($apiToken));
         $this->assertSame(2, $this->store->count());
     }
 

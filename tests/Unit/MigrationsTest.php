@@ -31,7 +31,7 @@ class MigrationsTest extends TestCase
      * it in tearDown(), leaking across this single-process PHPUnit run. That
      * leak is now fixed at the source — see tearDown()/setEnvIfEmpty() in
      * ExternalAuthConfigTest, ExchangeRouteTest, JwtHandlerFlatClaimsTest,
-     * ApplicationResolverThreadingTest, HybridCardJwtHandlerTest — but DATABASE_HOST
+     * ApplicationResolverThreadingTest, HybridApiTokenJwtHandlerTest — but DATABASE_HOST
      * remains the right gate for this specific class either way.)
      */
     protected function setUp(): void

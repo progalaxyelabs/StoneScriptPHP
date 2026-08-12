@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS platform_invitations (
     status                   VARCHAR(20)  NOT NULL DEFAULT 'pending', -- pending|accepted|expired|revoked
     expires_at               TIMESTAMPTZ  NOT NULL,
     accepted_at              TIMESTAMPTZ,
-    accepted_by_identity_id  UUID,                    -- filled in on accept, from the auth passport
+    accepted_by_identity_id  UUID,                    -- filled in on accept, from the auth token
     created_at               TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ  NOT NULL DEFAULT now()
 );

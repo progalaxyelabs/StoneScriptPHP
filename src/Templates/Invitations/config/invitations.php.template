@@ -32,7 +32,7 @@ return [
         return $invitation->role;
     },
 
-    // fn(InvitationRecord $invitation, array $passportClaims, string $role): array
+    // fn(InvitationRecord $invitation, array $authClaims, string $role): array
     //
     // Writes THIS platform's own tenant-membership record — whatever
     // table/shape this platform already uses (e.g. a customers/vendors
@@ -46,7 +46,7 @@ return [
     // ship accept-invite without ever granting real tenant access.
     'membership_writer' => function (
         \StoneScriptPHP\Auth\Invitations\InvitationRecord $invitation,
-        array $passportClaims,
+        array $authClaims,
         string $role
     ): array {
         throw new \RuntimeException(
@@ -55,8 +55,8 @@ return [
         );
     },
 
-    // Passport (identity token) validation config — same JWKS endpoint
-    // every other passport-consuming route in this platform already uses
+    // Auth token (identity token) validation config — same JWKS endpoint
+    // every other auth-token-consuming route in this platform already uses
     // (see config/auth.php / ExternalAuthConfig's jwks_url default).
     'auth' => [
         'jwks_url' => rtrim((string) (getenv('AUTH_SERVICE_URL') ?: ''), '/') . '/api/auth/jwks',
@@ -64,17 +64,20 @@ return [
         'audience' => null,
     ],
 
-    // Server-to-server create-membership call + (T2 only) local card
+    // Server-to-server create-membership call + (T2 only) local API-token
     // minting config.
     'platform' => [
         'platform_secret' => getenv('EXTERNAL_AUTH_CLIENT_SECRET') ?: null,
         'platform_code'   => getenv('PLATFORM_CODE') ?: '',
 
-        // T2 (card-model) platforms: leave true to mint a local card on
-        // accept, same pattern as ProvisionTenantRoute::mintProvisionCard().
+        // T2 (API-token-model) platforms: leave true to mint a local API token on
+        // accept, same pattern as ProvisionTenantRoute::mintProvisionApiToken().
         // T3 platforms (shared-schema-style, tenant-less identity JWT +
         // explicit tenant_id): set false to get the passthrough
         // identity-token + tenant_id contract instead.
+        // NOTE: the 'card' key name itself is intentionally left unrenamed —
+        // it is InvitationCompletionService's platform-facing config contract,
+        // not a framework-internal identifier (see that class's docblock).
         'card' => true,
         'signing_private_key_path'       => getenv('JWT_PRIVATE_KEY_PATH') ?: '',
         'signing_private_key_passphrase' => getenv('JWT_PRIVATE_KEY_PASSPHRASE') ?: null,

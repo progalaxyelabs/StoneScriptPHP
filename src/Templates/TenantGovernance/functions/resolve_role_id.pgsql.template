@@ -5,7 +5,7 @@
 -- NULL for a suspended/removed/nonexistent row (ExchangeRoute treats an
 -- empty roles_resolver result as "identity has no roles in this tenant" —
 -- exchange refuses with the existing framework contract, unchanged by this
--- feature). This is what actually lands on the card's role_id claim via
+-- feature). This is what actually lands on the API token's role_id claim via
 -- TenantGovernanceResolver::rolesResolver().
 CREATE OR REPLACE FUNCTION resolve_role_id(
     p_identity_id UUID,

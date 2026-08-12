@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\Auth\AuthContext;
 use StoneScriptPHP\Auth\JwtHandlerInterface;
-use StoneScriptPHP\Auth\Middleware\RequireCardMiddleware;
+use StoneScriptPHP\Auth\Middleware\RequireApiTokenMiddleware;
 use StoneScriptPHP\Auth\Middleware\RequireRoleMiddleware;
 use StoneScriptPHP\Auth\Middleware\RequireTenantMiddleware;
 use StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware;
@@ -21,12 +21,12 @@ use StoneScriptPHP\Routing\MiddlewarePipeline;
  *
  * This is the end-to-end proof for the fix: before the change, JwtAuthMiddleware
  * never populated $request['jwt_claims'], so every guard middleware downstream
- * (RequireCardMiddleware, RequireTenantMiddleware, RequireRoleMiddleware,
- * TenantUrlMatchMiddleware) silently no-op'd — a passport-only (tenant-less)
+ * (RequireApiTokenMiddleware, RequireTenantMiddleware, RequireRoleMiddleware,
+ * TenantUrlMatchMiddleware) silently no-op'd — an auth-token-only (tenant-less)
  * token reached tenant-scoped route handlers instead of getting rejected.
  *
  * @covers \StoneScriptPHP\Routing\Middleware\JwtAuthMiddleware
- * @covers \StoneScriptPHP\Auth\Middleware\RequireCardMiddleware
+ * @covers \StoneScriptPHP\Auth\Middleware\RequireApiTokenMiddleware
  * @covers \StoneScriptPHP\Auth\Middleware\RequireTenantMiddleware
  * @covers \StoneScriptPHP\Auth\Middleware\RequireRoleMiddleware
  * @covers \StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware
@@ -66,21 +66,21 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
 
     /**
      * THE live repro from the integration session (2026-07-04), reproduced and
-     * proven fixed: a passport-only token (no tenant_id) hitting a card-required
-     * route via the exact JwtAuthMiddleware → RequireCardMiddleware chain
+     * proven fixed: an auth-token-only token (no tenant_id) hitting an API-token-required
+     * route via the exact JwtAuthMiddleware → RequireApiTokenMiddleware chain
      * Application::run() wires must now get 403 tenant_context_required — not
      * reach the handler.
      */
-    public function test_passport_only_token_hitting_card_required_route_gets_403_not_handler(): void
+    public function test_auth_token_only_hitting_api_token_required_route_gets_403_not_handler(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer passport-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer auth-token';
         $_SERVER['REQUEST_URI'] = '/portal/tenant/tenant-1/orders';
 
-        $payload = ['identity_id' => 'id-1', 'sub' => 'id-1']; // passport: no tenant_id
+        $payload = ['identity_id' => 'id-1', 'sub' => 'id-1']; // auth token: no tenant_id
 
         $pipeline = new MiddlewarePipeline();
         $pipeline->pipe(new JwtAuthMiddleware($this->fakeJwtHandler($payload)));
-        $pipeline->pipe(new RequireCardMiddleware());
+        $pipeline->pipe(new RequireApiTokenMiddleware());
 
         $handlerReached = false;
         $request = ['route' => ['is_public' => false]];
@@ -92,7 +92,7 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
 
         $this->assertFalse(
             $handlerReached,
-            'BUG: passport-only token reached the tenant-scoped route handler instead of being 403\'d'
+            'BUG: auth-token-only token reached the tenant-scoped route handler instead of being 403\'d'
         );
         $this->assertSame('error', $response->status);
         $this->assertSame(403, $response->httpStatusCode);
@@ -100,11 +100,11 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
     }
 
     /**
-     * A valid card token on its OWN tenant route → 200 (handler reached).
+     * A valid API token on its OWN tenant route → 200 (handler reached).
      */
-    public function test_valid_card_on_own_tenant_route_reaches_handler(): void
+    public function test_valid_api_token_on_own_tenant_route_reaches_handler(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer card-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer api-token';
         $_SERVER['REQUEST_URI'] = '/portal/tenant/tenant-1/orders';
 
         $payload = [
@@ -116,7 +116,7 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
 
         $pipeline = new MiddlewarePipeline();
         $pipeline->pipe(new JwtAuthMiddleware($this->fakeJwtHandler($payload)));
-        $pipeline->pipe(new RequireCardMiddleware());
+        $pipeline->pipe(new RequireApiTokenMiddleware());
         $pipeline->pipe(new TenantUrlMatchMiddleware('tenantId'));
 
         $handlerReached = false;
@@ -130,29 +130,29 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
             return new ApiResponse('ok', 'reached');
         });
 
-        $this->assertTrue($handlerReached, 'Valid card on its own tenant route must reach the handler');
+        $this->assertTrue($handlerReached, 'Valid API token on its own tenant route must reach the handler');
         $this->assertSame('ok', $response->status);
     }
 
     /**
-     * A valid card token on a FOREIGN tenant route (URL tenantId != card tenant_id)
+     * A valid API token on a FOREIGN tenant route (URL tenantId != API token tenant_id)
      * → 403 tenant_mismatch, handler never reached.
      */
-    public function test_valid_card_on_foreign_tenant_route_returns_403(): void
+    public function test_valid_api_token_on_foreign_tenant_route_returns_403(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer card-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer api-token';
         $_SERVER['REQUEST_URI'] = '/portal/tenant/tenant-999/orders';
 
         $payload = [
             'identity_id' => 'id-1',
             'sub'         => 'id-1',
-            'tenant_id'   => 'tenant-1', // card belongs to tenant-1
+            'tenant_id'   => 'tenant-1', // API token belongs to tenant-1
             'role_id'     => 'owner',
         ];
 
         $pipeline = new MiddlewarePipeline();
         $pipeline->pipe(new JwtAuthMiddleware($this->fakeJwtHandler($payload)));
-        $pipeline->pipe(new RequireCardMiddleware());
+        $pipeline->pipe(new RequireApiTokenMiddleware());
         $pipeline->pipe(new TenantUrlMatchMiddleware('tenantId'));
 
         $handlerReached = false;
@@ -178,7 +178,7 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
      */
     public function test_flat_non_tenant_route_unaffected_by_global_tenant_url_match(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer card-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer api-token';
         $_SERVER['REQUEST_URI'] = '/health';
 
         $payload = ['identity_id' => 'id-1', 'sub' => 'id-1', 'tenant_id' => 'tenant-1'];
@@ -208,7 +208,7 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
      */
     public function test_require_role_middleware_enforces_once_claims_are_populated(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer card-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer api-token';
         $_SERVER['REQUEST_URI'] = '/admin/tenant/tenant-1/settings';
 
         $payload = [
@@ -241,14 +241,14 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
     /**
      * The regression proof for the 2026-07-23 fix (see RequireRoleMiddleware's
      * own docblock): before it, this middleware checked `$claims['role']`,
-     * which no real card ever carries (cards stamp `role_id`) — so EVERY card
+     * which no real API token ever carries (API tokens stamp `role_id`) — so EVERY API token
      * holder, including one with a sufficient role, was unconditionally
      * 403'd. This test would have failed before the fix regardless of the
      * role_id's value; it must pass now that role_id is checked correctly.
      */
     public function test_require_role_middleware_allows_sufficient_role_through(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer card-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer api-token';
         $_SERVER['REQUEST_URI'] = '/admin/tenant/tenant-1/settings';
 
         $payload = [
@@ -280,10 +280,10 @@ class AuthMiddlewarePipelineIntegrationTest extends TestCase
      */
     public function test_require_tenant_middleware_enforces_through_real_chain(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer passport-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer auth-token';
         $_SERVER['REQUEST_URI'] = '/portal/tenant/tenant-1/orders';
 
-        $payload = ['identity_id' => 'id-1', 'sub' => 'id-1']; // passport
+        $payload = ['identity_id' => 'id-1', 'sub' => 'id-1']; // auth token
 
         $pipeline = new MiddlewarePipeline();
         $pipeline->pipe(new JwtAuthMiddleware($this->fakeJwtHandler($payload)));

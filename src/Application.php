@@ -13,7 +13,7 @@ use StoneScriptPHP\Routing\Middleware\GatewayTenantMiddleware;
 use StoneScriptPHP\Routing\MiddlewareInterface;
 use StoneScriptPHP\Auth\JwtHandlerInterface;
 use StoneScriptPHP\Auth\RsaJwtHandler;
-use StoneScriptPHP\Auth\HybridCardJwtHandler;
+use StoneScriptPHP\Auth\HybridApiTokenJwtHandler;
 use StoneScriptPHP\Auth\MultiAuthJwtValidator;
 use StoneScriptPHP\Auth\MultiAuthJwtAdapter;
 use StoneScriptPHP\Auth\AuthRoutes;
@@ -24,7 +24,7 @@ use StoneScriptPHP\Subscriptions\SubscriptionMiddleware;
 use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
 use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
 use StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware;
-use StoneScriptPHP\Auth\Middleware\RequireCardMiddleware;
+use StoneScriptPHP\Auth\Middleware\RequireApiTokenMiddleware;
 use StoneScriptPHP\RequestLogging\RequestLogger;
 use StoneScriptPHP\Plugin\PluginInterface;
 use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
@@ -62,15 +62,20 @@ use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
  *       // Optional (S5.1 tenant-less token cannot authorize a tenant-scoped route).
  *       // Safe to enable globally -- auto-exempts ExternalAuthRoutes' own tier-2
  *       // routes (provision-tenant, select-tenant, change-password,
- *       // memberships, me) so a valid passport is never wrongly rejected on them.
+ *       // memberships, me) so a valid auth token is never wrongly rejected on them.
  *       // (invite-member was also on this list until 2026-07-21, when it was
  *       // removed along with the rest of the framework's invite/accept-invite
  *       // proxy — see DefaultTenantRouteProvider's class docblock.)
- *       // Prefer this over manually constructing `new RequireCardMiddleware()` in
+ *       // Prefer this over manually constructing `new RequireApiTokenMiddleware()` in
  *       // 'middleware' -- the manual form has no exemption list and WILL 403 every
  *       // one of those routes the moment JwtAuthMiddleware populates jwt_claims for
  *       // them (see class docblock -- this was a real fleet incident, 2026-07-05).
- *       'require_card' => ['enabled' => true],
+ *       // RENAMED from 'require_card' -> 'require_api_token' (Passport/Card ->
+ *       // Auth/API-token terminology rename). Platforms still passing the old
+ *       // 'require_card' key will silently no-op (the key is simply unread) --
+ *       // update platform config/auth.php (or wherever this array is built) to
+ *       // use 'require_api_token' instead.
+ *       'require_api_token' => ['enabled' => true],
  *   ]);
  *
  * @package StoneScriptPHP
@@ -112,7 +117,13 @@ class Application
         $jwtConfig          = $config['jwt'] ?? [];
         $customMiddleware   = $config['middleware'] ?? [];
         $storeAccessConfig  = $config['store_access'] ?? [];
-        $requireCardConfig  = $config['require_card'] ?? [];
+        // RENAMED (Passport/Card -> Auth/API-token terminology): this config array
+        // key was 'require_card' before this rename; it is now 'require_api_token'.
+        // Read here — this is the ONLY place in the framework that reads this key.
+        // A platform's own config/auth.php (or wherever this options array is
+        // assembled) must be updated to pass 'require_api_token' instead of
+        // 'require_card', or this feature will silently stay disabled.
+        $requireApiTokenConfig = $config['require_api_token'] ?? [];
         $authMode           = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
 
         // Phase 1 plugin seam (§ PluginInterface). `$config['plugins']` is `?? []` for
@@ -123,7 +134,7 @@ class Application
         $plugins = self::normalizePlugins($config['plugins'] ?? []);
 
         // Computed once, lazily, and reused everywhere it's needed (store_access,
-        // require_card exemption list, ExternalAuthRoutes::register itself) so there
+        // require_api_token exemption list, ExternalAuthRoutes::register itself) so there
         // is exactly one derivation of these options, not several that could drift.
         // MUST stay lazy, not unconditional: buildAuthRouteOptions() throws when
         // AUTH_SERVICE_URL is unset (via resolveAuthServiceUrl), which is the normal,
@@ -131,7 +142,7 @@ class Application
         // at all — calling it unconditionally would break every one of them.
         $authRouteOptions = null;
         $needsAuthRouteOptions = !empty($storeAccessConfig['enabled'])
-            || !empty($requireCardConfig['enabled'])
+            || !empty($requireApiTokenConfig['enabled'])
             || $authMode === 'external'
             || $authMode === 'hybrid';
         if ($needsAuthRouteOptions) {
@@ -213,7 +224,7 @@ class Application
         }
 
         // Plugin middleware (§ PluginInterface) — appended AFTER the platform's own
-        // custom middleware, BEFORE require_card/tenant_url_match enforcement below,
+        // custom middleware, BEFORE require_api_token/tenant_url_match enforcement below,
         // so a plugin can never silently reorder a platform's own middleware
         // guarantees. Empty $plugins (the default) adds nothing.
         foreach ($plugins as $plugin) {
@@ -226,22 +237,22 @@ class Application
 
         // §5.1 tenant-context enforcement (framework-spec.md §5.1): a tenant-less
         // token cannot authorize a tenant-scoped route. Opt-in — off by default for
-        // backward compat with platforms that still wire RequireCardMiddleware manually
+        // backward compat with platforms that still wire RequireApiTokenMiddleware manually
         // (or a custom equivalent) via 'middleware' above.
         //
-        // REGRESSION THIS FIXES (2026-07-05, real fleet incident): RequireCardMiddleware,
-        // used bare (`new RequireCardMiddleware()`, the previously-documented usage), has
+        // REGRESSION THIS FIXES (2026-07-05, real fleet incident): RequireApiTokenMiddleware,
+        // used bare (`new RequireApiTokenMiddleware()`, the previously-documented usage), has
         // zero path awareness — it 403s ANY authenticated-but-tenantless request, which
         // includes ExternalAuthRoutes' own tier-2 routes (provision-tenant, select-tenant,
-        // change-password, memberships, me — routes that intentionally take a passport,
-        // never a card; invite-member was also one of these until it was removed
+        // change-password, memberships, me — routes that intentionally take an auth token,
+        // never an API token; invite-member was also one of these until it was removed
         // 2026-07-21, see DefaultTenantRouteProvider's class docblock). Wiring it
         // globally via THIS config key auto-derives the
         // exemption list from ExternalAuthRoutes::protectedPaths($authRouteOptions) — the
         // same config that defines those routes — so the list can never drift out of sync
         // with what's actually registered, and a platform never has to hand-maintain it.
-        if (!empty($requireCardConfig['enabled'])) {
-            $router->use(new RequireCardMiddleware(
+        if (!empty($requireApiTokenConfig['enabled'])) {
+            $router->use(new RequireApiTokenMiddleware(
                 ExternalAuthRoutes::protectedPaths($authRouteOptions)
             ));
         }
@@ -252,7 +263,7 @@ class Application
         // Safe to wire globally: TenantUrlMatchMiddleware self-skips any route whose
         // matched pattern doesn't declare the configured param, so flat/non-tenant
         // routes (health, webhooks, admin auth, infra) are never affected.
-        // Runs AFTER require_card: confirm a card exists before checking its tenant claim.
+        // Runs AFTER require_api_token: confirm an API token exists before checking its tenant claim.
         $tenantUrlMatchConfig = $config['tenant_url_match'] ?? [];
         if (!empty($tenantUrlMatchConfig['enabled'])) {
             $router->use(new TenantUrlMatchMiddleware($tenantUrlMatchConfig['param'] ?? 'tenantId'));
@@ -440,23 +451,23 @@ class Application
     /**
      * Build the JWT handler based on auth mode config.
      *
-     * ## Injection (card model platforms)
+     * ## Injection (API-token model platforms)
      *
      * Pass a pre-built handler via `$config['jwt']['handler']` to override the default:
      *
      *   Application::run([
-     *       'jwt'  => ['handler' => new HybridCardJwtHandler(...)],
+     *       'jwt'  => ['handler' => new HybridApiTokenJwtHandler(...)],
      *       'auth' => ['mode' => 'external', ...],
      *   ]);
      *
      * ## Default behaviour per mode
      *
      * - `builtin`        → `RsaJwtHandler` (platform RSA key, self-contained auth).
-     * - `external/hybrid` → **`HybridCardJwtHandler`** (platform RSA for cards +
-     *   JWKS fallback for passports). This is the card-model default: the platform
-     *   mints and validates its own cards while still accepting auth-service passports
-     *   on public-adjacent routes (e.g. exchange validates the inbound passport itself,
-     *   but after exchange all subsequent requests carry platform-signed cards).
+     * - `external/hybrid` → **`HybridApiTokenJwtHandler`** (platform RSA for API tokens +
+     *   JWKS fallback for auth tokens). This is the API-token-model default: the platform
+     *   mints and validates its own API tokens while still accepting auth-service auth tokens
+     *   on public-adjacent routes (e.g. exchange validates the inbound auth token itself,
+     *   but after exchange all subsequent requests carry platform-signed API tokens).
      *
      * ## Key: issuer vs network URL
      *
@@ -523,7 +534,7 @@ class Application
             return new RsaJwtHandler();
         }
 
-        // external or hybrid: need to validate BOTH platform-minted cards AND auth-service passports.
+        // external or hybrid: need to validate BOTH platform-minted API tokens AND auth-service auth tokens.
         $serverUrl = self::resolveAuthServiceUrl($authConfig, $env, $mode);
 
         // AUTH_ISSUER MUST be set explicitly in external/hybrid mode.
@@ -547,11 +558,11 @@ class Application
         }
         $jwksPath = $authConfig['server']['paths']['jwks'] ?? '/api/auth/jwks';
 
-        // Default for external/hybrid: HybridCardJwtHandler validates platform-minted cards
-        // (platform RSA key) AND falls back to JWKS for auth-service passports.
-        // This replaces the former MultiAuthJwtAdapter (JWKS-only), which rejected cards
+        // Default for external/hybrid: HybridApiTokenJwtHandler validates platform-minted API tokens
+        // (platform RSA key) AND falls back to JWKS for auth-service auth tokens.
+        // This replaces the former MultiAuthJwtAdapter (JWKS-only), which rejected API tokens
         // because it only knew the auth service's public key, not the platform's.
-        return new HybridCardJwtHandler($serverUrl, $issuer, $jwksPath);
+        return new HybridApiTokenJwtHandler($serverUrl, $issuer, $jwksPath);
     }
 
     /**
@@ -603,13 +614,13 @@ class Application
             $options['provision_tenant'] = true;
         }
 
-        // Card model resolver closures (framework-spec.md §6).
+        // API-token model resolver closures (framework-spec.md §6).
         // These were previously NOT threaded through buildAuthRouteOptions(), which forced
         // platforms to bypass Application::run() entirely and call ExternalAuthRoutes::register()
         // directly (the canary's manual bootstrap workaround). Threading them here means
-        // platforms can wire the card model via the normal Application::run() config.
+        // platforms can wire the API-token model via the normal Application::run() config.
         //
-        // tenants_resolver: fn(array $passportClaims): array[] — tenants for this identity.
+        // tenants_resolver: fn(array $authClaims): array[] — tenants for this identity.
         // roles_resolver:   fn(array $claimsWithTenant): string[] — roles in that tenant.
         //
         // ExternalAuthRoutes::register() and ExternalAuthConfig both accept these keys directly.

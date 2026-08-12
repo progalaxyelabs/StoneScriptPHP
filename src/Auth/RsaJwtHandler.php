@@ -37,9 +37,9 @@ class RsaJwtHandler implements JwtHandlerInterface
      * @param string $tokenType 'access' or 'refresh' — selects the expiry AND is stamped
      *   as the first-class `type` claim (TokenClaims::CLAIM_TYPE). Distinct from the
      *   `token_type` (card/platform) CLASS claim — do not conflate.
-     * @param string $purpose 'authentication' (identity/passport) or 'authorization'
-     *   (card/API) — stamped as the first-class `purpose` claim. Defaults to
-     *   authentication because RsaJwtHandler is the local identity handler; card mint
+     * @param string $purpose 'authentication' (identity/auth-token) or 'authorization'
+     *   (API token) — stamped as the first-class `purpose` claim. Defaults to
+     *   authentication because RsaJwtHandler is the local identity handler; API-token mint
      *   sites pass 'authorization'.
      * @return string JWT token
      * @throws \RuntimeException if private key cannot be loaded
@@ -79,7 +79,7 @@ class RsaJwtHandler implements JwtHandlerInterface
         $expire = $issuedAt + $expirySeconds;
 
         // JWT_ISSUER MUST be set explicitly — defaulting to 'example.com' is a security trap:
-        // a card minted with iss=example.com will only pass verification if the server still
+        // an API token minted with iss=example.com will only pass verification if the server still
         // has JWT_ISSUER=example.com, creating a false sense of working auth that breaks the
         // moment the issuer is corrected. Fail loud so the misconfiguration is caught at token
         // generation time rather than as an intermittent 401 in production.
@@ -136,7 +136,7 @@ class RsaJwtHandler implements JwtHandlerInterface
             // Optionally verify issuer.
             // If JWT_ISSUER is not set, skip issuer verification rather than comparing
             // against a placeholder — this prevents false 'example.com' matches and
-            // lets the HybridCardJwtHandler's RSA-then-JWKS chain return false cleanly
+            // lets the HybridApiTokenJwtHandler's RSA-then-JWKS chain return false cleanly
             // so the JWKS fallback can try the token instead.
             if ($verifyIssuer) {
                 $env = Env::get_instance();

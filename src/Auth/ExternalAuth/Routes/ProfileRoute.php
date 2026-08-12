@@ -11,9 +11,9 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
 /**
  * GET {prefix}/me (PROTECTED)
  *
- * Returns the session context for the currently authenticated card token.
+ * Returns the session context for the currently authenticated API token.
  *
- * ## Card model response (framework-spec.md §6)
+ * ## API-token model response (framework-spec.md §6)
  *
  * When the platform has configured `tenants_resolver` + `roles_resolver`, this
  * endpoint returns the full session contract:
@@ -35,13 +35,13 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
  * ## Fallback (proxy to auth service)
  *
  * When resolvers are NOT configured (e.g. T1 platforms), this falls back to
- * proxying the card token to the auth service's /me endpoint.
+ * proxying the API token to the auth service's /me endpoint.
  *
  * @package StoneScriptPHP\Auth\ExternalAuth\Routes
  */
 class ProfileRoute extends BaseExternalAuthRoute
 {
-    /** @var callable|null fn(array $passportClaims): array[] — platform tenants resolver */
+    /** @var callable|null fn(array $authClaims): array[] — platform tenants resolver */
     protected $tenantsResolver;
 
     /** @var callable|null fn(array $claimsWithTenant): string[] — platform roles resolver */
@@ -77,9 +77,9 @@ class ProfileRoute extends BaseExternalAuthRoute
             return new ApiResponse('error', 'Unauthorized', ['error' => 'unauthorized'], 401);
         }
 
-        // Card model response when resolvers are available.
+        // API-token model response when resolvers are available.
         if ($this->tenantsResolver !== null && $this->rolesResolver !== null && $user->tenant_id) {
-            return $this->cardModelResponse($user);
+            return $this->apiTokenModelResponse($user);
         }
 
         // Fallback: proxy to auth service (T1 platforms or unconfigured).
@@ -87,11 +87,11 @@ class ProfileRoute extends BaseExternalAuthRoute
     }
 
     /**
-     * Build the §6 session contract response from card claims + resolvers.
+     * Build the §6 session contract response from API-token claims + resolvers.
      */
-    private function cardModelResponse(\StoneScriptPHP\Auth\AuthenticatedUser $user): ApiResponse
+    private function apiTokenModelResponse(\StoneScriptPHP\Auth\AuthenticatedUser $user): ApiResponse
     {
-        // Reconstruct passport-like claims from the authenticated user for resolver calls.
+        // Reconstruct auth-token-like claims from the authenticated user for resolver calls.
         $claims = [
             'identity_id'  => $user->user_id,
             'sub'          => $user->user_id,

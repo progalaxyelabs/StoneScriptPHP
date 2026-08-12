@@ -12,8 +12,8 @@ namespace StoneScriptPHP\Auth;
  *
  *   - `type`    ∈ {access, refresh} — what the credential IS. Strict equality.
  *   - `purpose` ∈ {authentication, authorization} — what the credential is FOR.
- *                 `authentication` = identity/passport (proves who you are);
- *                 `authorization`  = card/API (authorises tenant-scoped requests).
+ *                 `authentication` = identity/auth-token (proves who you are);
+ *                 `authorization`  = API token (authorises tenant-scoped requests).
  *                 Strict equality.
  *
  * These are DISTINCT from the pre-existing `token_type` claim (values `card` /
@@ -37,9 +37,9 @@ final class TokenClaims
     public const TYPE_REFRESH = 'refresh';
 
     // ── purpose values ───────────────────────────────────────────────────────
-    /** Identity / passport tokens. */
+    /** Identity / auth tokens. */
     public const PURPOSE_AUTHENTICATION = 'authentication';
-    /** Card / API tokens. */
+    /** API tokens. */
     public const PURPOSE_AUTHORIZATION = 'authorization';
 
     public const TYPES = [

@@ -12,22 +12,22 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\ExchangeRoute;
 use StoneScriptPHP\Auth\TokenExchangeException;
 
 /**
- * Unit tests for ExchangeRoute — passport/card tenancy model (framework-spec.md §6).
+ * Unit tests for ExchangeRoute — auth-token/API-token tenancy model (framework-spec.md §6).
  *
- * ## What the card model exchange does
+ * ## What the API-token model exchange does
  *
- *   1. Validate the PASSPORT (identity JWT, tenant-less) from the Authorization header.
+ *   1. Validate the AUTH TOKEN (identity JWT, tenant-less) from the Authorization header.
  *   2. Read tenant_id + optional role_id from the REQUEST BODY.
  *   3. Resolve available_tenants for the identity (via tenants_resolver).
  *   4. Verify the requested tenant_id is in the available set.
  *   5. Resolve available_roles in that tenant (via roles_resolver).
  *   6. Pick active_role_id (body hint if valid, else first role).
- *   7. Mint a CARD carrying: identity_id + tenant_id + single role_id.
+ *   7. Mint an API TOKEN carrying: identity_id + tenant_id + single role_id.
  *   8. Return §6 session contract: access_token + active_tenant + available_tenants
  *      + active_role + available_roles.
  *
  * Tests use a TestableExchangeRoute subclass that overrides the three external
- * seams (header extraction, JWKS validation, card signing) so no network call,
+ * seams (header extraction, JWKS validation, API-token signing) so no network call,
  * private key, or real token is needed.
  */
 class ExchangeRouteTest extends TestCase
@@ -133,9 +133,9 @@ class ExchangeRouteTest extends TestCase
         $this->assertSame(['owner', 'manager'], $response->data['available_roles']);
     }
 
-    // ── tenant_id from body, not from passport claims ─────────────────────────
+    // ── tenant_id from body, not from auth-token claims ─────────────────────────
 
-    public function test_passport_is_tenant_less_tenant_comes_from_body(): void
+    public function test_auth_token_is_tenant_less_tenant_comes_from_body(): void
     {
         $receivedTenantId = null;
         $route = new TestableExchangeRoute(
@@ -149,7 +149,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => [['id' => 'body-tenant']]
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-42'];  // no tenant_id in passport!
+        $route->stubClaims = ['sub' => 'id-42'];  // no tenant_id in auth token!
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 'body-tenant';  // comes from request body
 
@@ -269,7 +269,7 @@ class ExchangeRouteTest extends TestCase
 
     // ── missing token → 401 ──────────────────────────────────────────────────
 
-    public function test_missing_passport_returns_401(): void
+    public function test_missing_auth_token_returns_401(): void
     {
         $route = new TestableExchangeRoute(
             $this->makeClient(),
@@ -288,7 +288,7 @@ class ExchangeRouteTest extends TestCase
 
     // ── invalid / expired token → 401 ────────────────────────────────────────
 
-    public function test_invalid_passport_returns_401(): void
+    public function test_invalid_auth_token_returns_401(): void
     {
         $route = new TestableExchangeRoute(
             $this->makeClient(),
@@ -326,9 +326,9 @@ class ExchangeRouteTest extends TestCase
         $this->assertSame(501, $response->httpStatusCode);
     }
 
-    // ── passport without identity_id → 401 ───────────────────────────────────
+    // ── auth token without identity_id → 401 ───────────────────────────────────
 
-    public function test_passport_without_identity_id_returns_401(): void
+    public function test_auth_token_without_identity_id_returns_401(): void
     {
         $route = new TestableExchangeRoute(
             $this->makeClient(),
@@ -346,9 +346,9 @@ class ExchangeRouteTest extends TestCase
         $this->assertSame('invalid_identity_token', $response->data['error']);
     }
 
-    // ── roles_resolver receives passport claims + merged tenant_id ────────────
+    // ── roles_resolver receives auth-token claims + merged tenant_id ────────────
 
-    public function test_resolver_receives_passport_claims_with_tenant_merged(): void
+    public function test_resolver_receives_auth_claims_with_tenant_merged(): void
     {
         $received = null;
         $route = new TestableExchangeRoute(
@@ -362,7 +362,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => [['id' => 't-9']]
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-xyz', 'email' => 'u@test.com'];  // no tenant_id in passport
+        $route->stubClaims = ['sub' => 'id-xyz', 'email' => 'u@test.com'];  // no tenant_id in auth token
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 't-9';  // body
 
@@ -375,17 +375,17 @@ class ExchangeRouteTest extends TestCase
     }
 
     // ── §5.5 (framework-spec.md): re-exchange for a different tenant does not ──
-    // ── revoke or affect any previously-issued card — multi-tab support ──────
+    // ── revoke or affect any previously-issued API token — multi-tab support ──
 
     /**
      * Two sequential exchanges for two DIFFERENT tenants, same identity, must each
-     * independently succeed with their own correct card — simulating what happens
+     * independently succeed with their own correct API token — simulating what happens
      * when a user has two browser tabs open on two different tenants (framework-
-     * spec.md §5.5). Nothing about minting the second card may reference,
+     * spec.md §5.5). Nothing about minting the second API token may reference,
      * invalidate, or depend on the first call having happened.
      *
      * This locks in framework-spec.md §5.5: "exchange never revokes or invalidates
-     * a previously-issued card for a different tenant_id when minting a new one."
+     * a previously-issued API token for a different tenant_id when minting a new one."
      * process() has no shared mutable state and no revocation call at all — this
      * test would fail if either were ever introduced.
      */
@@ -404,7 +404,7 @@ class ExchangeRouteTest extends TestCase
             rolesResolver:   fn(array $claims) => ['owner'],
             tenantsResolver: fn(array $claims) => $allTenants
         );
-        $tab1->stubToken  = 'passport.jwt';        // same identity's passport in both tabs
+        $tab1->stubToken  = 'passport.jwt';        // same identity's auth token in both tabs
         $tab1->stubClaims = ['sub' => 'ceo-identity'];
         $tab1->stubCard   = 'card.software-dev.signed';
         $tab1->tenant_id  = 't-software-dev';
@@ -421,7 +421,7 @@ class ExchangeRouteTest extends TestCase
             rolesResolver:   fn(array $claims) => ['owner'],
             tenantsResolver: fn(array $claims) => $allTenants
         );
-        $tab2->stubToken  = 'passport.jwt';         // same identity's passport
+        $tab2->stubToken  = 'passport.jwt';         // same identity's auth token
         $tab2->stubClaims = ['sub' => 'ceo-identity'];
         $tab2->stubCard   = 'card.marketing.signed';
         $tab2->tenant_id  = 't-marketing';
@@ -432,7 +432,7 @@ class ExchangeRouteTest extends TestCase
         $this->assertSame('ok', $tab1Response->status);
         $this->assertSame('ok', $tab2Response->status);
 
-        // Each got its OWN distinct card, for its OWN tenant.
+        // Each got its OWN distinct API token, for its OWN tenant.
         $this->assertSame('card.software-dev.signed', $tab1Response->data['access_token']);
         $this->assertSame('t-software-dev', $tab1Response->data['active_tenant']['id']);
 
@@ -446,7 +446,7 @@ class ExchangeRouteTest extends TestCase
         $this->assertSame(
             'card.software-dev.signed',
             $tab1Response->data['access_token'],
-            "Tab 1's card must be unchanged after tab 2 exchanged a different tenant"
+            "Tab 1's API token must be unchanged after tab 2 exchanged a different tenant"
         );
     }
 
@@ -506,7 +506,7 @@ class TestableExchangeRoute extends ExchangeRoute
         return $this->stubToken;
     }
 
-    protected function validateIdentity(string $passportToken): array
+    protected function validateIdentity(string $authToken): array
     {
         if ($this->validateThrows !== null) {
             throw $this->validateThrows;
@@ -514,7 +514,7 @@ class TestableExchangeRoute extends ExchangeRoute
         return $this->stubClaims;
     }
 
-    protected function signCard(array $claimsWithTenant, string $activeRoleId): string
+    protected function signApiToken(array $claimsWithTenant, string $activeRoleId): string
     {
         return $this->stubCard;
     }

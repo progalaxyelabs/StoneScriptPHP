@@ -194,8 +194,8 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
 
         // Determine effective tenant data (idempotent replay returns existing tenant).
         // framework-spec.md §6: provision-tenant grants owner role + mints the
-        // same card that exchange would mint. The card is minted here rather than
-        // relayed from the auth service (which issues passports, not cards).
+        // same API token that exchange would mint. The API token is minted here rather than
+        // relayed from the auth service (which issues auth tokens, not API tokens).
         $tenantSlug = $data['tenant_slug'] ?? ($result['tenant_slug'] ?? null);
 
         // AUTH-SPEC §5a/S9 idempotent replay: when the same idempotency_key is reused,
@@ -206,12 +206,12 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         $statusCode = $isNewTenant ? 201 : 200;
         $message    = $isNewTenant ? 'Tenant provisioned' : 'Tenant already provisioned';
 
-        // framework-spec.md §6: provision grants 'owner' and mints a card.
-        // The card is the authoritative platform token — not the auth service's access_token.
-        // The auth service token ($result['access_token']) is a passport (identity JWT);
-        // we mint a platform card so the client is immediately authorised without a
+        // framework-spec.md §6: provision grants 'owner' and mints an API token.
+        // The API token is the authoritative platform token — not the auth service's access_token.
+        // The auth service token ($result['access_token']) is an auth token (identity JWT);
+        // we mint a platform API token so the client is immediately authorised without a
         // separate exchange call.
-        $cardToken   = $this->mintProvisionCard($identityId, $effectiveTenantId, 'owner', $data);
+        $apiToken    = $this->mintProvisionApiToken($identityId, $effectiveTenantId, 'owner', $data);
         $activeRole  = 'owner';
         $activeTenant = [
             'id'        => $effectiveTenantId,
@@ -221,8 +221,8 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         ];
 
         return new ApiResponse('ok', $message, [
-            // Card token (platform JWT) — the client uses this for all subsequent requests.
-            'access_token'       => $cardToken ?? $result['access_token'] ?? null,
+            // API token (platform JWT) — the client uses this for all subsequent requests.
+            'access_token'       => $apiToken ?? $result['access_token'] ?? null,
             'token_type'         => 'Bearer',
             'expires_in'         => $this->config->exchangeTtl,
 
@@ -247,16 +247,16 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     }
 
     /**
-     * Mint a platform card token immediately after provisioning.
+     * Mint a platform API token immediately after provisioning.
      *
-     * This gives the client a usable card without requiring a separate exchange call.
+     * This gives the client a usable API token without requiring a separate exchange call.
      * Per framework-spec.md §6: "provision-tenant grants owner and mints the same
-     * card that exchange would mint."
+     * API token that exchange would mint."
      *
      * Returns null if the signing key is not configured (e.g. during unit tests),
      * in which case the caller falls back to the auth service's access_token.
      */
-    private function mintProvisionCard(
+    private function mintProvisionApiToken(
         string $identityId,
         string $tenantId,
         string $role,
@@ -277,14 +277,14 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
 
         try {
             $service = new TokenExchangeService();
-            return $service->exchangeCard($claims, $role, [
+            return $service->exchangeApiToken($claims, $role, [
                 'private_key_path'       => $this->config->signingPrivateKeyPath,
                 'private_key_passphrase' => $this->config->signingPrivateKeyPassphrase,
                 'issuer'                 => $this->config->signingIssuer,
                 'ttl'                    => $this->config->exchangeTtl,
             ]);
         } catch (TokenExchangeException $e) {
-            log_error('ProvisionTenantRoute: card minting failed: ' . $e->getMessage());
+            log_error('ProvisionTenantRoute: API token minting failed: ' . $e->getMessage());
             return null;
         }
     }

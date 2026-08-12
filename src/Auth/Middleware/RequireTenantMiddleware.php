@@ -13,10 +13,10 @@ use StoneScriptPHP\ApiResponse;
  * Enforces the authorization invariant for tenant-scoped routes (framework-spec.md §6 §5.1):
  *   "A tenant-less token MUST be rejected on any tenant-scoped route."
  *
- * In the passport/card model:
- *   - A **passport** (identity JWT, no tenant_id) is rejected here — the client
- *     must call POST /api/auth/exchange to obtain a **card** first.
- *   - A **card** carries tenant_id and passes this middleware.
+ * In the auth-token/API-token model:
+ *   - An **auth token** (identity JWT, no tenant_id) is rejected here — the client
+ *     must call POST /api/auth/exchange to obtain an **API token** first.
+ *   - An **API token** carries tenant_id and passes this middleware.
  *
  * This middleware MUST run AFTER JwtAuthMiddleware / ValidateJwtMiddleware so that
  * jwt_claims are already in the request.
@@ -38,12 +38,12 @@ class RequireTenantMiddleware implements MiddlewareInterface
 
         $claims = $request['jwt_claims'];
 
-        // framework-spec.md §6 §5.1 — reject passport/tenant-less tokens on tenant-scoped routes.
+        // framework-spec.md §6 §5.1 — reject auth-token/tenant-less tokens on tenant-scoped routes.
         if (empty($claims['tenant_id'])) {
             http_response_code(403);
             return new ApiResponse(
                 'error',
-                'A card token is required for this route. Obtain one via POST /api/auth/exchange.',
+                'An API token is required for this route. Obtain one via POST /api/auth/exchange.',
                 ['error' => 'tenant_context_required'],
                 403
             );

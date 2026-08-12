@@ -7,8 +7,8 @@ namespace StoneScriptPHP\Auth;
 /**
  * RefreshTokenStore — framework-owned persistence for ALL refresh tokens.
  *
- * Every refresh token this framework mints — identity/passport (`authentication`)
- * AND card/API (`authorization`) — gets exactly one row here, discriminated by
+ * Every refresh token this framework mints — identity/auth-token (`authentication`)
+ * AND API-token (`authorization`) — gets exactly one row here, discriminated by
  * `purpose`. A refresh token is valid iff its row exists. There is no soft state.
  *
  * ## Revoke = DELETE the row (hard)
@@ -17,7 +17,7 @@ namespace StoneScriptPHP\Auth;
  * present (valid) or absent (revoked / never issued / expired-and-reaped). This is
  * deliberate and differs from the older, cookie-flow-only {@see TokenStorageInterface}
  * whose contract said "UPDATE revoked_at, keep an audit trail". That interface is
- * deprecated in favour of this one for the body-mode passport/card flow.
+ * deprecated in favour of this one for the body-mode auth-token/API-token flow.
  *
  * ## Why the DB row is the authority (not just JWT expiry)
  *

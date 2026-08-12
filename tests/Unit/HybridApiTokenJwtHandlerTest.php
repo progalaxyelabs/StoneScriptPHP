@@ -5,26 +5,26 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use StoneScriptPHP\Auth\HybridCardJwtHandler;
+use StoneScriptPHP\Auth\HybridApiTokenJwtHandler;
 use StoneScriptPHP\Auth\RsaJwtHandler;
 use StoneScriptPHP\Env;
 
 /**
- * Tests for HybridCardJwtHandler — the card-model JWT validator.
+ * Tests for HybridApiTokenJwtHandler — the API-token-model JWT validator.
  *
  * Validates that:
- *   1. A platform-minted CARD (signed with the platform's RSA key) is accepted.
- *   2. A passport-shaped token signed with a WRONG key is rejected (returns false).
+ *   1. A platform-minted API TOKEN (signed with the platform's RSA key) is accepted.
+ *   2. An auth-token-shaped token signed with a WRONG key is rejected (returns false).
  *   3. Token GENERATION delegates to the platform RSA handler (same as RsaJwtHandler).
  *   4. JWT_ISSUER fail-loud: generateToken() throws when JWT_ISSUER is unset.
  *
- * JWKS fallback (for auth-service passports) is not tested here because it requires a
+ * JWKS fallback (for auth-service auth tokens) is not tested here because it requires a
  * live JWKS endpoint. The JWKS code path is exercised in integration tests.
  *
- * @covers \StoneScriptPHP\Auth\HybridCardJwtHandler
+ * @covers \StoneScriptPHP\Auth\HybridApiTokenJwtHandler
  * @covers \StoneScriptPHP\Auth\RsaJwtHandler
  */
-class HybridCardJwtHandlerTest extends TestCase
+class HybridApiTokenJwtHandlerTest extends TestCase
 {
     private string $testKeysDir;
     private string $testPrivateKey;
@@ -109,33 +109,33 @@ class HybridCardJwtHandlerTest extends TestCase
         }
     }
 
-    // ── Platform card validation (RSA path) ─────────────────────────────────────
+    // ── Platform API-token validation (RSA path) ─────────────────────────────────
 
     /**
-     * A card minted by the platform's RSA key MUST be accepted by HybridCardJwtHandler.
+     * An API token minted by the platform's RSA key MUST be accepted by HybridApiTokenJwtHandler.
      *
      * This is the load-bearing scenario: `Application::run()` in external mode now
-     * defaults to HybridCardJwtHandler. When the exchange route mints a card with the
-     * platform key, subsequent business-route requests carry that card — and HybridCardJwtHandler
+     * defaults to HybridApiTokenJwtHandler. When the exchange route mints an API token with the
+     * platform key, subsequent business-route requests carry that API token — and HybridApiTokenJwtHandler
      * must validate it via the RSA path.
      */
-    public function test_platform_card_validates_via_rsa_path(): void
+    public function test_platform_api_token_validates_via_rsa_path(): void
     {
         $rsaHandler = new RsaJwtHandler();
-        $card = $rsaHandler->generateToken([
+        $apiToken = $rsaHandler->generateToken([
             'identity_id' => 'id-abc',
             'tenant_id'   => 'tenant-xyz',
             'role_id'     => 'owner',
         ]);
 
-        $hybrid = new HybridCardJwtHandler(
+        $hybrid = new HybridApiTokenJwtHandler(
             authServiceUrl: 'http://auth.unreachable:9999',  // JWKS never reached
             authIssuer:     'https://auth.unreachable.example.com'
         );
 
-        $claims = $hybrid->verifyToken($card);
+        $claims = $hybrid->verifyToken($apiToken);
 
-        $this->assertIsArray($claims, 'Platform card should validate via RSA path');
+        $this->assertIsArray($claims, 'Platform API token should validate via RSA path');
         $this->assertSame('id-abc', $claims['identity_id']);
         $this->assertSame('tenant-xyz', $claims['tenant_id']);
         $this->assertSame('owner', $claims['role_id']);
@@ -168,7 +168,7 @@ class HybridCardJwtHandlerTest extends TestCase
         // Restore platform key.
         $this->env->JWT_PRIVATE_KEY_PATH = $this->testPrivateKey;
 
-        $hybrid = new HybridCardJwtHandler(
+        $hybrid = new HybridApiTokenJwtHandler(
             authServiceUrl: 'http://auth.unreachable:9999',
             authIssuer:     'https://auth.unreachable.example.com'
         );
@@ -184,20 +184,20 @@ class HybridCardJwtHandlerTest extends TestCase
     // ── Token generation delegates to RsaJwtHandler ─────────────────────────────
 
     /**
-     * HybridCardJwtHandler::generateToken() should produce the same card as RsaJwtHandler.
+     * HybridApiTokenJwtHandler::generateToken() should produce the same API token as RsaJwtHandler.
      */
-    public function test_generate_token_produces_rsa_signed_card(): void
+    public function test_generate_token_produces_rsa_signed_api_token(): void
     {
-        $hybrid = new HybridCardJwtHandler(
+        $hybrid = new HybridApiTokenJwtHandler(
             authServiceUrl: 'http://auth.unreachable:9999',
             authIssuer:     'https://auth.unreachable.example.com'
         );
 
         $payload = ['identity_id' => 'id-1', 'tenant_id' => 'tenant-1', 'role_id' => 'owner'];
-        $card = $hybrid->generateToken($payload, 3600);
+        $apiToken = $hybrid->generateToken($payload, 3600);
 
-        // Verify the card with the same handler's RSA verifier.
-        $claims = $hybrid->verifyToken($card);
+        // Verify the API token with the same handler's RSA verifier.
+        $claims = $hybrid->verifyToken($apiToken);
 
         $this->assertIsArray($claims);
         $this->assertSame('id-1', $claims['identity_id']);
@@ -210,7 +210,7 @@ class HybridCardJwtHandlerTest extends TestCase
     /**
      * RsaJwtHandler::generateToken() MUST throw when JWT_ISSUER is empty string.
      *
-     * The old behaviour (default to 'example.com') silently produced cards with a wrong
+     * The old behaviour (default to 'example.com') silently produced API tokens with a wrong
      * issuer, causing intermittent 401 errors that were hard to diagnose. Fail-loud
      * catches the misconfiguration at the first mint attempt.
      *
@@ -253,7 +253,7 @@ class HybridCardJwtHandlerTest extends TestCase
      */
     public function test_invalid_jwt_returns_false(): void
     {
-        $hybrid = new HybridCardJwtHandler(
+        $hybrid = new HybridApiTokenJwtHandler(
             authServiceUrl: 'http://auth.unreachable:9999',
             authIssuer:     'https://auth.unreachable.example.com'
         );

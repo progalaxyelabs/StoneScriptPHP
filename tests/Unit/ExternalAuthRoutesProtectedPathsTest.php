@@ -9,9 +9,9 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes;
 
 /**
  * Unit tests for ExternalAuthRoutes::protectedPaths() — the single source of truth
- * for RequireCardMiddleware's tenant-agnostic (tier-2) exemption list.
+ * for RequireApiTokenMiddleware's tenant-agnostic (tier-2) exemption list.
  *
- * Added 2026-07-05 alongside the RequireCardMiddleware fix (see its class docblock
+ * Added 2026-07-05 alongside the RequireApiTokenMiddleware fix (see its class docblock
  * and framework-spec.md §5.5). This was previously untested code; per house rule,
  * modifying it means owning its test coverage from here on.
  *
@@ -64,7 +64,7 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
     /**
      * With default options (canonical prefix /api/auth, legacy_compat true by
      * default, provision_tenant explicitly enabled), the exact tier-2 route set
-     * used to fix the 2026-07-05 fleet incident (RequireCardMiddleware) must be present.
+     * used to fix the 2026-07-05 fleet incident (RequireApiTokenMiddleware) must be present.
      *
      * `/api/auth/invite-member` was part of this set until
      * `invite`/`accept_invite` were removed from DefaultTenantRouteProvider

@@ -164,7 +164,7 @@ class JwtAuthMiddleware implements MiddlewareInterface
             AuthContext::setUser($user);
 
             // Store raw JWT claims on the request (used by the Auth\Middleware\Require*
-            // guard family — RequireCardMiddleware, RequireTenantMiddleware,
+            // guard family — RequireApiTokenMiddleware, RequireTenantMiddleware,
             // RequireRoleMiddleware, RequireIssuerMiddleware, TenantUrlMatchMiddleware —
             // and RequestContextTrait). Without this, every guard reads an always-empty
             // $request['jwt_claims'] and silently passes every request through, whether

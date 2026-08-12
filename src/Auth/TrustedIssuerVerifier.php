@@ -33,14 +33,14 @@ use Firebase\JWT\Key;
  *
  * ```php
  * $verifier = new TrustedIssuerVerifier([
- *     // Builtin/standalone platform: identity AND card share one local key + iss.
+ *     // Builtin/standalone platform: identity AND API token share one local key + iss.
  *     'https://api.exampleapp.in' => [
  *         'kind'       => 'local',
  *         'public_key' => file_get_contents('/keys/jwt-public.pem'),
  *         // or 'public_key_path' => '/keys/jwt-public.pem',
  *         'audience'   => null,          // optional strict audience check
  *     ],
- *     // Federated identity provider: passports verified via JWKS (different key!).
+ *     // Federated identity provider: auth tokens verified via JWKS (different key!).
  *     'https://auth.example.com' => [
  *         'kind'      => 'jwks',
  *         'jwks_url'  => 'https://auth.example.com/auth/jwks',

@@ -75,9 +75,9 @@ class ExternalAuthConfig
     public readonly string $signingIssuer;
 
     /**
-     * @var callable|null Platform-specific tenants resolver (card model — §4/§6).
+     * @var callable|null Platform-specific tenants resolver (API-token model — §4/§6).
      *
-     * Signature: fn(array $passportClaims): array
+     * Signature: fn(array $authClaims): array
      *   Returns a list of tenant objects the identity has access to on this platform.
      *   Each element: [ 'id' => string, 'name' => string, ... ]
      *
@@ -188,14 +188,14 @@ class ExternalAuthConfig
         $this->signingPrivateKeyPassphrase = $options['signing_private_key_passphrase']
             ?? ($env->JWT_PRIVATE_KEY_PASSPHRASE ?? null);
 
-        // JWT_ISSUER MUST be set explicitly — it is stamped as 'iss' on every card this platform
+        // JWT_ISSUER MUST be set explicitly — it is stamped as 'iss' on every API token this platform
         // mints via POST /api/auth/exchange. If unset, TokenExchangeService::mintToken() will
-        // throw at card-signing time (it already validates that issuer is non-empty).
+        // throw at API-token-signing time (it already validates that issuer is non-empty).
         // See also: RsaJwtHandler::generateToken() throws on empty JWT_ISSUER.
         $this->signingIssuer = (string) ($options['signing_issuer'] ?? ($env->JWT_ISSUER ?? ''));
 
-        // Tenants resolver for the card model (framework-spec.md §6).
-        // fn(array $passportClaims): array — returns tenant objects for the identity.
+        // Tenants resolver for the API-token model (framework-spec.md §6).
+        // fn(array $authClaims): array — returns tenant objects for the identity.
         $this->tenantsResolver = $options['tenants_resolver'] ?? null;
 
         // Phase 1 plugin seam (see TenantRouteProviderInterface docblock). Defaults to

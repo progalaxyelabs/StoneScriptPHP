@@ -5,39 +5,39 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Auth;
 
 /**
- * HybridCardJwtHandler — validates BOTH platform-minted cards and auth-service passports.
+ * HybridApiTokenJwtHandler — validates BOTH platform-minted API tokens and auth-service auth tokens.
  *
  * ## The problem it solves
  *
- * In the passport/card model (framework-spec.md §6) the platform mints two
+ * In the auth-token/API-token model (framework-spec.md §6) the platform mints two
  * completely different kinds of JWTs:
  *
- *   - **Passport** — identity JWT issued by the central auth service.
+ *   - **Auth token** — identity JWT issued by the central auth service.
  *     Signed with the auth service's private key, `iss` = AUTH_ISSUER.
  *     Validated via JWKS fetched from the auth service.
  *
- *   - **Card** — platform token issued by THIS platform's API.
+ *   - **API token** — platform token issued by THIS platform's API.
  *     Signed with THIS platform's RSA key (JWT_PRIVATE_KEY_PATH), `iss` = JWT_ISSUER.
  *     Validated with the platform's own public key.
  *
- * The old `MultiAuthJwtAdapter` (JWKS-only) rejects platform-minted cards because it
+ * The old `MultiAuthJwtAdapter` (JWKS-only) rejects platform-minted API tokens because it
  * only knows the auth service's public key — NOT the platform's. Using `RsaJwtHandler`
- * alone rejects passports because their issuer and signature don't match the platform key.
+ * alone rejects auth tokens because their issuer and signature don't match the platform key.
  *
- * `HybridCardJwtHandler` solves this by chaining both:
- *   1. Try platform RSA first (fast, no network) → succeeds for cards.
- *   2. Fall back to JWKS validation → succeeds for passports.
+ * `HybridApiTokenJwtHandler` solves this by chaining both:
+ *   1. Try platform RSA first (fast, no network) → succeeds for API tokens.
+ *   2. Fall back to JWKS validation → succeeds for auth tokens.
  *
  * ## Validation order
  *
  * Platform RSA is tried first because:
  *   - It is fast (local key file, no network).
- *   - In steady state (all clients hold a card), RSA succeeds immediately.
+ *   - In steady state (all clients hold an API token), RSA succeeds immediately.
  *   - RSA gracefully returns `false` on key mismatch — NEVER throws beyond Exception.
  *
  * JWKS is the fallback for:
- *   - Passports on protected routes (rare — usually exchange is the only passport-bearing route).
- *   - Transition period when old clients still hold passports from a prior session.
+ *   - Auth tokens on protected routes (rare — usually exchange is the only auth-token-bearing route).
+ *   - Transition period when old clients still hold auth tokens from a prior session.
  *
  * ## Usage in Application::run()
  *
@@ -46,14 +46,14 @@ namespace StoneScriptPHP\Auth;
  * `jwt.handler` injection key if needed:
  *
  *   Application::run([
- *       'jwt' => ['handler' => new HybridCardJwtHandler(...)],
+ *       'jwt' => ['handler' => new HybridApiTokenJwtHandler(...)],
  *       'auth' => ['mode' => 'external', ...],
  *   ]);
  *
  * @package StoneScriptPHP\Auth
  * @since   5.4.0
  */
-class HybridCardJwtHandler implements JwtHandlerInterface
+class HybridApiTokenJwtHandler implements JwtHandlerInterface
 {
     private RsaJwtHandler $platformHandler;
     private JwtHandlerInterface $authServiceHandler;
@@ -82,7 +82,7 @@ class HybridCardJwtHandler implements JwtHandlerInterface
     }
 
     /**
-     * Verify a JWT — platform card (RSA) or auth-service passport (JWKS).
+     * Verify a JWT — platform API token (RSA) or auth-service auth token (JWKS).
      *
      * Validation order: platform RSA → JWKS fallback.
      * Returns decoded claims (minus standard JWT fields) on success, false on failure.
@@ -92,23 +92,23 @@ class HybridCardJwtHandler implements JwtHandlerInterface
      */
     public function verifyToken(string $jwt): array|false
     {
-        // Attempt platform RSA validation first (cards).
+        // Attempt platform RSA validation first (API tokens).
         // RsaJwtHandler::verifyToken() returns false on any failure — never throws.
         $claims = $this->platformHandler->verifyToken($jwt);
         if ($claims !== false) {
             return $claims;
         }
 
-        // Fall back to JWKS (passports from the auth service).
+        // Fall back to JWKS (auth tokens from the auth service).
         return $this->authServiceHandler->verifyToken($jwt);
     }
 
     /**
-     * Generate a platform JWT (card) using the platform's RSA private key.
+     * Generate a platform JWT (API token) using the platform's RSA private key.
      *
-     * Delegates to RsaJwtHandler — all card signing uses the platform key.
+     * Delegates to RsaJwtHandler — all API-token signing uses the platform key.
      *
-     * @param array       $payload      Claims to stamp on the card.
+     * @param array       $payload      Claims to stamp on the API token.
      * @param int|null    $expirySeconds Expiry in seconds (defaults to JWT_ACCESS_TOKEN_EXPIRY or 900).
      * @param string      $tokenType    'access' or 'refresh' — stamped as the `type` claim.
      * @param string      $purpose      'authentication'|'authorization' — stamped as the `purpose` claim.

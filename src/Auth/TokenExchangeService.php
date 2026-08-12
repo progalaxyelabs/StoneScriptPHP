@@ -10,22 +10,22 @@ use Firebase\JWT\JWK;
 /**
  * Token Exchange Service
  *
- * Validates identity tokens (passports from the central auth service) and mints
- * platform tokens (cards). Central to the passport/card tenancy model:
+ * Validates identity tokens (auth tokens from the central auth service) and mints
+ * platform tokens (API tokens). Central to the auth-token/API-token tenancy model:
  *
- *   Passport = identity JWT from auth service. Tenant-less. Proves *who you are*.
- *   Card     = platform JWT from this service. Carries identity_id + tenant_id +
+ *   Auth token = identity JWT from auth service. Tenant-less. Proves *who you are*.
+ *   API token  = platform JWT from this service. Carries identity_id + tenant_id +
  *              single active role_id. Authorises all tenant-scoped requests.
  *
  * ## Canonical flow (framework-spec.md §6)
  *
- * 1. Client authenticates with auth service → gets **passport** (identity JWT)
+ * 1. Client authenticates with auth service → gets **auth token** (identity JWT)
  * 2. Client calls platform's POST /api/auth/exchange with:
- *      Authorization: Bearer <passport>
+ *      Authorization: Bearer <auth token>
  *      Body: { tenant_id, role_id? }
- * 3. Platform validates passport via JWKS
+ * 3. Platform validates auth token via JWKS
  * 4. Platform looks up identity's memberships (tenants + roles)
- * 5. Platform issues a **card** via exchangeCard()
+ * 5. Platform issues an **API token** via exchangeApiToken()
  *
  * @package StoneScriptPHP\Auth
  */
@@ -42,20 +42,20 @@ class TokenExchangeService
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
-     * Validate an identity token (passport) against a JWKS endpoint.
+     * Validate an identity token (auth token) against a JWKS endpoint.
      *
-     * @param string $token JWT passport from identity provider
+     * @param string $token JWT auth token from identity provider
      * @param string $jwksUrl JWKS endpoint URL (e.g., https://auth.example.com/.well-known/jwks.json)
      * @param string $expectedIssuer Expected issuer claim (e.g., https://auth.example.com)
      * @param string|null $expectedAudience Optional audience to verify
      * @param string|null $expectedPurpose Optional strict `purpose` assertion. When set
-     *   (TokenClaims::PURPOSE_AUTHENTICATION), the passport MUST carry a matching
-     *   `purpose` claim. Left null by default because the federated passport minter
+     *   (TokenClaims::PURPOSE_AUTHENTICATION), the auth token MUST carry a matching
+     *   `purpose` claim. Left null by default because the federated auth-token minter
      *   (the external auth service) stamps `purpose` in a LATER phase — enabling the
-     *   assertion before that would reject every in-flight passport. Builtin-mode
-     *   platforms, whose passports this framework mints and already stamps, may pass
+     *   assertion before that would reject every in-flight auth token. Builtin-mode
+     *   platforms, whose auth tokens this framework mints and already stamps, may pass
      *   TokenClaims::PURPOSE_AUTHENTICATION to enforce it today.
-     * @return array Decoded passport claims
+     * @return array Decoded auth-token claims
      * @throws TokenExchangeException If validation fails
      */
     public function validateIdentityToken(
@@ -136,29 +136,34 @@ class TokenExchangeService
     }
 
     /**
-     * Mint a **card token** — the canonical platform JWT in the passport/card model.
+     * Mint an **API token** — the canonical platform JWT in the auth-token/API-token model.
      *
-     * The card carries:
-     *   - identity_id (preserved from passport)
+     * The API token carries:
+     *   - identity_id (preserved from the auth token)
      *   - tenant_id (from the merged claims / chosen at exchange time)
      *   - role_id (single active role — NOT an array)
      *   - iss = platform API (not the auth service)
      *
-     * framework-spec.md §6 — there is one card shape for all multi-tenant platforms.
+     * framework-spec.md §6 — there is one API-token shape for all multi-tenant platforms.
      *
-     * @param array  $identityClaimsWithTenant Passport claims + 'tenant_id' merged in
-     * @param string $activeRoleId             The single active role to stamp on the card
+     * NOTE: the `token_type` claim value stamped below stays the literal string `'card'`
+     * — that value is written into every JWT this framework mints and is a wire-level
+     * contract with existing tokens/clients, not a framework-internal identifier, so it is
+     * deliberately left unrenamed here (see this repo's rename report for the full reasoning).
+     *
+     * @param array  $identityClaimsWithTenant Auth-token claims + 'tenant_id' merged in
+     * @param string $activeRoleId             The single active role to stamp on the API token
      * @param array  $config Platform signing configuration:
      *   - private_key_path: string - Path to RSA private key (PEM format)
      *   - private_key_passphrase: string|null - Passphrase if key is encrypted
      *   - issuer: string - Platform issuer URL (iss = platform API)
      *   - audience: string|null - Optional audience claim
      *   - ttl: int - Token TTL in seconds (default: 3600)
-     *   - custom_claims: array - Extra claims merged into the card
-     * @return string Signed card JWT
+     *   - custom_claims: array - Extra claims merged into the API token
+     * @return string Signed API-token JWT
      * @throws TokenExchangeException If token generation fails
      */
-    public function exchangeCard(
+    public function exchangeApiToken(
         array $identityClaimsWithTenant,
         string $activeRoleId,
         array $config,
@@ -168,8 +173,9 @@ class TokenExchangeService
             $identityClaimsWithTenant,
             $config,
             static function (array $base) use ($activeRoleId, $tokenType): array {
-                // `token_type` is the token CLASS (card). `type`/`purpose` are the
-                // orthogonal typed claims — a card is always purpose=authorization.
+                // `token_type` is the token CLASS (API token; wire value stays 'card' —
+                // see this method's docblock). `type`/`purpose` are the orthogonal typed
+                // claims — an API token is always purpose=authorization.
                 $base['token_type']                = 'card';
                 $base['role_id']                   = $activeRoleId;
                 $base[TokenClaims::CLAIM_PURPOSE]   = TokenClaims::PURPOSE_AUTHORIZATION;
@@ -182,7 +188,7 @@ class TokenExchangeService
     /**
      * Exchange identity claims for a platform token with a roles array.
      *
-     * @deprecated Use exchangeCard() for the passport/card tenancy model.
+     * @deprecated Use exchangeApiToken() for the auth-token/API-token tenancy model.
      *   This method retains the legacy `roles` array claim and is kept for
      *   backward compatibility with platforms that have not yet migrated.
      *
@@ -211,43 +217,43 @@ class TokenExchangeService
     }
 
     /**
-     * Convenience method: validate passport and mint a card in one call.
+     * Convenience method: validate an auth token and mint an API token in one call.
      *
-     * @param string $passportToken JWT passport from identity provider
-     * @param string $activeRoleId  The single active role to stamp on the card
+     * @param string $authToken JWT auth token from identity provider
+     * @param string $activeRoleId  The single active role to stamp on the API token
      * @param array  $authConfig Auth validation config:
      *   - jwks_url: string - JWKS endpoint
      *   - issuer: string - Expected issuer
      *   - audience: string|null - Expected audience
-     * @param array $platformConfig Platform signing config (see exchangeCard())
-     * @return array{token: string, claims: array} Card token and decoded passport claims
+     * @param array $platformConfig Platform signing config (see exchangeApiToken())
+     * @return array{token: string, claims: array} API token and decoded auth-token claims
      * @throws TokenExchangeException If validation or exchange fails
      */
-    public function validateAndExchangeCard(
-        string $passportToken,
+    public function validateAndExchangeApiToken(
+        string $authToken,
         string $activeRoleId,
         array $authConfig,
         array $platformConfig
     ): array {
-        $passportClaims = $this->validateIdentityToken(
-            $passportToken,
+        $authClaims = $this->validateIdentityToken(
+            $authToken,
             $authConfig['jwks_url'],
             $authConfig['issuer'],
             $authConfig['audience'] ?? null
         );
 
-        $cardToken = $this->exchangeCard($passportClaims, $activeRoleId, $platformConfig);
+        $apiToken = $this->exchangeApiToken($authClaims, $activeRoleId, $platformConfig);
 
         return [
-            'token'  => $cardToken,
-            'claims' => $passportClaims,
+            'token'  => $apiToken,
+            'claims' => $authClaims,
         ];
     }
 
     /**
      * Convenience method: validate and exchange in one call (legacy).
      *
-     * @deprecated Use validateAndExchangeCard() for the card model.
+     * @deprecated Use validateAndExchangeApiToken() for the API-token model.
      *
      * @param string $identityToken JWT from identity provider
      * @param array $roles Roles from platform's tenant DB
@@ -295,9 +301,9 @@ class TokenExchangeService
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
-     * Shared token-minting logic used by both exchangeCard() and exchange().
+     * Shared token-minting logic used by both exchangeApiToken() and exchange().
      *
-     * @param array    $identityClaims  Source identity/passport claims
+     * @param array    $identityClaims  Source identity/auth-token claims
      * @param array    $config          Signing configuration
      * @param callable $claimsDecorator fn(array $base): array — adds token-type-specific claims
      * @return string Signed JWT
@@ -355,7 +361,7 @@ class TokenExchangeService
             'iat' => $now,
             'exp' => $now + $ttl,
 
-            // Identity claims (preserved from passport / identity token)
+            // Identity claims (preserved from the auth token / identity token)
             'sub'          => $identityClaims['sub'] ?? null,
             'identity_id'  => $identityClaims['sub'] ?? $identityClaims['identity_id'] ?? null,
             'tenant_id'    => $identityClaims['tenant_id'] ?? null,

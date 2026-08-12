@@ -52,7 +52,7 @@ Guidance:
 - Open/pre-auth endpoints (health, home, JWKS, login, register, OAuth initiate) →
   `access: public`.
 - Identity-bearer endpoints (exchange) → `authentication` + `access`.
-- Card/business endpoints → `authorization` + `access`.
+- API-token/business endpoints → `authorization` + `access`.
 - Refresh/logout endpoints (credential in the body) → `authentication` or
   `authorization` + `token_type: refresh` (NOT public — they carry a refresh token).
 
@@ -63,9 +63,9 @@ use StoneScriptPHP\Auth\Middleware\AuthMiddlewareRegistrar;
 use StoneScriptPHP\Auth\TrustedIssuerVerifier;
 
 $verifier = new TrustedIssuerVerifier([
-    // builtin/standalone: identity + card share one local key + iss
+    // builtin/standalone: identity + API token share one local key + iss
     'https://api.yourapp.in' => ['kind' => 'local', 'public_key_path' => '/keys/jwt-public.pem'],
-    // federated identity (external mode): passports via JWKS
+    // federated identity (external mode): auth tokens via JWKS
     // 'https://auth.example.com' => ['kind' => 'jwks', 'jwks_url' => 'https://auth.example.com/auth/jwks'],
 ]);
 

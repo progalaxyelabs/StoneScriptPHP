@@ -150,7 +150,7 @@ class TrustedIssuerVerifierTest extends TestCase
         ]);
 
         $token = JWT::encode(
-            ['iss' => self::ISSUER_B, 'sub' => 'passport-user', 'iat' => time(), 'exp' => time() + 900],
+            ['iss' => self::ISSUER_B, 'sub' => 'auth-token-user', 'iat' => time(), 'exp' => time() + 900],
             $this->keyB['priv'],
             'RS256',
             'test-kid'
@@ -158,6 +158,6 @@ class TrustedIssuerVerifierTest extends TestCase
 
         $claims = $verifier->verify($token);
         $this->assertIsArray($claims);
-        $this->assertSame('passport-user', $claims['sub']);
+        $this->assertSame('auth-token-user', $claims['sub']);
     }
 }

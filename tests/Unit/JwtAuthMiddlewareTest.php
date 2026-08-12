@@ -18,15 +18,15 @@ use StoneScriptPHP\Routing\Middleware\JwtAuthMiddleware;
  *
  * JwtAuthMiddleware historically stored the authenticated user ONLY in
  * AuthContext::setUser(), and never populated $request['jwt_claims']. Every
- * guard middleware in the Auth\Middleware\* family (RequireCardMiddleware,
+ * guard middleware in the Auth\Middleware\* family (RequireApiTokenMiddleware,
  * RequireTenantMiddleware, RequireRoleMiddleware, RequireIssuerMiddleware,
  * TenantUrlMatchMiddleware) — plus RequestContextTrait used by controllers —
  * reads authorization state exclusively from $request['jwt_claims']. Because
  * that key was never set, every guard middleware always observed an empty/
  * absent jwt_claims and treated EVERY authenticated request as if it were an
  * unauthenticated public route, silently passing it through instead of
- * enforcing card/role/tenant/issuer requirements. Confirmed live: a
- * passport-only (tenant-less) token reached a tenant-scoped route handler
+ * enforcing API-token/role/tenant/issuer requirements. Confirmed live: an
+ * auth-token-only (tenant-less) token reached a tenant-scoped route handler
  * instead of getting a 403 tenant_context_required.
  *
  * The fix converges both middleware families on ONE populated field:
@@ -78,7 +78,7 @@ class JwtAuthMiddlewareTest extends TestCase
      */
     public function test_valid_card_token_populates_jwt_claims_on_request(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer valid-card-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer valid-api-token';
 
         $payload = [
             'identity_id' => 'id-1',
@@ -117,7 +117,7 @@ class JwtAuthMiddlewareTest extends TestCase
      */
     public function test_auth_context_and_jwt_claims_agree_on_same_payload(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer valid-card-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer valid-api-token';
 
         $payload = [
             'identity_id' => 'id-42',
@@ -148,20 +148,20 @@ class JwtAuthMiddlewareTest extends TestCase
     }
 
     /**
-     * Passport (tenant-less) tokens also populate jwt_claims — WITHOUT a
-     * tenant_id key. It's the downstream guard's job (RequireCardMiddleware /
-     * RequireTenantMiddleware) to reject passports on tenant-scoped routes;
+     * Auth (tenant-less) tokens also populate jwt_claims — WITHOUT a
+     * tenant_id key. It's the downstream guard's job (RequireApiTokenMiddleware /
+     * RequireTenantMiddleware) to reject auth tokens on tenant-scoped routes;
      * JwtAuthMiddleware's only job is faithfully passing the validated claims
      * through.
      */
-    public function test_passport_token_populates_jwt_claims_without_tenant_id(): void
+    public function test_auth_token_populates_jwt_claims_without_tenant_id(): void
     {
-        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer valid-passport-token';
+        $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer valid-auth-token';
 
         $payload = [
             'identity_id' => 'id-1',
             'sub'         => 'id-1',
-            // no tenant_id, no role_id — passport
+            // no tenant_id, no role_id — auth token
         ];
 
         $middleware = new JwtAuthMiddleware($this->fakeJwtHandler($payload));

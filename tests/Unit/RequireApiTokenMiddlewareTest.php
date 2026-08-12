@@ -6,24 +6,24 @@ namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\ApiResponse;
-use StoneScriptPHP\Auth\Middleware\RequireCardMiddleware;
+use StoneScriptPHP\Auth\Middleware\RequireApiTokenMiddleware;
 
 /**
- * Tests for RequireCardMiddleware — card-model global enforcement with public-route pass-through.
+ * Tests for RequireApiTokenMiddleware — API-token-model global enforcement with public-route pass-through.
  *
  * Validates framework-spec.md §6 §5.1 + the public-route pass-through behaviour
  * that allows the exchange endpoint (and other explicitly excluded paths) to be
  * wired as global middleware without self-blocking.
  *
- * @covers \StoneScriptPHP\Auth\Middleware\RequireCardMiddleware
+ * @covers \StoneScriptPHP\Auth\Middleware\RequireApiTokenMiddleware
  */
-class RequireCardMiddlewareTest extends TestCase
+class RequireApiTokenMiddlewareTest extends TestCase
 {
-    private RequireCardMiddleware $middleware;
+    private RequireApiTokenMiddleware $middleware;
 
     protected function setUp(): void
     {
-        $this->middleware = new RequireCardMiddleware();
+        $this->middleware = new RequireApiTokenMiddleware();
     }
 
     // ── Public-route pass-through ────────────────────────────────────────────────
@@ -47,7 +47,7 @@ class RequireCardMiddlewareTest extends TestCase
 
         $this->assertTrue(
             $passedThrough,
-            'Public routes (no jwt_claims) must pass through RequireCardMiddleware'
+            'Public routes (no jwt_claims) must pass through RequireApiTokenMiddleware'
         );
     }
 
@@ -69,12 +69,12 @@ class RequireCardMiddlewareTest extends TestCase
         $this->assertTrue($passedThrough, 'Empty jwt_claims should also pass through');
     }
 
-    // ── Card tokens (tenant_id present) ─────────────────────────────────────────
+    // ── API tokens (tenant_id present) ─────────────────────────────────────────
 
     /**
-     * A valid card (has tenant_id) MUST pass through to the route handler.
+     * A valid API token (has tenant_id) MUST pass through to the route handler.
      */
-    public function test_card_with_tenant_id_passes_through(): void
+    public function test_api_token_with_tenant_id_passes_through(): void
     {
         $request = [
             'jwt_claims' => [
@@ -92,26 +92,26 @@ class RequireCardMiddlewareTest extends TestCase
 
         $this->middleware->handle($request, $next);
 
-        $this->assertTrue($passedThrough, 'Card with tenant_id should pass through');
+        $this->assertTrue($passedThrough, 'API token with tenant_id should pass through');
     }
 
-    // ── Passport on business route → 403 ────────────────────────────────────────
+    // ── Auth token on business route → 403 ────────────────────────────────────────
 
     /**
-     * A passport (identity JWT, no tenant_id) on a tenant-scoped route MUST be
+     * An auth token (identity JWT, no tenant_id) on a tenant-scoped route MUST be
      * rejected with 403 tenant_context_required (framework-spec.md §6 §5.1).
      *
      * This is the core guard: the exchange endpoint is excluded from JwtAuthMiddleware
-     * so passports reach the exchange route normally. But if a client sends a passport
+     * so auth tokens reach the exchange route normally. But if a client sends an auth token
      * to a business route (e.g. GET /portal/warehouses), it gets 403 here.
      */
-    public function test_passport_on_business_route_returns_403_tenant_context_required(): void
+    public function test_auth_token_on_business_route_returns_403_tenant_context_required(): void
     {
         $request = [
             'jwt_claims' => [
                 'identity_id' => 'id-xyz',
                 'sub'         => 'id-xyz',
-                // No tenant_id — this is a passport, not a card
+                // No tenant_id — this is an auth token, not an API token
             ],
         ];
 
@@ -146,9 +146,9 @@ class RequireCardMiddlewareTest extends TestCase
     // ── Contrast: difference from RequireTenantMiddleware ────────────────────────
 
     /**
-     * RequireCardMiddleware differs from RequireTenantMiddleware in one key way:
+     * RequireApiTokenMiddleware differs from RequireTenantMiddleware in one key way:
      * when jwt_claims is absent, RequireTenantMiddleware returns 401, but
-     * RequireCardMiddleware passes through.
+     * RequireApiTokenMiddleware passes through.
      *
      * This test documents the intended difference — the public-route use case.
      */
@@ -159,32 +159,32 @@ class RequireCardMiddlewareTest extends TestCase
         /** @var ApiResponse|null $response */
         $response = $this->middleware->handle($request, fn($r) => null);
 
-        // RequireCardMiddleware passes through → callable returns null
+        // RequireApiTokenMiddleware passes through → callable returns null
         // (We pass fn($r) => null so response IS null if pass-through worked)
         $this->assertNull(
             $response,
-            'RequireCardMiddleware must NOT return 401 on absent claims — it passes through (unlike RequireTenantMiddleware)'
+            'RequireApiTokenMiddleware must NOT return 401 on absent claims — it passes through (unlike RequireTenantMiddleware)'
         );
     }
 
     // ── Tenant-agnostic (tier-2) path exemption — 2026-07-05 regression fix ──────
     //
-    // Regression coverage for the real fleet incident: RequireCardMiddleware, wired
+    // Regression coverage for the real fleet incident: RequireApiTokenMiddleware, wired
     // globally with an empty exemption list, 403'd ExternalAuthRoutes' own tier-2
     // routes (provision-tenant, select-tenant, etc.) the moment JwtAuthMiddleware
     // started reliably populating jwt_claims for them. See framework-spec.md §5.5
     // and the class docblock for the full chain.
 
     /**
-     * A passport on a path that IS in the exemption list must pass through —
+     * An auth token on a path that IS in the exemption list must pass through —
      * this is the whole point of the fix (e.g. POST /api/auth/provision-tenant).
      */
-    public function test_passport_on_exempt_tenant_agnostic_path_passes_through(): void
+    public function test_auth_token_on_exempt_tenant_agnostic_path_passes_through(): void
     {
-        $middleware = new RequireCardMiddleware(['/api/auth/provision-tenant', '/api/auth/me']);
+        $middleware = new RequireApiTokenMiddleware(['/api/auth/provision-tenant', '/api/auth/me']);
 
         $request = [
-            'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],  // passport, no tenant_id
+            'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],  // auth token, no tenant_id
             'route' => ['pattern' => '/api/auth/provision-tenant'],
         ];
 
@@ -198,19 +198,19 @@ class RequireCardMiddlewareTest extends TestCase
 
         $this->assertTrue(
             $passedThrough,
-            'A passport on an exempt tenant-agnostic path must pass through, not 403'
+            'An auth token on an exempt tenant-agnostic path must pass through, not 403'
         );
     }
 
     /**
-     * A passport on a path that is NOT in the exemption list must still 403 —
+     * An auth token on a path that is NOT in the exemption list must still 403 —
      * the exemption must be precise, not a blanket bypass. Guards against a lazy
      * fix that accidentally re-opens the exact hole RequireTenantMiddleware exists
      * to close.
      */
-    public function test_passport_on_non_exempt_path_still_returns_403(): void
+    public function test_auth_token_on_non_exempt_path_still_returns_403(): void
     {
-        $middleware = new RequireCardMiddleware(['/api/auth/provision-tenant']);
+        $middleware = new RequireApiTokenMiddleware(['/api/auth/provision-tenant']);
 
         $request = [
             'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],
@@ -225,13 +225,13 @@ class RequireCardMiddlewareTest extends TestCase
     }
 
     /**
-     * A passport with no 'route'/'pattern' key at all (should not normally happen —
+     * An auth token with no 'route'/'pattern' key at all (should not normally happen —
      * this middleware always runs post-routing — but defensive) must still 403,
      * never silently pass through for lack of information to check against.
      */
-    public function test_passport_with_no_route_pattern_still_returns_403(): void
+    public function test_auth_token_with_no_route_pattern_still_returns_403(): void
     {
-        $middleware = new RequireCardMiddleware(['/api/auth/provision-tenant']);
+        $middleware = new RequireApiTokenMiddleware(['/api/auth/provision-tenant']);
 
         $request = [
             'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],
@@ -247,12 +247,12 @@ class RequireCardMiddlewareTest extends TestCase
     /**
      * Default construction (no argument) must reproduce the pre-fix, fully-strict
      * behavior — an empty exemption list means nothing is exempted, preserving
-     * backward compatibility for any existing manual `new RequireCardMiddleware()`
+     * backward compatibility for any existing manual `new RequireApiTokenMiddleware()`
      * call sites until they're migrated to pass the real list.
      */
     public function test_default_construction_has_empty_exemption_list(): void
     {
-        $middleware = new RequireCardMiddleware();  // no args — legacy call shape
+        $middleware = new RequireApiTokenMiddleware();  // no args — legacy call shape
 
         $request = [
             'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],
@@ -293,6 +293,6 @@ class RequireCardMiddlewareTest extends TestCase
 
         $this->middleware->handle($original, $next);
 
-        $this->assertSame($original, $receivedRequest, 'RequireCardMiddleware must not mutate the request');
+        $this->assertSame($original, $receivedRequest, 'RequireApiTokenMiddleware must not mutate the request');
     }
 }

@@ -72,9 +72,9 @@ class ExternalAuthRoutes
         $client = new ExternalAuthServiceClient($config->authServiceUrl, $config->platformCode);
         $provisioner = $options['provisioner'] ?? null;
 
-        // Card model resolvers (framework-spec.md §6).
+        // API-token model resolvers (framework-spec.md §6).
         // roles_resolver: fn(array $claimsWithTenant): string[] — roles for identity in tenant.
-        // tenants_resolver: fn(array $passportClaims): array[] — tenants the identity belongs to.
+        // tenants_resolver: fn(array $authClaims): array[] — tenants the identity belongs to.
         $rolesResolver   = $options['roles_resolver']   ?? null;
         $tenantsResolver = $config->tenantsResolver;
 
@@ -171,10 +171,10 @@ class ExternalAuthRoutes
             log_debug("ExternalAuthRoutes: Registered GET $prefix/health");
         }
 
-        // Token exchange is PUBLIC: the inbound Authorization token is a passport (identity
-        // JWT from the auth service, not a platform card). JwtAuthMiddleware validates platform
-        // cards and would reject it. The exchange route validates the passport itself via JWKS.
-        // Card model: body carries tenant_id + optional role_id. Returns §6 session contract.
+        // Token exchange is PUBLIC: the inbound Authorization token is an auth token (identity
+        // JWT from the auth service, not a platform API token). JwtAuthMiddleware validates platform
+        // API tokens and would reject it. The exchange route validates the auth token itself via JWKS.
+        // API-token model: body carries tenant_id + optional role_id. Returns §6 session contract.
         if ($config->isEnabled('exchange')) {
             $router->post(
                 "$prefix/exchange",
@@ -182,17 +182,17 @@ class ExternalAuthRoutes
                 [],
                 true
             );
-            log_debug("ExternalAuthRoutes: Registered POST $prefix/exchange (public, card model)");
+            log_debug("ExternalAuthRoutes: Registered POST $prefix/exchange (public, API-token model)");
         }
 
         // Protected routes (auth required)
 
         if ($config->isEnabled('change_password')) {
-            // Tier-2 identity route: consumes a PASSPORT (purpose=authentication),
-            // never a card. Typed access=authentication so the 7.x typed-auth
-            // AccessTokenMiddleware admits the passport (a card would be a purpose
+            // Tier-2 identity route: consumes an AUTH TOKEN (purpose=authentication),
+            // never an API token. Typed access=authentication so the 7.x typed-auth
+            // AccessTokenMiddleware admits the auth token (an API token would be a purpose
             // mismatch → 403). Mirrors this route's membership of protectedPaths()
-            // (the RequireCardMiddleware "no card needed" exemption list).
+            // (the RequireApiTokenMiddleware "no API token needed" exemption list).
             $router->post(
                 "$prefix/change-password",
                 new ChangePasswordRoute($client, $config->hooks, $config),
@@ -204,7 +204,7 @@ class ExternalAuthRoutes
         // select_tenant, provision_tenant, memberships are tenant routes —
         // delegated below via $config->tenantRouteProvider (Phase 1 seam, see
         // TenantRouteProviderInterface — bundles registration with the
-        // RequireCardMiddleware exemption-path computation so they can't drift apart).
+        // RequireApiTokenMiddleware exemption-path computation so they can't drift apart).
         // (invite used to live here too — removed 2026-07-21, see
         // DefaultTenantRouteProvider's class docblock.)
         $config->tenantRouteProvider->register(
@@ -218,10 +218,10 @@ class ExternalAuthRoutes
         );
 
         if ($config->isEnabled('profile')) {
-            // Tier-2 identity route: consumes a PASSPORT (purpose=authentication).
+            // Tier-2 identity route: consumes an AUTH TOKEN (purpose=authentication).
             // /me returns the cross-tenant session context (identity + available
-            // tenants/roles) resolved from the passport — it is NOT a tenant-scoped
-            // card route. Typed access=authentication (see change-password above).
+            // tenants/roles) resolved from the auth token — it is NOT a tenant-scoped
+            // API-token route. Typed access=authentication (see change-password above).
             $router->get(
                 "$prefix/me",
                 new ProfileRoute($client, $config->hooks, $config, $rolesResolver, $tenantsResolver),
@@ -316,10 +316,10 @@ class ExternalAuthRoutes
 
     /**
      * Get protected paths — tier-2, identity-required-but-tenant-agnostic routes
-     * (auth required, but a passport suffices; no card/tenant_id needed).
+     * (auth required, but an auth token suffices; no API token/tenant_id needed).
      *
-     * Used by `RequireCardMiddleware`'s exemption list (see its class docblock and
-     * `Application::run()`'s `require_card` config key) so those routes are never
+     * Used by `RequireApiTokenMiddleware`'s exemption list (see its class docblock and
+     * `Application::run()`'s `require_api_token` config key) so those routes are never
      * wrongly rejected for lacking a `tenant_id` — they were never supposed to need
      * one. This is the single source of truth for that list; do not hand-maintain
      * a duplicate anywhere.

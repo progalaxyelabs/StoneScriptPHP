@@ -62,13 +62,13 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         // accept-invite REMOVED 2026-07-21 — see class docblock.
 
         // Protected (tier-2) tenant routes. These are IDENTITY routes: the caller
-        // presents a PASSPORT (purpose=authentication), never a tenant-scoped card —
-        // they operate BEFORE / ACROSS tenant selection (select/provision/invite/
+        // presents an AUTH TOKEN (purpose=authentication), never a tenant-scoped API
+        // token — they operate BEFORE / ACROSS tenant selection (select/provision/invite/
         // memberships all resolve against the identity, and memberships proxies the
-        // passport straight to the auth service's JWKS-validated endpoint). Typed
-        // access=authentication so the 7.x AccessTokenMiddleware admits the passport;
-        // a card here would be a purpose mismatch → 403. This mirrors their membership
-        // of protectedPaths() (the RequireCardMiddleware "no card needed" exemptions).
+        // auth token straight to the auth service's JWKS-validated endpoint). Typed
+        // access=authentication so the 7.x AccessTokenMiddleware admits the auth token;
+        // an API token here would be a purpose mismatch → 403. This mirrors their membership
+        // of protectedPaths() (the RequireApiTokenMiddleware "no API token needed" exemptions).
         if ($config->isEnabled('select_tenant')) {
             $router->post(
                 "$prefix/select-tenant",

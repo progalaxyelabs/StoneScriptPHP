@@ -10,21 +10,21 @@ use StoneScriptPHP\Auth\Middleware\RequireTenantMiddleware;
 use StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware;
 
 /**
- * Tests for card model boundary enforcement middleware.
+ * Tests for API-token model boundary enforcement middleware.
  *
  * Covers framework-spec.md §6 authorization invariants:
  *   §5.1 — tenant-less token MUST be rejected on any tenant-scoped route
  *   §5.2 — url.tenantId MUST equal card.tenant_id
  */
-class CardBoundaryMiddlewareTest extends TestCase
+class ApiTokenBoundaryMiddlewareTest extends TestCase
 {
     // ── RequireTenantMiddleware (§5.1) ────────────────────────────────────────
 
-    public function test_tenant_less_passport_rejected_with_tenant_context_required(): void
+    public function test_tenant_less_auth_token_rejected_with_tenant_context_required(): void
     {
         $middleware = new RequireTenantMiddleware();
 
-        // Simulate a passport token: no tenant_id in claims
+        // Simulate an auth token: no tenant_id in claims
         $request = [
             'jwt_claims' => ['identity_id' => 'id-1', 'sub' => 'id-1'],
         ];
@@ -38,11 +38,11 @@ class CardBoundaryMiddlewareTest extends TestCase
         $this->assertSame('tenant_context_required', $response->data['error']);
     }
 
-    public function test_card_token_with_tenant_id_passes_through(): void
+    public function test_api_token_with_tenant_id_passes_through(): void
     {
         $middleware = new RequireTenantMiddleware();
 
-        // Simulate a card token: has tenant_id
+        // Simulate an API token: has tenant_id
         $request = [
             'jwt_claims' => [
                 'identity_id' => 'id-1',
@@ -59,7 +59,7 @@ class CardBoundaryMiddlewareTest extends TestCase
 
         $middleware->handle($request, $next);
 
-        $this->assertTrue($passedThrough, 'Card token with tenant_id should pass through');
+        $this->assertTrue($passedThrough, 'API token with tenant_id should pass through');
     }
 
     public function test_missing_jwt_claims_returns_401(): void
@@ -87,7 +87,7 @@ class CardBoundaryMiddlewareTest extends TestCase
     // self-skip guard doesn't short-circuit the actual enforcement being tested.
     // Self-skip behaviour itself is covered by the dedicated tests further down.
 
-    public function test_url_tenant_matches_card_tenant_passes_through(): void
+    public function test_url_tenant_matches_api_token_tenant_passes_through(): void
     {
         $middleware = new TenantUrlMatchMiddleware('tenantId');
 
@@ -108,12 +108,12 @@ class CardBoundaryMiddlewareTest extends TestCase
         $this->assertTrue($passedThrough, 'Matching tenant ID should pass through');
     }
 
-    public function test_url_tenant_different_from_card_tenant_rejected_403(): void
+    public function test_url_tenant_different_from_api_token_tenant_rejected_403(): void
     {
         $middleware = new TenantUrlMatchMiddleware('tenantId');
 
         $request = [
-            'jwt_claims' => ['tenant_id' => 'tenant-abc'],  // card says abc
+            'jwt_claims' => ['tenant_id' => 'tenant-abc'],  // API token says abc
             'params'     => ['tenantId'  => 'tenant-xyz'],  // URL says xyz → mismatch!
             'route'      => ['pattern' => '/portal/tenant/{tenantId}/orders'],
         ];
@@ -173,7 +173,7 @@ class CardBoundaryMiddlewareTest extends TestCase
         $middleware = new TenantUrlMatchMiddleware();
 
         $request = [
-            'jwt_claims' => ['identity_id' => 'id-1'],  // no tenant_id — passport
+            'jwt_claims' => ['identity_id' => 'id-1'],  // no tenant_id — auth token
             'params'     => ['tenantId' => 'some-tenant'],
             'route'      => ['pattern' => '/portal/tenant/{tenantId}/orders'],
         ];
@@ -215,10 +215,10 @@ class CardBoundaryMiddlewareTest extends TestCase
 
     /**
      * Same self-skip applies even when the request DOES carry jwt_claims with a
-     * tenant_id (e.g. a card token hitting an admin/auth-only endpoint) — the
+     * tenant_id (e.g. an API token hitting an admin/auth-only endpoint) — the
      * route simply isn't tenant-scoped, so the middleware has nothing to check.
      */
-    public function test_non_tenant_route_self_skips_even_with_card_claims_present(): void
+    public function test_non_tenant_route_self_skips_even_with_api_token_claims_present(): void
     {
         $middleware = new TenantUrlMatchMiddleware('tenantId');
 

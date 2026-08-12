@@ -125,7 +125,7 @@ class TenantRouteProviderSeamTest extends TestCase
 
     /**
      * ExternalAuthRoutes::protectedPaths() reflects a CUSTOM provider's protectedPaths()
-     * output — proving the exemption-list derivation (RequireCardMiddleware's Bug-1
+     * output — proving the exemption-list derivation (RequireApiTokenMiddleware's Bug-1
      * guard) stays coherent with whichever provider actually registers the routes,
      * not hardcoded to the framework's built-in tenant route set.
      */
@@ -236,9 +236,9 @@ class TenantRouteProviderSeamTest extends TestCase
     /**
      * 7.1.2 typed-auth fix: the tier-2 IDENTITY routes registered by the default
      * provider (select-tenant, provision-tenant, memberships, memberships/{id})
-     * consume a PASSPORT (purpose=authentication), never a tenant-scoped card.
+     * consume an AUTH TOKEN (purpose=authentication), never a tenant-scoped API token.
      * They MUST register with access=authentication so the 7.x
-     * AccessTokenMiddleware admits the passport — a card here is a purpose
+     * AccessTokenMiddleware admits the auth token — an API token here is a purpose
      * mismatch → 403. Regression guard for the external-mode 7.x boot/journey
      * (first fleet platform to adopt this pattern; unblocked others behind it).
      *
@@ -284,7 +284,7 @@ class TenantRouteProviderSeamTest extends TestCase
      * (/me, /change-password) are access=authentication, while its pre-auth
      * routes (/login, /register, /exchange, /refresh-token) stay access=public.
      * This is the exact split an external-mode platform relies on to boot under
-     * 7.x AND route passports vs cards correctly at request time.
+     * 7.x AND route auth tokens vs API tokens correctly at request time.
      */
     public function test_external_auth_routes_type_identity_vs_public_routes(): void
     {
@@ -299,7 +299,7 @@ class TenantRouteProviderSeamTest extends TestCase
 
         $access = $this->accessByRoute($router);
 
-        // Tier-2 identity routes → authentication (passport).
+        // Tier-2 identity routes → authentication (auth token).
         $this->assertSame('authentication', $access['GET /api/auth/me'] ?? null);
         $this->assertSame('authentication', $access['POST /api/auth/change-password'] ?? null);
 

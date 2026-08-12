@@ -13,7 +13,7 @@ use StoneScriptPHP\Tenancy\NoTenantStrategy;
 /**
  * GatewayTenantMiddleware
  *
- * Propagates the card token's authorization context to the StoneScriptDB gateway
+ * Propagates the API token's authorization context to the StoneScriptDB gateway
  * so that every Database::fn() call within the request runs in the correct tenant
  * scope.
  *
@@ -37,7 +37,7 @@ use StoneScriptPHP\Tenancy\NoTenantStrategy;
  *
  * MUST run AFTER JwtAuthMiddleware in the middleware chain so that `auth()` returns
  * a populated `AuthenticatedUser`. Gateway context is set only when tenant_id is
- * present (i.e. the token is a card, not a passport).
+ * present (i.e. the token is an API token, not an auth token).
  *
  * Usage:
  *   $router->use(new JwtAuthMiddleware($jwtHandler, $excludedPaths))

@@ -36,11 +36,20 @@ class InvitationException extends \Exception
     /** Invitation row exists, `status` is not `pending` (already accepted or revoked). */
     public const ALREADY_USED = 'invite_already_used';
 
-    /** Authenticated passport's email does not match the invitation's email. */
+    /** Authenticated auth token's email does not match the invitation's email. */
     public const EMAIL_MISMATCH = 'invite_email_mismatch';
 
-    /** The Authorization: Bearer passport failed JWKS/issuer/audience validation. */
-    public const INVALID_PASSPORT = 'invite_invalid_passport';
+    /**
+     * The Authorization: Bearer auth token failed JWKS/issuer/audience validation.
+     *
+     * NOTE: the PHP constant name was renamed from INVALID_PASSPORT (Passport ->
+     * Auth token terminology), but the string VALUE is deliberately left
+     * unchanged — it is a machine-readable error code returned to API clients
+     * over the wire (see InvitationCompletionService::complete()), not a
+     * framework-internal identifier, so renaming it would be a breaking API
+     * contract change out of scope for this rename.
+     */
+    public const INVALID_AUTH_TOKEN = 'invite_invalid_passport';
 
     /** The server-to-server create-membership call to auth failed. */
     public const MEMBERSHIP_FAILED = 'invite_membership_failed';

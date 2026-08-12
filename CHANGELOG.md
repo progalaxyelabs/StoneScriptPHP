@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [8.0.0] - 2026-08-12
+
+### Changed — BREAKING: "Passport"/"Card" jargon renamed to "Auth"/"API token"
+
+The framework used "Passport" (the identity-level JWT issued by the central
+auth service) and "Card" (the platform-level JWT minted by exchanging a
+passport for tenant+role context) as internal naming throughout the auth
+layer. Renamed to plain, direct terminology across the public surface:
+
+- `HybridCardJwtHandler` -> `HybridApiTokenJwtHandler`
+- `RequireCardMiddleware` -> `RequireApiTokenMiddleware`
+- `TokenExchangeService::exchangeCard()` -> `exchangeApiToken()`
+- `TokenExchangeService::validateAndExchangeCard()` -> `validateAndExchangeApiToken()`
+- `ExchangeRoute::signCard()` -> `signApiToken()`
+- `ProvisionTenantRoute::mintProvisionCard()` -> `mintProvisionApiToken()`
+- `InvitationCompletionService::mintCard()` -> `mintApiToken()`
+- `AuthenticatedUser::isCard()` -> `isApiToken()`
+- `ProfileRoute::cardModelResponse()` -> `apiTokenModelResponse()`
+- `InvitationException::INVALID_PASSPORT` -> `INVALID_AUTH_TOKEN` (constant
+  name only — the wire-level error code string is unchanged)
+- **Config key**: `Application::run(['require_card' => [...]])` ->
+  `require_api_token`. Any platform's own `config/auth.php` setting
+  `require_card` must be updated to `require_api_token` or the middleware
+  silently stops being wired (the old key is simply unread, not an error —
+  see the migration note at `src/Application.php`'s `run()` method).
+
+Companion libraries `@progalaxyelabs/ngx-stonescriptphp-client` and
+`@progalaxyelabs/stonescriptphp-client-core` received the equivalent rename
+(`exchangeForCard()` -> `exchangeForApiToken()`, token-storage accessors
+`*IdentityAccessToken` -> `*AuthAccessToken`, etc.) as major releases of
+their own, on the same day — upgrade all three together.
+
+**Deliberately left unchanged** (wire-level contract, not internal naming):
+the JWT's own `token_type` claim still stamps the literal string `"card"`,
+and `InvitationCompletionService`'s `platformConfig['card']` config key /
+`mode: 'card'` response value are untouched — changing values that cross the
+wire is a separate, larger compatibility decision from renaming internal
+identifiers, and out of scope for this release.
+
 ### Added — pluggable DB transport mode (DB_MODE = gateway | direct | pgandroid)
 
 `src/Database.php`'s `_fn()` used to hardcode `GatewayClient::callFunction()` —

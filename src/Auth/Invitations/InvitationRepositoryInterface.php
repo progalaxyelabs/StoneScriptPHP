@@ -41,7 +41,7 @@ interface InvitationRepositoryInterface
      *
      * @param string $id Invitation row id.
      * @param string $identityId The accepting identity's id, taken from the
-     *   validated passport's `sub`/`identity_id` claim.
+     *   validated auth token's `sub`/`identity_id` claim.
      */
     public function markAccepted(string $id, string $identityId): void;
 }

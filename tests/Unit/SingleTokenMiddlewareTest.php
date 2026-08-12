@@ -21,7 +21,7 @@ use StoneScriptPHP\Routing\RouteAccess;
  * SingleTokenMiddleware — standalone + no-tenant single-token accept/reject matrix.
  *
  * Locks in the ONE deliberate difference from AccessTokenMiddleware: the
- * authn/authz `purpose` equality gate is dropped (a passport is accepted on an
+ * authn/authz `purpose` equality gate is dropped (an auth token is accepted on an
  * authorization route, and vice-versa), while EVERY other check — signature,
  * issuer, expiry, and `type == access` — is retained exactly as strict.
  *
@@ -99,7 +99,7 @@ class SingleTokenMiddlewareTest extends TestCase
     public function test_authentication_purpose_token_passes_on_authorization_route(): void
     {
         // This is EXACTLY what AccessTokenMiddleware rejects with 403 — the
-        // single-token relaxation is what makes the login-issued passport usable
+        // single-token relaxation is what makes the login-issued auth token usable
         // as the API bearer with no exchange step.
         $this->setBearer($this->mint([
             'type' => TokenClaims::TYPE_ACCESS,
@@ -108,7 +108,7 @@ class SingleTokenMiddlewareTest extends TestCase
 
         $r = $this->runMw($this->authzRoute());
 
-        $this->assertTrue($r['passed'], 'passport (authentication purpose) must pass an authorization route in single-token mode');
+        $this->assertTrue($r['passed'], 'auth token (authentication purpose) must pass an authorization route in single-token mode');
         $this->assertNull($r['response']);
     }
 

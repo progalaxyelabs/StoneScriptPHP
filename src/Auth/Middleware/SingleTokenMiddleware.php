@@ -16,11 +16,11 @@ use StoneScriptPHP\ApiResponse;
  *
  * ## Why the purpose gate is dropped here (and only here)
  *
- * The two-token model exists to SEPARATE two credentials: an identity/passport
- * token (`purpose=authentication`) proving who you are, and a card/API token
+ * The two-token model exists to SEPARATE two credentials: an identity/auth
+ * token (`purpose=authentication`) proving who you are, and an API token
  * (`purpose=authorization`) authorising a tenant-scoped request. That separation
  * is meaningful when the two are signed by DIFFERENT authorities (external auth
- * server signs the passport, the platform signs the card) and/or scoped to
+ * server signs the auth token, the platform signs the API token) and/or scoped to
  * DIFFERENT tenants.
  *
  * In the **standalone + no-tenant** cell of the auth matrix there is exactly ONE

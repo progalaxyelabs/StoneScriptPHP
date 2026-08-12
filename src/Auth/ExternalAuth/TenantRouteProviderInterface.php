@@ -14,14 +14,14 @@ use StoneScriptPHP\Routing\Router;
  * tenant slug lookup, tenant memberships) rather than pure identity (login,
  * logout, password reset, profile). `ExternalAuthRoutes` no longer hard-`use`
  * -imports these route classes directly — it delegates both registration AND
- * the RequireCardMiddleware exemption-path computation to a single provider
+ * the RequireApiTokenMiddleware exemption-path computation to a single provider
  * implementing this interface.
  *
  * ## Why registration and exemption-path computation live together
  *
- * `RequireCardMiddleware`'s tenant-agnostic exemption list is derived from
+ * `RequireApiTokenMiddleware`'s tenant-agnostic exemption list is derived from
  * `ExternalAuthRoutes::protectedPaths()` (see that method's docblock and the
- * 2026-07-05 fleet incident it fixes: a bare `RequireCardMiddleware` 403s any
+ * 2026-07-05 fleet incident it fixes: a bare `RequireApiTokenMiddleware` 403s any
  * authenticated-but-tenant-less request, including these tier-2 routes, unless
  * they're explicitly exempted). If route REGISTRATION and exemption-list
  * COMPUTATION ever live in different places, they can silently drift apart —
@@ -58,7 +58,7 @@ interface TenantRouteProviderInterface
      * @param ExternalAuthConfig $config
      * @param mixed $provisioner Tenant provisioner (for provision-tenant), or null.
      * @param callable|null $rolesResolver fn(array $claimsWithTenant): string[]
-     * @param callable|null $tenantsResolver fn(array $passportClaims): array[]
+     * @param callable|null $tenantsResolver fn(array $authClaims): array[]
      */
     public function register(
         Router $router,
@@ -82,7 +82,7 @@ interface TenantRouteProviderInterface
      * Protected (tier-2, identity-required-but-tenant-agnostic) path strings
      * this provider registers under $prefix — merged into
      * `ExternalAuthRoutes::protectedPaths()`, the single source of truth for
-     * `RequireCardMiddleware`'s exemption list. MUST stay in sync with
+     * `RequireApiTokenMiddleware`'s exemption list. MUST stay in sync with
      * `register()` — see class docblock.
      *
      * @return string[]

@@ -21,7 +21,7 @@ use StoneScriptPHP\Auth\TokenExchangeService;
  * JWKS fetch, ExternalAuthServiceClient::createMembershipForInvite()'s
  * outbound call to auth) via PHPUnit's createMock() on both concrete
  * classes — neither call ever hits a real network in these tests.
- * Card-minting (exchangeCard()) IS exercised for real, with a throwaway
+ * API-token minting (exchangeApiToken()) IS exercised for real, with a throwaway
  * RSA keypair generated per test (mirrors RsaJwtHandlerTypedClaimsTest's
  * own pattern), since that path is pure local crypto, not an HTTP call.
  *
@@ -66,7 +66,7 @@ class InvitationCompletionServiceTest extends TestCase
         );
     }
 
-    private function passportClaims(array $overrides = []): array
+    private function authClaims(array $overrides = []): array
     {
         return array_merge([
             'sub'   => 'identity-123',
@@ -88,7 +88,7 @@ class InvitationCompletionServiceTest extends TestCase
         $repository->expects($this->once())->method('markAccepted')->with('inv-1', 'identity-123');
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
-        $tokenExchange->method('validateIdentityToken')->willReturn($this->passportClaims());
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims());
 
         $authClient = $this->createMock(ExternalAuthServiceClient::class);
         $authClient->expects($this->once())
@@ -127,7 +127,7 @@ class InvitationCompletionServiceTest extends TestCase
 
         $result = $service->complete(
             'raw-token',
-            'passport-token',
+            'auth-token',
             $repository,
             fn(InvitationRecord $inv) => $inv->role,
             fn(InvitationRecord $inv, array $claims, string $role) => ['tenant_id' => 'tenant-1'],
@@ -142,19 +142,19 @@ class InvitationCompletionServiceTest extends TestCase
         $this->assertSame('mem-1', $result['membership']['id']);
     }
 
-    public function test_complete_mints_a_local_card_for_t2_platform(): void
+    public function test_complete_mints_a_local_api_token_for_t2_platform(): void
     {
         $repository = $this->createMock(InvitationRepositoryInterface::class);
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
 
         // Partial mock: only validateIdentityToken() (the HTTP/JWKS boundary)
-        // is stubbed — exchangeCard() runs FOR REAL below, since it's pure
+        // is stubbed — exchangeApiToken() runs FOR REAL below, since it's pure
         // local RSA signing, not a network call, and is exactly the
         // behavior this test wants to prove actually works.
         $tokenExchangeMock = $this->getMockBuilder(TokenExchangeService::class)
             ->onlyMethods(['validateIdentityToken'])
             ->getMock();
-        $tokenExchangeMock->method('validateIdentityToken')->willReturn($this->passportClaims());
+        $tokenExchangeMock->method('validateIdentityToken')->willReturn($this->authClaims());
 
         $authClient = $this->createMock(ExternalAuthServiceClient::class);
         $authClient->method('createMembershipForInvite')->willReturn(['membership_id' => 'mem-1']);
@@ -163,7 +163,7 @@ class InvitationCompletionServiceTest extends TestCase
 
         $result = $service->complete(
             'raw-token',
-            'passport-token',
+            'auth-token',
             $repository,
             fn(InvitationRecord $inv) => $inv->role,
             fn(InvitationRecord $inv, array $claims, string $role) => ['tenant_id' => 'tenant-1'],
@@ -184,13 +184,13 @@ class InvitationCompletionServiceTest extends TestCase
         $this->assertSame('Bearer', $result['token_type']);
     }
 
-    public function test_complete_falls_back_to_auth_returned_token_when_card_signing_not_configured(): void
+    public function test_complete_falls_back_to_auth_returned_token_when_api_token_signing_not_configured(): void
     {
         $repository = $this->createMock(InvitationRepositoryInterface::class);
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
-        $tokenExchange->method('validateIdentityToken')->willReturn($this->passportClaims());
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims());
 
         $authClient = $this->createMock(ExternalAuthServiceClient::class);
         $authClient->method('createMembershipForInvite')->willReturn(['access_token' => 'fallback-token']);
@@ -199,7 +199,7 @@ class InvitationCompletionServiceTest extends TestCase
 
         $result = $service->complete(
             'raw-token',
-            'passport-token',
+            'auth-token',
             $repository,
             fn(InvitationRecord $inv) => $inv->role,
             fn(InvitationRecord $inv, array $claims, string $role) => ['tenant_id' => 'tenant-1'],
@@ -224,7 +224,7 @@ class InvitationCompletionServiceTest extends TestCase
         );
 
         try {
-            $service->complete('bad-token', 'passport', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('bad-token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::NOT_FOUND, $e->getErrorCode());
@@ -243,7 +243,7 @@ class InvitationCompletionServiceTest extends TestCase
         );
 
         try {
-            $service->complete('token', 'passport', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::ALREADY_USED, $e->getErrorCode());
@@ -264,7 +264,7 @@ class InvitationCompletionServiceTest extends TestCase
         );
 
         try {
-            $service->complete('token', 'passport', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::EXPIRED, $e->getErrorCode());
@@ -272,7 +272,7 @@ class InvitationCompletionServiceTest extends TestCase
         }
     }
 
-    public function test_complete_throws_invalid_passport_when_jwks_validation_fails(): void
+    public function test_complete_throws_invalid_auth_token_when_jwks_validation_fails(): void
     {
         $repository = $this->createMock(InvitationRepositoryInterface::class);
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
@@ -284,10 +284,10 @@ class InvitationCompletionServiceTest extends TestCase
         $service = new InvitationCompletionService($tokenExchange, $this->createMock(ExternalAuthServiceClient::class));
 
         try {
-            $service->complete('token', 'bad-passport', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'bad-auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
-            $this->assertSame(InvitationException::INVALID_PASSPORT, $e->getErrorCode());
+            $this->assertSame(InvitationException::INVALID_AUTH_TOKEN, $e->getErrorCode());
             $this->assertSame(401, $e->getHttpStatusCode());
         }
     }
@@ -297,18 +297,18 @@ class InvitationCompletionServiceTest extends TestCase
      * under auth's old atomic accept; it's an emergent consequence of
      * decoupling identity creation from invitation acceptance.
      */
-    public function test_complete_throws_email_mismatch_when_passport_email_differs(): void
+    public function test_complete_throws_email_mismatch_when_auth_token_email_differs(): void
     {
         $repository = $this->createMock(InvitationRepositoryInterface::class);
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation(['email' => 'invited@example.com']));
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
-        $tokenExchange->method('validateIdentityToken')->willReturn($this->passportClaims(['email' => 'someone-else@example.com']));
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims(['email' => 'someone-else@example.com']));
 
         $service = new InvitationCompletionService($tokenExchange, $this->createMock(ExternalAuthServiceClient::class));
 
         try {
-            $service->complete('token', 'passport', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::EMAIL_MISMATCH, $e->getErrorCode());
@@ -322,7 +322,7 @@ class InvitationCompletionServiceTest extends TestCase
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation(['email' => 'Invitee@Example.com']));
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
-        $tokenExchange->method('validateIdentityToken')->willReturn($this->passportClaims(['email' => 'invitee@example.com']));
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims(['email' => 'invitee@example.com']));
 
         $authClient = $this->createMock(ExternalAuthServiceClient::class);
         $authClient->method('createMembershipForInvite')->willReturn(['access_token' => 'tok']);
@@ -331,7 +331,7 @@ class InvitationCompletionServiceTest extends TestCase
 
         $result = $service->complete(
             'token',
-            'passport',
+            'auth-token',
             $repository,
             fn($i) => $i->role,
             fn($i, $c, $r) => ['tenant_id' => 't'],
@@ -348,12 +348,12 @@ class InvitationCompletionServiceTest extends TestCase
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
-        $tokenExchange->method('validateIdentityToken')->willReturn($this->passportClaims());
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims());
 
         $service = new InvitationCompletionService($tokenExchange, $this->createMock(ExternalAuthServiceClient::class));
 
         try {
-            $service->complete('token', 'passport', $repository, fn($i) => $i->role, fn($i, $c, $r) => [], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => [], $this->authConfig(), ['platform_secret' => 's']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::CONFIG_ERROR, $e->getErrorCode());
@@ -366,12 +366,12 @@ class InvitationCompletionServiceTest extends TestCase
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
-        $tokenExchange->method('validateIdentityToken')->willReturn($this->passportClaims());
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims());
 
         $service = new InvitationCompletionService($tokenExchange, $this->createMock(ExternalAuthServiceClient::class));
 
         try {
-            $service->complete('token', 'passport', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => null]);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => null]);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::CONFIG_ERROR, $e->getErrorCode());
@@ -400,7 +400,7 @@ class InvitationCompletionServiceTest extends TestCase
         $repository->expects($this->never())->method('markAccepted');
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
-        $tokenExchange->method('validateIdentityToken')->willReturn($this->passportClaims());
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims());
 
         $authClient = $this->createMock(ExternalAuthServiceClient::class);
         $authClient->method('createMembershipForInvite')->willThrowException(new \RuntimeException('auth unreachable'));
@@ -408,7 +408,7 @@ class InvitationCompletionServiceTest extends TestCase
         $service = new InvitationCompletionService($tokenExchange, $authClient);
 
         try {
-            $service->complete('token', 'passport', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::MEMBERSHIP_FAILED, $e->getErrorCode());

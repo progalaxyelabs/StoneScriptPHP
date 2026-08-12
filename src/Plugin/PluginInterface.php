@@ -42,7 +42,7 @@ use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
  * ## Precedence
  *
  * - Plugin middleware is appended AFTER the platform's own `config['middleware']`
- *   and BEFORE `require_card`/`tenant_url_match` enforcement — a plugin cannot
+ *   and BEFORE `require_api_token`/`tenant_url_match` enforcement — a plugin cannot
  *   silently skip a platform's own middleware ordering guarantees.
  * - Plugin routes are merged UNDER the platform's own `routes.php` entries: if a
  *   platform defines the same METHOD+path as a plugin, the platform's own route

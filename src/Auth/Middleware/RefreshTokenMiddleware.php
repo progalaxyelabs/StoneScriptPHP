@@ -17,7 +17,7 @@ use StoneScriptPHP\Auth\TrustedIssuerVerifier;
  * Separate-by-type (owner preference): this class handles ONLY `token_type=refresh`
  * routes; {@see AccessTokenMiddleware} handles access routes. `purpose` is a
  * PARAMETER on this class (authentication for identity-refresh/logout, authorization
- * for card-refresh) — NOT a third middleware class. Split by TYPE only.
+ * for API-token-refresh) — NOT a third middleware class. Split by TYPE only.
  *
  * For a route whose `token_type` is `refresh`, it:
  *   1. reads `refresh_token` from the request body (not the Authorization header),
