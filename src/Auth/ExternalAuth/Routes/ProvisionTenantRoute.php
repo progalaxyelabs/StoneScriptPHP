@@ -25,12 +25,20 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  *      router edge before process() ever runs.
  *   3. Existing-tenant guard (AUTH-SPEC §5a/S9, 2026-08-12): unless
  *      allow_additional_tenant=true, check whether this identity already has
- *      a membership on this platform (findExistingTenantId()) — if so, REPLAY
- *      that tenant instead of generating a new uuid and provisioning a new
- *      (orphaned, on a retry) database. Fixes a real bug: this used to run
- *      unconditionally, so a double-click/network retry physically
- *      provisioned a new, orphaned tenant database every time, even though
- *      step 5's idempotency_key handling correctly deduped the MEMBERSHIP.
+ *      a membership on this platform (findExistingMembership()). If found AND
+ *      its tenant_name matches (case/whitespace-insensitive) the name on THIS
+ *      request, REPLAY that tenant (200) instead of generating a new uuid and
+ *      provisioning a new (orphaned, on a retry) database — fixes a real bug:
+ *      this used to run unconditionally, so a double-click/network retry
+ *      physically provisioned a new, orphaned tenant database every time,
+ *      even though step 5's idempotency_key handling correctly deduped the
+ *      MEMBERSHIP. If found but the name DIFFERS, this is not a retry of the
+ *      same request — it looks like a genuine attempt to register a second,
+ *      differently-named tenant. Silently replaying the existing one would
+ *      log the identity into a store they didn't ask for with no indication
+ *      their actual request was never created, so this returns 409
+ *      `tenant_already_exists` instead (the same error code downstream
+ *      platforms already converged on independently).
  *   4. Generate tenant_id (or reuse the existing one from step 3), slug, db_schema.
  *   5. AUTH-SPEC §3d: if oauth_state is present (and this is NOT a replay),
  *      call ExternalAuthServiceClient::promoteOAuthConnection() to commit the
@@ -56,7 +64,7 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  * subclass via `ExternalAuthConfig`'s `provision_tenant_route_class` option
  * (see that property's docblock) — the constructor stays a normal 3+1-arg
  * DI constructor (for testability, same as every other ExternalAuth route),
- * and mintProvisionApiToken()/slugify()/generateUuid()/findExistingTenantId()
+ * and mintProvisionApiToken()/slugify()/generateUuid()/findExistingMembership()
  * are protected, not private, specifically so a subclass can override just
  * the piece it needs instead of reimplementing this whole class.
  *
@@ -188,11 +196,40 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // to avoid the orphaned-DB waste, not the dedup authority — auth's
         // createMembership() (idempotency_key-keyed) remains the real
         // correctness guarantee against duplicate MEMBERSHIPS either way.
-        $existingTenantId = null;
+        //
+        // Name comparison (2026-08-12): MembershipObject.tenant_name is
+        // already present on every row getMemberships() returns (AUTH-SPEC —
+        // no extra lookup needed). A genuine double-click/retry resubmits the
+        // exact same form state, so an existing membership whose tenant_name
+        // matches THIS request's tenant_name (normalized: trim + casefold, to
+        // tolerate trivial whitespace/case drift between two rapid-fire
+        // submits rather than risk a false 409 on a real retry) is treated as
+        // that same retry and replayed. A existing membership with a
+        // DIFFERENT name is not a retry — see the class docblock's step 3 for
+        // why that returns 409 instead of a silent, surprising replay.
+        $existingMembership = null;
         if (!$this->allow_additional_tenant) {
-            $existingTenantId = $this->findExistingTenantId();
+            $existingMembership = $this->findExistingMembership();
         }
 
+        if ($existingMembership !== null) {
+            $sameName = mb_strtolower(trim($existingMembership['tenant_name'])) === mb_strtolower(trim($resolvedName));
+            if (!$sameName) {
+                log_warning(
+                    "ProvisionTenantRoute: identity={$identityId} already has tenant=" .
+                    "{$existingMembership['tenant_id']} ({$existingMembership['tenant_name']}) — " .
+                    "denying request for a differently-named tenant ({$resolvedName})"
+                );
+                return new ApiResponse(
+                    'error',
+                    'Tenant already exists',
+                    ['error' => 'tenant_already_exists'],
+                    409
+                );
+            }
+        }
+
+        $existingTenantId = $existingMembership['tenant_id'] ?? null;
         $isReplay = $existingTenantId !== null;
 
         // 2. Resolve tenant identifiers — a genuinely NEW uuid, or the
@@ -377,18 +414,25 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      * Best-effort check: does this identity already have ANY membership for
      * this platform? Used by the existing-tenant guard in process() (see its
      * comment for the real, confirmed bug this fixes — orphaned tenant
-     * databases from unconditional provisioning on retry). Returns the first
-     * membership's tenant_id, or null if none found, no Bearer token is
-     * present, or the lookup itself failed — every null case is treated as
-     * fail-open by process() (proceed to provision), never fail-closed, since
-     * this guard is a best-effort optimization, not the dedup authority
-     * (createMembership()'s idempotency_key handling is).
+     * databases from unconditional provisioning on retry, and for the
+     * same-name-replay-vs-different-name-409 distinction added 2026-08-12).
+     *
+     * Returns `['tenant_id' => string, 'tenant_name' => string]` for the
+     * first membership found (both fields are always present on
+     * MembershipObject per AUTH-SPEC — no extra lookup needed for the name),
+     * or null if none found, no Bearer token is present, or the lookup
+     * itself failed — every null case is treated as fail-open by process()
+     * (proceed to provision), never fail-closed, since this guard is a
+     * best-effort optimization, not the dedup authority (createMembership()'s
+     * idempotency_key handling is).
      *
      * Protected — override seam for a platform wanting different
      * existing-tenant resolution (e.g. filtering by membership status, or by
      * a specific tenant_id rather than "the first one found").
+     *
+     * @return array{tenant_id: string, tenant_name: string}|null
      */
-    protected function findExistingTenantId(): ?string
+    protected function findExistingMembership(): ?array
     {
         $rawToken = $this->getBearerToken();
         if ($rawToken === null) {
@@ -402,8 +446,16 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             return null;
         }
 
-        $tenantId = $response['memberships'][0]['tenant_id'] ?? null;
-        return ($tenantId !== null && $tenantId !== '') ? (string) $tenantId : null;
+        $membership = $response['memberships'][0] ?? null;
+        $tenantId = $membership['tenant_id'] ?? null;
+        if ($tenantId === null || $tenantId === '') {
+            return null;
+        }
+
+        return [
+            'tenant_id'   => (string) $tenantId,
+            'tenant_name' => (string) ($membership['tenant_name'] ?? ''),
+        ];
     }
 
     /**

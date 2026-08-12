@@ -150,11 +150,13 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
 
     // ── #2 existing-tenant guard ────────────────────────────────────────
 
-    public function test_existing_tenant_replays_without_calling_provisioner(): void
+    public function test_existing_tenant_same_name_replays_without_calling_provisioner(): void
     {
         $this->authenticatedUser();
         $client = new FakeExternalAuthServiceClient();
-        $client->membershipsResponse = ['memberships' => [['tenant_id' => 'existing-tenant-99', 'status' => 'active']]];
+        $client->membershipsResponse = ['memberships' => [
+            ['tenant_id' => 'existing-tenant-99', 'tenant_name' => 'Acme Store', 'status' => 'active'],
+        ]];
         $provisioner = new SpyTenantProvisioner();
         $route = $this->route($client, $provisioner);
         $route->tenant_name = 'Acme Store';
@@ -165,6 +167,57 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         $this->assertSame('ok', $res->status);
         $this->assertFalse($provisioner->provisionCalled, 'provisioner->provision() must NOT run on an existing-tenant replay');
         $this->assertSame('existing-tenant-99', $client->lastCreateMembershipData['tenant_id'] ?? null);
+    }
+
+    /**
+     * Name comparison is normalized (trim + casefold) — a genuine retry can
+     * have trivial whitespace/case drift between two rapid-fire submits and
+     * must still replay, not false-409.
+     */
+    public function test_existing_tenant_name_matches_case_and_whitespace_insensitively(): void
+    {
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $client->membershipsResponse = ['memberships' => [
+            ['tenant_id' => 'existing-tenant-99', 'tenant_name' => '  Acme Store  ', 'status' => 'active'],
+        ]];
+        $provisioner = new SpyTenantProvisioner();
+        $route = $this->route($client, $provisioner);
+        $route->tenant_name = 'ACME STORE';
+        $route->idempotency_key = 'idem-1';
+
+        $res = $route->process();
+
+        $this->assertSame('ok', $res->status);
+        $this->assertFalse($provisioner->provisionCalled);
+    }
+
+    /**
+     * Different name = not a retry — a genuine attempt to register a second,
+     * differently-named tenant. Silently replaying the existing one would log
+     * the identity into a store they didn't ask for with no indication their
+     * real request was never created — so this returns 409, matching the
+     * tenant_already_exists error code downstream platforms already use.
+     */
+    public function test_existing_tenant_different_name_returns_409_and_does_not_provision(): void
+    {
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $client->membershipsResponse = ['memberships' => [
+            ['tenant_id' => 'existing-tenant-99', 'tenant_name' => 'ABC Medicals', 'status' => 'active'],
+        ]];
+        $provisioner = new SpyTenantProvisioner();
+        $route = $this->route($client, $provisioner);
+        $route->tenant_name = 'XYZ Pharmacy';
+        $route->idempotency_key = 'idem-1';
+
+        $res = $route->process();
+
+        $this->assertSame('error', $res->status);
+        $this->assertSame(409, $res->httpStatusCode);
+        $this->assertSame('tenant_already_exists', $res->data['error'] ?? null);
+        $this->assertFalse($provisioner->provisionCalled, 'must not provision AND must not silently replay a differently-named existing tenant');
+        $this->assertNull($client->lastCreateMembershipData, 'must not call createMembership() at all on the 409 path');
     }
 
     public function test_no_existing_tenant_runs_provisioner_normally(): void
@@ -257,15 +310,21 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
     {
         $this->authenticatedUser();
         $client = new FakeExternalAuthServiceClient();
-        $client->membershipsResponse = ['memberships' => [['tenant_id' => 'existing-tenant-99', 'status' => 'active']]];
+        // tenant_name MUST match the request below — otherwise this hits the
+        // 409-different-name path instead of a genuine replay, which would
+        // also never call promote but for the wrong reason (false-green risk).
+        $client->membershipsResponse = ['memberships' => [
+            ['tenant_id' => 'existing-tenant-99', 'tenant_name' => 'Acme Store', 'status' => 'active'],
+        ]];
         $provisioner = new SpyTenantProvisioner();
         $route = $this->route($client, $provisioner);
         $route->tenant_name = 'Acme Store';
         $route->idempotency_key = 'idem-1';
         $route->oauth_state = 'oauth-state-token-abc';
 
-        $route->process();
+        $res = $route->process();
 
+        $this->assertSame('ok', $res->status, 'must be a genuine replay, not the 409-different-name path');
         $this->assertNull($client->lastPromoteOauthState, 'a replay already has its OAuth connection promoted from the original call');
     }
 

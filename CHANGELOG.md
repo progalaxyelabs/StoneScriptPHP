@@ -33,10 +33,21 @@ brand-new, orphaned tenant database every time, even though the auth-layer
 `idempotency_key` handling correctly deduplicated the resulting membership
 row. Two independent downstream platforms hit this in production and each
 built their own guard around it. This release generalizes that pattern into
-the framework: before provisioning, the route now checks whether the calling
-identity already has a membership on this platform
-(`findExistingTenantId()`), and if so, replays that existing tenant instead
-of creating a new one.
+the framework via `findExistingMembership()`: before provisioning, the route
+checks whether the calling identity already has a membership on this
+platform, and — critically — compares that membership's `tenant_name`
+against the name on the current request (normalized: trim + casefold):
+
+- **Same name** → treated as a genuine retry of the same request. Replays
+  the existing tenant (200) instead of creating a new one.
+- **Different name** → NOT treated as a retry. Returns 409
+  `tenant_already_exists` instead of silently replaying — an identity that
+  already owns "ABC Medicals" and submits "XYZ Pharmacy" is not retrying
+  anything; silently logging them into ABC Medicals with no indication XYZ
+  Pharmacy was never created would be worse than an explicit error. This
+  error code was independently converged on by the downstream platforms
+  that built their own guards, so the framework adopts it rather than
+  inventing a new one.
 
 **This changes default behavior** for any platform whose provisioning flow
 relies on always creating a brand-new tenant regardless of existing
