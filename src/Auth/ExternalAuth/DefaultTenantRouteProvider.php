@@ -79,12 +79,20 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         }
 
         if ($config->isEnabled('provision_tenant')) {
+            // $config->provisionTenantRouteClass defaults to ProvisionTenantRoute::class —
+            // see that property's docblock (ExternalAuthConfig.php) for why a
+            // platform-specific subclass is substituted HERE, at the one place that
+            // already has real $client/$hooks/$config/$provisioner in scope, rather
+            // than via routes.php (chronologically impossible — routes.php evaluates
+            // before this method ever runs).
+            $routeClass = $config->provisionTenantRouteClass;
             $router->post(
                 "$prefix/provision-tenant",
-                new ProvisionTenantRoute($client, $config->hooks, $config, $provisioner),
+                new $routeClass($client, $config->hooks, $config, $provisioner),
                 access: RouteAccess::AUTHENTICATION
             );
-            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/provision-tenant (protected, authentication)");
+            log_debug("DefaultTenantRouteProvider: Registered POST $prefix/provision-tenant "
+                . ($routeClass === ProvisionTenantRoute::class ? '(protected, authentication)' : "(protected, authentication, class=$routeClass)"));
         }
 
         // invite-member REMOVED 2026-07-21 — see class docblock.

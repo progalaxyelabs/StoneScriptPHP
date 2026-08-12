@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Auth\ExternalAuth;
 
+use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
+
 /**
  * ExternalAuth Configuration
  *
@@ -101,6 +103,47 @@ class ExternalAuthConfig
      * TenantRouteProviderInterface's docblock).
      */
     public readonly TenantRouteProviderInterface $tenantRouteProvider;
+
+    /**
+     * @var class-string<ProvisionTenantRoute> Which class DefaultTenantRouteProvider
+     * constructs for POST {prefix}/provision-tenant. Defaults to the framework's
+     * own ProvisionTenantRoute — set unchanged, every platform gets identical
+     * behavior to before this option existed.
+     *
+     * A platform-specific subclass (e.g. `class AcmeProvisionTenantRoute extends
+     * ProvisionTenantRoute { protected function slugify(...) {...} }`) can be
+     * substituted by passing its class name (a plain string — deliberately NOT
+     * an object instance or a closure) as `provision_tenant_route_class` in the
+     * options array passed to `ExternalAuthRoutes::register()`.
+     *
+     * Why a class-name override here, rather than a platform extending
+     * ProvisionTenantRoute and registering the subclass directly in its own
+     * routes.php (`'handler' => AcmeProvisionTenantRoute::class`): that path
+     * goes through Router::executeHandler()'s bare `new $handlerClass()` (zero
+     * args) for any class-string handler — but ProvisionTenantRoute's
+     * constructor deliberately REQUIRES $client/$hooks/$config/$provisioner
+     * (constructor injection, kept exactly as-is here, for testability — every
+     * ExternalAuth route is built the same way and tests construct them
+     * directly with fakes). A subclass registered that way would fatal with
+     * ArgumentCountError. It is also chronologically impossible to work around
+     * from routes.php itself: `'routes' => require CONFIG_PATH . 'routes.php'`
+     * is a function ARGUMENT to `Application::run()`, evaluated before that
+     * call's body runs — but `ExternalAuthRoutes::register()` (which is what
+     * builds $client/$config/$provisioner) is called FROM INSIDE
+     * `Application::run()`. routes.php runs first; the objects it would need
+     * don't exist yet.
+     *
+     * This option instead lets DefaultTenantRouteProvider::register() — which
+     * DOES already have real $client/$hooks/$config/$provisioner in scope at
+     * the exact point it constructs the route — build the PLATFORM's class
+     * instead of the framework's default, using the identical, already-proven
+     * pattern StoneScriptPHP\Auth\AuthRoutes::register() uses for RefreshRoute
+     * (`new RefreshRoute($jwtHandler)` built inline, at registration time, by
+     * the framework's own code — never routes.php). No router changes, no
+     * global registry, no closures: ordinary constructor injection, at the one
+     * place that already has the arguments on hand.
+     */
+    public readonly string $provisionTenantRouteClass;
 
     /** @var array<string, callable|null> Lifecycle hooks */
     public readonly array $hooks;
@@ -204,6 +247,28 @@ class ExternalAuthConfig
         $this->tenantRouteProvider = $providedTenantRouteProvider instanceof TenantRouteProviderInterface
             ? $providedTenantRouteProvider
             : new DefaultTenantRouteProvider();
+
+        // provision_tenant_route_class — see the property's own docblock for
+        // the full "why". A plain class-name STRING (scalar), not an object or
+        // closure. Validated at boot (fail loud, same discipline as the
+        // required-secret checks elsewhere in this constructor) rather than
+        // deferred to the first provision-tenant request.
+        $providedProvisionTenantRouteClass = $options['provision_tenant_route_class'] ?? ProvisionTenantRoute::class;
+        if (!is_string($providedProvisionTenantRouteClass)) {
+            throw new \InvalidArgumentException(
+                'provision_tenant_route_class must be a class name string (e.g. ' .
+                'AcmeProvisionTenantRoute::class), got ' . get_debug_type($providedProvisionTenantRouteClass) . '. ' .
+                'Pass a class name, not an object instance or a closure.'
+            );
+        }
+        if (!is_a($providedProvisionTenantRouteClass, ProvisionTenantRoute::class, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "provision_tenant_route_class '%s' must be %s or a subclass of it.",
+                $providedProvisionTenantRouteClass,
+                ProvisionTenantRoute::class
+            ));
+        }
+        $this->provisionTenantRouteClass = $providedProvisionTenantRouteClass;
 
         // Hooks
         $this->hooks = [
