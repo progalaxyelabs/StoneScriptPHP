@@ -23,8 +23,8 @@ infra-tagged route made it newly INCLUDED in that guard's route set — and an
 identity-scoped route structurally cannot carry a `/{service}/tenant/{id}`
 URL prefix (there's no tenant yet, that's the entire point of a route like
 provision-tenant), so the guard flagged it as a false positive and aborted
-generation entirely for that service. Found live on medstoreapp (a T3
-platform) regenerating its client after the 9.1.0/9.2.0 upgrade.
+generation entirely for that service. Found live on a downstream T3 platform
+regenerating its client after the 9.1.0/9.2.0 upgrade.
 
 `routeIsTenantUrlExempt()` (`access: authentication|public`) is now the
 single shared predicate both the guard and the URL-template builder key off:

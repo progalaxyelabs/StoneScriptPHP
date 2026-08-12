@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
  *
  * Root cause: v9.1.0 (ClientGeneratorAccessAwareTokenTest) made
  * access:authentication/public routes includable in an otherwise-excluded
- * service (real fleet convention: identity-scoped tier-2 routes like
+ * service (a common convention: identity-scoped tier-2 routes like
  * provision-tenant land under service:'infra' purely because they don't
  * belong to a specific business service — see exclusionReason()). But that
  * feature's own test suite generated exclusively with --tenancy=T2, so it
@@ -20,11 +20,12 @@ use PHPUnit\Framework\TestCase;
  * (the v4.7 guard that hard-aborts generation if a T3-tenant-scoped route is
  * missing its /{service}/tenant/{tenantId} URL prefix — see that function's
  * docblock for the production incident it prevents). On a real T3 platform
- * (medstoreapp: /portal/tenant/{tenantId}/... business routes), declaring
- * access:authentication on an infra-tagged route made it newly INCLUDED in
- * that guard's route set — and an identity-scoped route structurally cannot
- * carry a tenant URL prefix (there's no tenant yet), so the guard flagged it
- * as a false positive and aborted generation entirely for that service.
+ * (a downstream production platform with /portal/tenant/{tenantId}/...
+ * business routes), declaring access:authentication on an infra-tagged route
+ * made it newly INCLUDED in that guard's route set — and an identity-scoped
+ * route structurally cannot carry a tenant URL prefix (there's no tenant
+ * yet), so the guard flagged it as a false positive and aborted generation
+ * entirely for that service.
  *
  * Fix: routeIsTenantUrlExempt() (access: authentication|public) is now the
  * shared predicate BOTH the guard and the URL-template builder key off —

@@ -459,7 +459,7 @@ function routeIsTenantUrlExempt(array $route): bool
  * treated every route in the service uniformly, which made a T3 platform's
  * `php stone generate client` hard-abort the moment it declared
  * `access: authentication` on an infra-tagged route — exactly the
- * medstoreapp/provision-tenant case that surfaced this.
+ * downstream-platform/provision-tenant case that surfaced this.
  *
  * @param array<int,array<string,mixed>> $routes All routes for one T3-tenant-scoped service.
  * @param string $serviceName e.g. 'portal'
