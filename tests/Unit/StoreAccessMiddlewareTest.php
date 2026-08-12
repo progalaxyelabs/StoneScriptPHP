@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use StoneScriptPHP\Auth\AuthContext;
+use StoneScriptPHP\Auth\AuthenticatedUser;
+use StoneScriptPHP\Database;
+use StoneScriptPHP\Env;
 use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
 use StoneScriptPHP\ApiResponse;
 
@@ -19,8 +23,11 @@ use StoneScriptPHP\ApiResponse;
  * tenant-scoped.
  *
  * The membership-check happy path makes an HTTP call to the auth service, so it
- * is covered by integration/E2E, not here. These cases all return before any
- * network call.
+ * is covered by integration/E2E for the general case — these first four cases
+ * all return before any network call. The DB_MODE-guard tests further down
+ * (StoreAccessMiddlewareDbModeTest) DO reach the post-membership-check
+ * setTenantId() call site, using a test subclass that stubs fetchMemberships()
+ * instead of calling the auth service for real.
  */
 class StoreAccessMiddlewareTest extends TestCase
 {

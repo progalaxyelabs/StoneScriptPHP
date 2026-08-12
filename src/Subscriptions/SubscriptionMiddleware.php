@@ -70,6 +70,19 @@ class SubscriptionMiddleware implements MiddlewareInterface
             return $next($request);
         }
 
+        // DB_MODE=direct/pgandroid: subscription billing is a gateway-mode-only
+        // concept (checkSubscription() calls Database::getGatewayClient(), which
+        // throws outside gateway mode — already fails safely OPEN via the
+        // catch below, but paying for a guaranteed-fail call + exception on
+        // every single authenticated request is wasteful, and semantically a
+        // non-gateway deployment has no SaaS billing relationship to check
+        // against in the first place. Found 2026-08-01 by the android-server
+        // manual-build-v2 pass — same root cause as GatewayTenantMiddleware's
+        // fix (see Database::isGatewayMode()'s docblock).
+        if (!Database::isGatewayMode()) {
+            return $next($request);
+        }
+
         $result = $this->checkSubscription((string) $user->tenant_id);
 
         if ($result === null) {

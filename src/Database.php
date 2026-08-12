@@ -210,6 +210,37 @@ class Database
     }
 
     /**
+     * True when the active transport is the real gateway transport
+     * (DB_MODE=gateway) and Database::fake() is not active. Lets
+     * tenant-routing middleware (GatewayTenantMiddleware, StoreAccessMiddleware)
+     * skip gateway-specific operations (setTenantId(), provisioning) on
+     * DB_MODE=direct/pgandroid, where "route this request to a different
+     * physical tenant database" has no equivalent — those transports talk to
+     * exactly one database already (see getGatewayClient()'s docblock for
+     * the same reasoning). Added 2026-08-01: found by the android-server
+     * manual-build-v2 pass — the FIRST real API-token-authenticated request ever
+     * driven through DB_MODE=pgandroid's full middleware pipeline hit
+     * GatewayTenantMiddleware unconditionally calling getGatewayClient()
+     * and throwing, because that middleware had no way to ask "should I
+     * even try." DB_MODE=pgandroid was landed and unit-tested at the
+     * Database::fn()/PgandroidTransport layer only — this is the first
+     * proof it reached a full Application::run() request lifecycle with a
+     * real, non-public route, which is exactly where a gateway-only
+     * assumption elsewhere in the framework was always going to surface.
+     *
+     * @return bool
+     */
+    public static function isGatewayMode(): bool
+    {
+        if (self::$fakeResponses !== null) {
+            return false;
+        }
+
+        $instance = self::get_instance();
+        return $instance->getTransport() instanceof GatewayTransport;
+    }
+
+    /**
      * Enter fake mode: subsequent Database::fn() calls resolve from this
      * registry instead of calling a real gateway. Calls merge with any
      * previously registered responses (re-registering the same function

@@ -138,8 +138,22 @@ class StoreAccessMiddleware implements MiddlewareInterface
             return new ApiResponse('error', 'store_access_denied', ['error' => 'store_access_denied'], 403);
         }
 
-        // Grant access: set tenant context for all downstream GatewayClient calls
-        Database::getGatewayClient()->setTenantId($tenantId);
+        // Grant access: set tenant context for all downstream GatewayClient calls —
+        // but only when the active transport IS the gateway. DB_MODE=direct/pgandroid
+        // have no "physical tenant database" concept to route to (see
+        // Database::isGatewayMode()'s docblock, which already names this class as a
+        // beneficiary — this call site is what makes that true). Same fix and same
+        // 2026-08-01 android-server root cause as GatewayTenantMiddleware /
+        // SubscriptionMiddleware: this line was unconditional, so a successful
+        // membership check under a non-gateway transport still 500'd right here.
+        if (Database::isGatewayMode()) {
+            Database::getGatewayClient()->setTenantId($tenantId);
+        } else {
+            log_debug('StoreAccessMiddleware: tenant_id=' . $tenantId
+                . ' present but transport is not gateway-mode — skipping setTenantId() '
+                . '(no gateway-specific tenant routing concept for this DB_MODE, see '
+                . 'Database::isGatewayMode()).');
+        }
 
         return $next($request);
     }
@@ -147,10 +161,15 @@ class StoreAccessMiddleware implements MiddlewareInterface
     /**
      * Call GET /api/auth/memberships on the auth service and return the memberships array.
      *
+     * Protected (not private) — test seam so a test subclass can inject a canned
+     * membership list without a live auth service, matching the override pattern
+     * already used elsewhere in this codebase (e.g. AasaanworkProvisionTenantRoute's
+     * getAuthClient()/getProvisioner()).
+     *
      * @return array<array{tenant_id: string, role: string, status: string, ...}>
      * @throws \RuntimeException on HTTP failure or invalid response
      */
-    private function fetchMemberships(string $bearerToken): array
+    protected function fetchMemberships(string $bearerToken): array
     {
         $url = $this->authServiceUrl
             . '/api/auth/memberships'
