@@ -7,6 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.0] - 2026-08-12
+
+### Changed — BREAKING: `ProvisionTenantRoute` — `tenant_name` is now the only accepted field name
+
+`store_name` has been removed entirely. AUTH-SPEC §5a has always named
+`tenant_name` as the canonical field; `store_name` was never part of any spec
+and had silently caused real-world field-name mismatches downstream (a
+spec-compliant client sending `tenant_name` got a blank tenant name, since
+the framework's reflection-based property injection drops unmatched input
+keys with no error). `tenant_name` is now `required` in `validation_rules()`
+— same enforcement as `idempotency_key`, checked by the router before
+`process()` ever runs.
+
+**Migration:** any caller still sending `store_name` must switch to
+`tenant_name`. Zero known live traffic depends on the old field name (this
+route's current fleet callers have no frontend code exercising it at all,
+confirmed by a repo-wide search).
+
+### Changed — BREAKING: `ProvisionTenantRoute` now guards against duplicate-tenant creation by default
+
+Previously, `generateUuid()` + `provisioner->provision()` ran unconditionally
+on every call — a double-click or network retry silently provisioned a
+brand-new, orphaned tenant database every time, even though the auth-layer
+`idempotency_key` handling correctly deduplicated the resulting membership
+row. Two independent downstream platforms hit this in production and each
+built their own guard around it. This release generalizes that pattern into
+the framework: before provisioning, the route now checks whether the calling
+identity already has a membership on this platform
+(`findExistingTenantId()`), and if so, replays that existing tenant instead
+of creating a new one.
+
+**This changes default behavior** for any platform whose provisioning flow
+relies on always creating a brand-new tenant regardless of existing
+memberships (e.g. a deliberate "create another organization" flow). Set the
+new `allow_additional_tenant = true` request field to restore the old
+unconditional-create behavior for that call. The guard fails open on any
+lookup error — it's a best-effort optimization against wasted provisioning,
+not a security boundary.
+
+### Added — `ExternalAuthConfig::$provisionTenantRouteClass`
+
+Lets a platform substitute its own `ProvisionTenantRoute` subclass — set
+`provision_tenant_route_class` (a plain class-name string) in the options
+passed to `ExternalAuthRoutes::register()`. `DefaultTenantRouteProvider`
+builds whichever class this names (defaulting to the framework's own
+`ProvisionTenantRoute`) using the same constructor-injection pattern
+`StoneScriptPHP\Auth\AuthRoutes` already uses for `RefreshRoute`. Previously,
+a platform-registered subclass in its own `routes.php` would fatal — the
+router's bare `new $handlerClass()` construction has no way to satisfy
+`ProvisionTenantRoute`'s required constructor arguments, and it's also
+chronologically impossible to work around from `routes.php` itself (that
+file's route array is evaluated before `ExternalAuthRoutes::register()` ever
+builds those arguments). `mintProvisionApiToken()`, `slugify()`,
+`generateUuid()`, and the new `findExistingTenantId()` are now `protected`
+(previously `private`/nonexistent) so a subclass can override just the piece
+it needs.
+
+### Added — `ExternalAuthServiceClient::promoteOAuthConnection()` + `ProvisionTenantRoute` `oauth_state` support
+
+Commits an OAuth connection linkage (`POST /api/oauth/promote`) for platforms
+whose signup flow does OAuth confirm-signup followed by tenant provisioning.
+Pass `oauth_state` on the provision-tenant request; the route calls promote
+before provisioning and fails loud (500, no tenant created) if it fails —
+an unpromoted connection would otherwise orphan the identity's ability to
+log in via that provider again.
+
+### Added — `php stone generate android-server`
+
+New generator (`cli/generate-android-server.php`) that produces an
+offline-embeddable `android-server/` tree from a platform's real `src/` —
+routes.php policy-transformed to exclude admin/auth-provisioning routes, a
+`schema-manifest.json` for an on-device schema-bringup driver, and an offline
+`.env` profile (`DB_MODE=pgandroid`). Fixed two CLI-wiring bugs that made it
+unreachable via `php stone generate android-server` (both confirmed via a
+real subprocess run, not just code review): the top-level `stone` script
+unconditionally stripped the generate subcommand token before it could reach
+`cli/generate-dispatcher.php`'s own subcommand lookup, and that dispatcher
+then resolved its generator file path against the wrong base directory in
+vendor-installed mode.
+
+### Fixed — generated `TokenStore` didn't work in single-token mode
+
+In single-token mode, `ngx-stonescriptphp-client`'s `TokenService` aliases
+the API token under the auth-token storage key instead of writing a separate
+one — the generated `TokenStore` (`php stone generate client`) had no
+fallback for that alias, so `get()` always returned `null` and every
+business-API request went out with no `Authorization` header. Fixed with a
+priority-ordered fallback chain (session api-token -> local api-token ->
+local auth-token alias) that is correct regardless of which tenancy mode a
+given platform runs.
+
+### Fixed — DB_MODE-aware gateway-tenant-routing guards
+
+`GatewayTenantMiddleware`, `SubscriptionMiddleware`, and
+`StoreAccessMiddleware` each called gateway-only operations
+(`Database::getGatewayClient()->setTenantId()`, a subscription-status check)
+unconditionally — every authenticated request under `DB_MODE=direct` or
+`DB_MODE=pgandroid` threw. Added `Database::isGatewayMode()` and gated all
+three call sites behind it; each now cleanly skips the gateway-specific
+operation (there is no "route to a different physical tenant database"
+concept outside gateway mode) and proceeds normally instead of throwing.
+
 ## [8.0.0] - 2026-08-12
 
 ### Changed — BREAKING: "Passport"/"Card" jargon renamed to "Auth"/"API token"

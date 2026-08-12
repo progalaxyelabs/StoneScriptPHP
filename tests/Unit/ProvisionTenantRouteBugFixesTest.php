@@ -25,9 +25,10 @@ use StoneScriptPHP\Tenancy\TenantProvisioner;
  *   #3 tenant_name: only store_name existed, contradicting AUTH-SPEC's own
  *      canonical field name — a spec-compliant client silently got a blank
  *      tenant name (reflection-based property injection drops unmatched
- *      keys with no error). Fixed via the tenant_name alias.
- *   #5 oauth_state: missing entirely — medstoreapp needed it for its
- *      OAuth-signup-then-provision handoff (AUTH-SPEC §3d) and had to
+ *      keys with no error). Fixed by making tenant_name the only accepted
+ *      field name (store_name later removed entirely).
+ *   #5 oauth_state: missing entirely — a downstream platform needed it for
+ *      its OAuth-signup-then-provision handoff (AUTH-SPEC §3d) and had to
  *      reimplement provision-tenant from scratch in part because of this.
  *      Fixed via ExternalAuthServiceClient::promoteOAuthConnection().
  *
@@ -101,7 +102,7 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         AuthContext::setUser(new AuthenticatedUser(user_id: 'identity-1', email: 'owner@example.com'));
     }
 
-    // ── #3 tenant_name / store_name ─────────────────────────────────────
+    // ── #3 tenant_name ───────────────────────────────────────────────────
 
     public function test_accepts_tenant_name_field(): void
     {
@@ -118,46 +119,33 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         $this->assertSame('Acme Store', $provisioner->lastData['tenant_name'] ?? null);
     }
 
-    public function test_accepts_store_name_as_backward_compat_alias(): void
+    /**
+     * store_name was removed entirely (2026-08-12) — see tenant_name's
+     * property docblock. `required` enforcement now lives solely in
+     * validation_rules() (checked by the Router against raw request input
+     * BEFORE process() runs — see Router::executeHandler()), matching
+     * idempotency_key's own pattern, not a manual guard inside process().
+     * This is a router-edge concern, not testable via a direct process()
+     * call — see test_validation_rules_requires_tenant_name() instead,
+     * which pins the actual enforcement contract.
+     */
+    public function test_store_name_property_no_longer_exists(): void
     {
-        $this->authenticatedUser();
-        $client = new FakeExternalAuthServiceClient();
-        $provisioner = new SpyTenantProvisioner();
-        $route = $this->route($client, $provisioner);
-        $route->store_name = 'Legacy Store';
-        $route->idempotency_key = 'idem-1';
-
-        $res = $route->process();
-
-        $this->assertSame('ok', $res->status);
-        $this->assertSame('Legacy Store', $provisioner->lastData['tenant_name'] ?? null);
+        $this->assertFalse(
+            property_exists(ProvisionTenantRoute::class, 'store_name'),
+            'store_name must be fully removed, not just deprecated — tenant_name is the only accepted field name'
+        );
     }
 
-    public function test_tenant_name_wins_when_both_present(): void
+    public function test_validation_rules_requires_tenant_name(): void
     {
-        $this->authenticatedUser();
-        $client = new FakeExternalAuthServiceClient();
-        $provisioner = new SpyTenantProvisioner();
-        $route = $this->route($client, $provisioner);
-        $route->tenant_name = 'Canonical Name';
-        $route->store_name = 'Alias Name';
-        $route->idempotency_key = 'idem-1';
+        $route = $this->route(new FakeExternalAuthServiceClient());
 
-        $route->process();
+        $rules = $route->validation_rules();
 
-        $this->assertSame('Canonical Name', $provisioner->lastData['tenant_name'] ?? null);
-    }
-
-    public function test_rejects_when_neither_tenant_name_nor_store_name_present(): void
-    {
-        $this->authenticatedUser();
-        $route = $this->route(new FakeExternalAuthServiceClient(), new SpyTenantProvisioner());
-        $route->idempotency_key = 'idem-1';
-
-        $res = $route->process();
-
-        $this->assertSame('error', $res->status);
-        $this->assertSame(422, $res->httpStatusCode);
+        $this->assertArrayHasKey('tenant_name', $rules);
+        $this->assertStringContainsString('required', $rules['tenant_name']);
+        $this->assertArrayNotHasKey('store_name', $rules);
     }
 
     // ── #2 existing-tenant guard ────────────────────────────────────────

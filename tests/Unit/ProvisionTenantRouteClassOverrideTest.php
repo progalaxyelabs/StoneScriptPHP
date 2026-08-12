@@ -16,7 +16,7 @@ use StoneScriptPHP\Routing\Router;
  * ExternalAuthConfig::$provisionTenantRouteClass (2026-08-12) — lets a platform
  * substitute its own ProvisionTenantRoute subclass without reimplementing the
  * whole route from scratch, fixing the real blocker found investigating why
- * medstoreapp and aasaanwork both gave up on `extends ProvisionTenantRoute`:
+ * real fleet platforms both gave up on `extends ProvisionTenantRoute`:
  *
  *   - ProvisionTenantRoute's constructor REQUIRES $client/$hooks/$config/
  *     $provisioner (kept exactly as-is here — constructor injection for

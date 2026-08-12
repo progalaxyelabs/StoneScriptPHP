@@ -20,8 +20,9 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  *
  * Flow:
  *   1. Decode JWT — extract identity_id
- *   2. Resolve tenant_name (AUTH-SPEC §5a — canonical field, store_name
- *      accepted as a backward-compat alias); reject if neither is present.
+ *   2. tenant_name (AUTH-SPEC §5a — the only accepted field name for this;
+ *      `store_name` was removed 2026-08-12) is validated `required` at the
+ *      router edge before process() ever runs.
  *   3. Existing-tenant guard (AUTH-SPEC §5a/S9, 2026-08-12): unless
  *      allow_additional_tenant=true, check whether this identity already has
  *      a membership on this platform (findExistingTenantId()) — if so, REPLAY
@@ -42,7 +43,7 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  *        d. seedData()            — platform-specific seeding (default no-op)
  *   7. Call auth's POST /api/internal/create-membership — idempotent on
  *      (identity_id, tenant_id); reports is_new_tenant=false on replay.
- *   8. Return full platform JWT envelope (AUTH-SPEC §5a / TENANCY-IDENTITY-MODEL.md §6):
+ *   8. Return full platform JWT envelope (AUTH-SPEC §5a, framework-spec.md §6):
  *      access_token, token_type, expires_in, active_tenant, available_tenants[],
  *      active_role, available_roles[], identity {id, email, display_name},
  *      membership {id, tenant_id, role}
@@ -64,19 +65,17 @@ use StoneScriptPHP\Exceptions\FrameworkException;
 class ProvisionTenantRoute extends BaseExternalAuthRoute
 {
     /**
-     * AUTH-SPEC §5a: canonical field name. `store_name` (below) is accepted
-     * as a backward-compatible alias — either satisfies the requirement,
-     * process() resolves `$this->tenant_name ?: $this->store_name`. Both are
-     * declared `optional` in validation_rules() (neither alone can be
-     * `required` without rejecting the other's callers); process() enforces
-     * "at least one" manually. Added 2026-08-12 — previously ONLY
-     * `store_name` existed, which silently dropped `tenant_name` on any
-     * spec-compliant client (reflection-based property injection ignores
-     * unmatched input keys — no error, just a blank tenant name).
+     * AUTH-SPEC §5a: the ONLY accepted field name for the tenant's display
+     * name. `store_name` was removed entirely (2026-08-12) — it was never
+     * part of any spec, and it's what drove real-world field-name divergence
+     * between this framework default and downstream platform-specific
+     * overrides. This route's current callers on the fleet have zero live
+     * frontend traffic exercising it today (confirmed by a repo-wide search
+     * across the fleet — no caller anywhere sends store_name to this route).
+     * Required — see validation_rules(), same enforcement pattern as
+     * idempotency_key below.
      */
     public string $tenant_name      = '';
-    /** Backward-compatible alias for tenant_name — see its docblock. */
-    public string $store_name       = '';
     /** AUTH-SPEC §5a S9 — required, client-generated UUID. Prevents double-creates on retry. */
     public string $idempotency_key  = '';
     /**
@@ -85,21 +84,21 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      * oauth_pending JWT confirm-signup issued. When set, process() calls
      * ExternalAuthServiceClient::promoteOAuthConnection() to commit the
      * OAuth connection linkage (oauth_pending_connections -> oauth_connections)
-     * before creating the tenant membership. Added 2026-08-12 — medstoreapp
-     * needed this for its OAuth-signup-then-provision handoff and the
-     * framework had no equivalent, one of the reasons it reimplemented this
-     * whole route instead of extending it.
+     * before creating the tenant membership. Added 2026-08-12 — a downstream
+     * platform needed this for its OAuth-signup-then-provision handoff and
+     * the framework had no equivalent, one of the reasons it reimplemented
+     * this whole route instead of extending it.
      */
     public string $oauth_state      = '';
     /**
      * When true, skip the existing-tenant guard below and always provision a
      * genuinely new tenant even if the identity already has one for this
-     * platform. Mirrors aasaanwork's own `allow_additional` field — its
-     * docblock: "the Switch-Org 'Add New Organization' flow needs exactly
-     * this: skip Layer 1 entirely". Default false: the SAFE default is
-     * "prevent duplicate-tenant creation on a double-click or network
-     * retry" — see the guard's own comment in process() for the bug this
-     * fixes. Added 2026-08-12.
+     * platform. Mirrors a pattern a downstream platform's own override
+     * already used (an `allow_additional` field) for a "create a second
+     * business/organization" flow that deliberately needs to skip the guard
+     * below. Default false: the SAFE default is "prevent duplicate-tenant
+     * creation on a double-click or network retry" — see the guard's own
+     * comment in process() for the bug this fixes. Added 2026-08-12.
      */
     public bool $allow_additional_tenant = false;
     public string $display_name     = '';
@@ -130,12 +129,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     public function validation_rules(): array
     {
         return array_merge([
-            // tenant_name/store_name: individually optional here — "at least one
-            // required" can't be expressed as a single-field rule without
-            // rejecting whichever alias the caller didn't use. Enforced manually
-            // in process(). See tenant_name's own property docblock.
-            'tenant_name'     => 'optional|string|max:255',
-            'store_name'      => 'optional|string|max:255',
+            'tenant_name'     => 'required|string|max:255',   // AUTH-SPEC §5a — only accepted field name
             'idempotency_key' => 'required|string|max:64',   // AUTH-SPEC §5a S9
             'oauth_state'     => 'optional|string|max:512',
             'allow_additional_tenant' => 'optional|boolean',
@@ -163,18 +157,13 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         }
         $identityId = (string) $user->user_id;
 
-        // AUTH-SPEC §5a: resolve canonical tenant_name, falling back to the
-        // store_name alias — see tenant_name's own property docblock. Neither
-        // is `required` individually in validation_rules() (that would reject
-        // whichever alias the caller didn't send), so "at least one" is
-        // enforced here, manually — same pattern medstoreapp's/aasaanwork's
-        // own overrides already used for this exact reason.
-        $resolvedName = $this->tenant_name ?: $this->store_name;
-        if (!$resolvedName) {
-            return new ApiResponse('error', 'Validation failed', null, 422, [
-                ['field' => 'tenant_name', 'message' => 'Tenant name is required (tenant_name or store_name)'],
-            ]);
-        }
+        // AUTH-SPEC §5a: tenant_name is `required` in validation_rules()
+        // above — the Router validates $allInput against that BEFORE
+        // process() ever runs (Router::executeHandler(), before property
+        // injection), so it's guaranteed non-empty here on the normal HTTP
+        // path. Same enforcement pattern as idempotency_key — no redundant
+        // manual guard, consistent with how this route already worked.
+        $resolvedName = $this->tenant_name;
 
         // AUTH-SPEC §5a/S9 — existing-tenant guard (2026-08-12 fix for a real,
         // confirmed bug, not a hypothetical): generateUuid() +
@@ -187,13 +176,13 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // orphaned database was never cleaned up — createDatabase() is only
         // idempotent BY uuid, and each retry used a different one.
         //
-        // Both platforms that hit this in production built their own app-level
-        // guard (medstoreapp: a Redis-based 24h idempotency cache; aasaanwork:
-        // this exact "does the identity already have a membership" check,
-        // called "Layer 1" in its docblock). This generalizes aasaanwork's
-        // version into the framework. Bypassable via allow_additional_tenant
-        // for platforms/flows that legitimately create >1 tenant per identity
-        // (TENANCY-IDENTITY-MODEL.md §4.3 "add a second business").
+        // Two downstream platforms that hit this in production built their own
+        // app-level guard around it independently (one a cache-based approach,
+        // the other an existing-membership check equivalent to this one). This
+        // generalizes that pattern into the framework itself. Bypassable via
+        // allow_additional_tenant for platforms/flows that legitimately create
+        // more than one tenant per identity (e.g. a "create a second
+        // business/organization" flow).
         //
         // Fail-open on lookup error: this guard is a best-effort optimization
         // to avoid the orphaned-DB waste, not the dedup authority — auth's
@@ -431,11 +420,11 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      * `provision_tenant_route_class` (see ExternalAuthConfig::$provisionTenantRouteClass)
      * can override just this customization point (e.g. to mint a different
      * token shape) without reimplementing all of process(). Was private until
-     * 2026-08-12; confirmed via `git log --all -p` that no platform ever
-     * attempted `extends ProvisionTenantRoute` before this fix — both
-     * medstoreapp and aasaanwork instead reimplemented the entire route from
-     * scratch as a standalone IRouteHandler, in part because this and the two
-     * methods below were unreachable from a subclass either way.
+     * 2026-08-12; confirmed via `git log --all -p` that no downstream platform
+     * ever attempted `extends ProvisionTenantRoute` before this fix — real
+     * fleet platforms instead reimplemented the entire route from scratch as
+     * a standalone IRouteHandler, in part because this and the two methods
+     * below were unreachable from a subclass either way.
      */
     protected function mintProvisionApiToken(
         string $identityId,

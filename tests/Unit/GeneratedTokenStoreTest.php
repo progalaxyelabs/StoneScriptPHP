@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * verbatimTokensTs() (cli/generate-client.php) — single-token-mode fallback
- * fix (2026-08-01), found live on medstoreapp's offline Android build.
+ * fix (2026-08-01), found live on a downstream platform's offline Android build.
  *
  * Root cause (see cli/generate-client.php's own docblock above ACCESS_KEY for
  * the full two-pass writeup): in single-token mode, ngx-stonescriptphp-client's

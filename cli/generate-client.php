@@ -833,8 +833,8 @@ function verbatimTokensTs(): string
 // building a "Switch Org" UI that opens a tenant picker in a new tab of the
 // same origin).
 //
-// 2026-08-01 single-token-mode fix (real bug, found live on medstoreapp's
-// offline Android build, root-caused in two passes):
+// 2026-08-01 single-token-mode fix (real bug, found live on a downstream
+// platform's offline Android build, root-caused in two passes):
 //
 // Pass 1 (WRONG — storage location only): assumed TokenService just moved
 // `ssp_api_access_token` from sessionStorage to localStorage in single-token
