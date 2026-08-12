@@ -395,6 +395,30 @@ ERR
 }
 
 /**
+ * True when a route is identity-scoped/public rather than tenant-scoped,
+ * regardless of which `service` it's tagged under. A route declaring
+ * `access: authentication` (runs on an auth/identity token, before any
+ * tenant is selected — e.g. provision-tenant, select-tenant) or `public`
+ * (no token at all) can never legitimately carry a `/{service}/tenant/{id}`
+ * URL segment, no matter what `service` value it happens to be tagged with
+ * (real fleet convention: these land under `service: 'infra'` purely
+ * because they don't belong to a specific business service — see A3's
+ * exclusion carve-out in exclusionReason()). This is the single shared
+ * predicate both the T3-prefix guard (assertT3RoutesCarryTenantPrefix()) and
+ * the URL-template builder (buildGroupMethods()) key off of, so they can
+ * never drift out of sync with each other — the guard must exempt exactly
+ * the routes the template builder also treats as non-tenant-scoped, or one
+ * silently reintroduces the doubled-URL bug the other was built to prevent.
+ * Added 2026-08-12 alongside the guard fix below.
+ *
+ * @param array<string,mixed> $route
+ */
+function routeIsTenantUrlExempt(array $route): bool
+{
+    return in_array($route['access'] ?? null, ['authentication', 'public'], true);
+}
+
+/**
  * v4.7 hard-error guard (production incident on a downstream T2 platform).
  *
  * T3 (URL-tenant) mode builds every tenant-scoped business-method URL by
@@ -414,9 +438,28 @@ ERR
  * after a routine client regeneration omitted the --tenancy flag and picked
  * up the T3 default).
  *
- * Fails loudly instead of writing a broken client: if ANY route in a
- * T3-tenant-scoped service lacks the expected prefix, abort generation with
- * every offending route listed and a direct pointer to --tenancy=T2.
+ * Fails loudly instead of writing a broken client: if ANY genuinely
+ * tenant-scoped route in a T3 service lacks the expected prefix, abort
+ * generation with every offending route listed and a direct pointer to
+ * --tenancy=T2.
+ *
+ * v9.1.0 made `access: authentication`/`public` routes includable in a
+ * service that would otherwise be entirely excluded (A3's infra/webhook
+ * carve-out) — real identity-scoped tier-2 endpoints like provision-tenant
+ * get tagged `service: 'infra'` purely because they don't belong to a
+ * specific business service, not because they're tenant-scoped. Those
+ * routes structurally CANNOT carry a `/{service}/tenant/{tenantId}` prefix
+ * (there is no tenant yet — that's the entire point of a route like
+ * provision-tenant), so this guard must not flag them: it exists to catch
+ * genuinely tenant-scoped routes that are MISSING the prefix by mistake, not
+ * to reject routes that were never tenant-scoped in the first place. Fixed
+ * 2026-08-12 — this exact carve-out (`access` !== authorization) is already
+ * used for the A3 exclusion itself (see exclusionReason()) and for token
+ * selection (buildMethodTs()); this guard was the one place that still
+ * treated every route in the service uniformly, which made a T3 platform's
+ * `php stone generate client` hard-abort the moment it declared
+ * `access: authentication` on an infra-tagged route — exactly the
+ * medstoreapp/provision-tenant case that surfaced this.
  *
  * @param array<int,array<string,mixed>> $routes All routes for one T3-tenant-scoped service.
  * @param string $serviceName e.g. 'portal'
@@ -427,6 +470,9 @@ function assertT3RoutesCarryTenantPrefix(array $routes, string $serviceName): vo
 
     $offending = [];
     foreach ($routes as $route) {
+        if (routeIsTenantUrlExempt($route)) {
+            continue;
+        }
         $path = $route['path'] ?? '';
         if (!preg_match($prefixPattern, $path)) {
             $offending[] = strtoupper($route['method'] ?? '?') . ' ' . ($path === '' ? '?' : $path);
@@ -1249,7 +1295,11 @@ TS;
  *
  * @param string $groupName     e.g. 'inventory'
  * @param array  $routes        All routes in this group (for this service)
- * @param bool   $isTenantScoped True when T3 non-admin service
+ * @param bool   $isTenantScoped Service-level default: true when T3 non-admin
+ *                                 service. Overridden PER ROUTE to false for
+ *                                 any route routeIsTenantUrlExempt() flags
+ *                                 (access: authentication|public) — see that
+ *                                 function's docblock.
  * @param string $serviceName   e.g. 'portal'
  * @return string TypeScript source lines for the group object body
  */
@@ -1284,27 +1334,31 @@ function buildGroupMethods(
         }
         $emittedActions[] = $action;
 
+        // v9.1.0+9.3.0: access-aware token selection AND per-route tenant-URL
+        // exemption both key off the same routeIsTenantUrlExempt() predicate —
+        // an identity-scoped (`authentication`) or `public` route is neither
+        // tenant-URL-scoped nor sent with the API token, regardless of which
+        // service it's tagged under (see routeIsTenantUrlExempt() docblock).
+        // Computed BEFORE building the URL template (moved up from below) so
+        // buildUrlTemplate()/templateNeedsIdParam() get the per-route override,
+        // not the blanket service-level $isTenantScoped — otherwise an exempt
+        // route still got ${this.t} prepended, reproducing the exact doubled-
+        // URL bug assertT3RoutesCarryTenantPrefix() exists to prevent.
+        $accessType = $route['access'] ?? null;
+        $routeIsTenantScoped = $isTenantScoped && !routeIsTenantUrlExempt($route);
+
         // Build TypeScript URL template
-        $urlTemplate = buildUrlTemplate($path, $isTenantScoped, $serviceName);
+        $urlTemplate = buildUrlTemplate($path, $routeIsTenantScoped, $serviceName);
 
         // Determine if the emitted URL template will contain ${id} and therefore
         // whether the method signature must declare `id: string | number`.
         // Previously used hasTailId() — WRONG: only detected tail params.
         // The URL template replaces ALL {param} segments with ${id}, so any route
         // with a non-tail {id} (e.g. /routes/{id}/start) also needs the id param.
-        $needsIdParam = templateNeedsIdParam($path, $serviceName, $isTenantScoped);
+        $needsIdParam = templateNeedsIdParam($path, $serviceName, $routeIsTenantScoped);
 
         // Resolve typed return (CLIENT-SDK-SPEC §10). null → ApiResponse fallback.
         $responseTs = routeResponseTsType($route);
-
-        // v4.8: access-aware token selection. Threads the route's actual
-        // RouteAccess value (public|authentication|authorization) through
-        // rather than collapsing it to a boolean — 'public' legitimately
-        // means "send no token at all", distinct from "send the auth token"
-        // (authentication) and today's only behavior, "send the API token"
-        // (authorization, the default for unset/legacy routes). See
-        // verbatimHttpTs()/verbatimTokensTs().
-        $accessType = $route['access'] ?? null;
 
         // Build method signature and call
         $methodTs = buildMethodTs($action, $method, $urlTemplate, $needsIdParam, $responseTs, $accessType);

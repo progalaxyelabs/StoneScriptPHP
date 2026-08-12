@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.3.0] - 2026-08-12
+
+### Fixed — `php stone generate client` hard-aborted for T3 platforms with an `access:authentication`/`public` route
+
+v9.1.0 made `access: authentication`/`public` routes includable in a service
+that would otherwise be entirely excluded (the A3 infra/webhook carve-out) —
+real identity-scoped tier-2 endpoints like `provision-tenant` get tagged
+`service: 'infra'` purely because they don't belong to a specific business
+service, not because they're tenant-scoped. But that feature's own test
+suite generated exclusively with `--tenancy=T2`, so it never exercised the
+interaction with the v4.7 `assertT3RoutesCarryTenantPrefix()` guard: on a
+real T3 (URL-tenant) platform, declaring `access: authentication` on an
+infra-tagged route made it newly INCLUDED in that guard's route set — and an
+identity-scoped route structurally cannot carry a `/{service}/tenant/{id}`
+URL prefix (there's no tenant yet, that's the entire point of a route like
+provision-tenant), so the guard flagged it as a false positive and aborted
+generation entirely for that service. Found live on medstoreapp (a T3
+platform) regenerating its client after the 9.1.0/9.2.0 upgrade.
+
+`routeIsTenantUrlExempt()` (`access: authentication|public`) is now the
+single shared predicate both the guard and the URL-template builder key off:
+exempt routes skip the guard AND don't get `${this.t}` prepended to their
+URL — skipping only the guard without also fixing the template builder would
+have reintroduced the exact doubled-URL 404 bug the guard exists to prevent,
+just silently instead of loudly. Genuinely tenant-scoped routes missing
+their prefix are still caught exactly as before (regression-tested).
+
 ## [9.2.0] - 2026-08-12
 
 ### Fixed — `ProvisionTenantRoute`: `before_provision` hook was dead code whenever a provisioner was set
