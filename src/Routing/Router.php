@@ -188,6 +188,7 @@ class Router
         bool $collection = false,
         ?string $access = null,
         string $tokenType = 'access',
+        ?int $clientTimeoutMs = null,
     ): self {
         $method = strtoupper($method);
         $fullPath = $path;
@@ -232,6 +233,7 @@ class Router
             'param'      => $param,
             'response'   => $response,
             'collection' => $collection,
+            'client_timeout_ms' => $clientTimeoutMs,
         ];
 
         // Track known services/scopes
@@ -279,6 +281,7 @@ class Router
             isPublic:  $config['is_public']  ?? false,
             access:    $config['access']     ?? null,
             tokenType: $config['token_type'] ?? 'access',
+            clientTimeoutMs: isset($config['client_timeout_ms']) ? (int) $config['client_timeout_ms'] : null,
         );
     }
 
@@ -324,7 +327,7 @@ class Router
             $method = strtoupper($method);
             foreach ($routes as $path => $config) {
                 $entry = self::normalizeRouteConfig($config);
-                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection, $entry->access, $entry->tokenType);
+                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection, $entry->access, $entry->tokenType, $entry->clientTimeoutMs);
             }
         }
         return $this;
@@ -372,6 +375,7 @@ class Router
                     'is_public' => $meta['is_public'] ?? false,
                     'access'     => $meta['access']     ?? null,
                     'token_type' => $meta['token_type'] ?? 'access',
+                    'client_timeout_ms' => $meta['client_timeout_ms'] ?? null,
                 ];
             }
         }

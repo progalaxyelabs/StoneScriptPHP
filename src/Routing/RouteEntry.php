@@ -110,6 +110,21 @@ class RouteEntry
          * RouteAccess::TOKEN_REFRESH (body refresh token, stateful DB-gated).
          */
         public readonly string $tokenType = RouteAccess::TOKEN_ACCESS,
+
+        /**
+         * Opt-in client-side fetch timeout, in milliseconds, for the generated
+         * TypeScript client's call to this route (v4.9, generate-client.php).
+         * When null (default), the generated fetch stays unbounded — today's
+         * behavior for every route, unchanged. Declare it on routes that are
+         * legitimately slow by design (e.g. provision-tenant, which creates a
+         * whole tenant database + schema — observed 4.2-5.0s in production)
+         * so a caller with a shorter expectation of its own gets a clear,
+         * distinguishable timeout error instead of silently aborting the
+         * connection while the server keeps working and completes moments
+         * later. Purely a client generation hint — has no runtime effect on
+         * this PHP route handler itself.
+         */
+        public readonly ?int $clientTimeoutMs = null,
     ) {
         if ($access !== null && !RouteAccess::isValidAccess($access)) {
             throw new \InvalidArgumentException(

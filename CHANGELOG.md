@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.4.0] - 2026-08-13
+
+### Added — opt-in per-route client-side fetch timeout (`client_timeout_ms`)
+
+Every generated `fetch()` call in `cli/generate-client.php`'s output was previously
+UNBOUNDED — no timeout at all, relying entirely on the browser's own (effectively
+unlimited) default. Found live investigating medstoreapp's `provision-tenant`: the
+route genuinely takes 4.2-5.0s (it creates a whole tenant database + deploys its
+schema via the gateway), and a caller with a shorter expectation of its own gave up
+mid-request — the server had no idea and completed successfully 2.8s later, and the
+caller's retry then collided with the framework's existing-tenant guard (409).
+
+A route can now declare `'client_timeout_ms' => 20000` in `routes.php` (mirrors the
+existing `access:` per-route pattern) to get an explicit, generous bound on its
+generated client call instead of silently inheriting "however long the caller feels
+like waiting." Deliberately per-route, not a global default — a blanket timeout
+would risk prematurely aborting some other route's differently-slow endpoint this
+change has no visibility into. Routes that don't set it keep today's unbounded
+behavior, byte-identical to every client generated before this feature.
+
+- `HttpRequestOptions.timeoutMs` (generated `http.ts`) — wires `AbortSignal.timeout()`
+  into the fetch call; a timeout abort now throws a distinguishable `ApiError` (code
+  `request_timeout`) instead of the generic "Network error — check your connection",
+  since a client-side timeout is not the same failure as an actual network drop (the
+  server may still be working).
+- `RouteEntry::$clientTimeoutMs` / `Router::addRoute()` / `Router::getRouteMeta()`
+  thread the value from `routes.php` through to the generator — same plumbing path
+  as `access`.
+- Tests: `tests/Unit/ClientGeneratorTimeoutMsTest.php` (call-site emission, combined
+  with `access:`, timeout-only, and the byte-identical-default regression guard).
+
 ## [9.3.0] - 2026-08-12
 
 ### Fixed — `php stone generate client` hard-aborted for T3 platforms with an `access:authentication`/`public` route

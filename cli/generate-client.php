@@ -694,9 +694,27 @@ export interface HttpParams {
  *     in storage. Previously EVERY generated call attached whatever the
  *     TokenStore held regardless of the route's actual access requirement;
  *     a public route now genuinely sends no Authorization header.
+ *
+ * v4.9 — timeoutMs (opt-in, per-route). Every generated `fetch()` call was
+ * previously UNBOUNDED — no timeout at all, relying entirely on the browser's
+ * own (effectively unlimited) fetch default. Fine for typical sub-second
+ * calls, but wrong for routes that are legitimately slow by design (e.g.
+ * provision-tenant, which physically creates a new tenant database + deploys
+ * its full schema via the gateway — observed 4.2-5.0s consistently in
+ * production). Without a bound, ANY caller with its own shorter expectation
+ * (a test harness, a upstream proxy, a future UI-level abort) can give up
+ * before the request finishes, while the server keeps working and completes
+ * successfully moments later — the client then has no idea, and a naive
+ * retry can collide with server-side idempotency/duplicate guards. Declared
+ * per-route via `client_timeout_ms` in routes.php (mirrors the `access:`
+ * pattern above) rather than a global default: a blanket timeout would risk
+ * prematurely aborting some OTHER platform's genuinely-slower endpoint this
+ * change has no visibility into. Routes that don't set it keep today's
+ * unbounded behavior, byte-identical to before this feature.
  */
 export interface HttpRequestOptions {
   tokenMode?: 'public' | 'authentication' | 'authorization';
+  timeoutMs?: number;
 }
 
 /**
@@ -803,14 +821,31 @@ export class MinimalHttp {
     // tokenMode === 'public' -> no Authorization header, even if a token
     // happens to be in storage.
 
+    // v4.9 — see HttpRequestOptions.timeoutMs docblock. Undefined signal when
+    // not set == today's unbounded behavior, unchanged.
+    const signal = options?.timeoutMs !== undefined ? AbortSignal.timeout(options.timeoutMs) : undefined;
+
     let res: Response;
     try {
       res = await fetch(url.toString(), {
         method,
         headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal,
       });
     } catch (networkErr) {
+      if (networkErr instanceof DOMException && networkErr.name === 'TimeoutError') {
+        // AbortSignal.timeout() fired before the server responded. The server
+        // may still complete the request (it has no idea the client gave up)
+        // — this is distinct from a genuine network failure, so callers get a
+        // distinguishable message instead of the generic "check your connection".
+        throw new ApiError(
+          `Request timed out after ${options?.timeoutMs}ms. It may still complete on the server — please wait a moment before retrying.`,
+          0,
+          networkErr,
+          'request_timeout',
+        );
+      }
       throw new ApiError('Network error — check your connection', 0, networkErr, null);
     }
 
@@ -1347,6 +1382,12 @@ function buildGroupMethods(
         $accessType = $route['access'] ?? null;
         $routeIsTenantScoped = $isTenantScoped && !routeIsTenantUrlExempt($route);
 
+        // v4.9: opt-in per-route client-side fetch timeout — see
+        // HttpRequestOptions.timeoutMs docblock in verbatimHttpTs(). Mirrors
+        // the `access:` pattern: a route declares it in routes.php, the
+        // generator threads it through, unset routes are unaffected.
+        $timeoutMs = isset($route['client_timeout_ms']) ? (int) $route['client_timeout_ms'] : null;
+
         // Build TypeScript URL template
         $urlTemplate = buildUrlTemplate($path, $routeIsTenantScoped, $serviceName);
 
@@ -1361,7 +1402,7 @@ function buildGroupMethods(
         $responseTs = routeResponseTsType($route);
 
         // Build method signature and call
-        $methodTs = buildMethodTs($action, $method, $urlTemplate, $needsIdParam, $responseTs, $accessType);
+        $methodTs = buildMethodTs($action, $method, $urlTemplate, $needsIdParam, $responseTs, $accessType, $timeoutMs);
         $lines[] = $methodTs;
     }
 
@@ -1456,6 +1497,9 @@ function buildUrlTemplate(string $path, bool $isTenantScoped, string $serviceNam
  *                                   existing generated client is byte-identical to
  *                                   before this feature for the common case. See
  *                                   verbatimHttpTs()/verbatimTokensTs().
+ * @param int|null    $timeoutMs    v4.9: the route's `client_timeout_ms`, or null
+ *                                   for today's default (unbounded fetch, unchanged).
+ *                                   See HttpRequestOptions.timeoutMs docblock.
  * @return string TypeScript source for one method entry (including trailing comma)
  */
 function buildMethodTs(
@@ -1465,18 +1509,24 @@ function buildMethodTs(
     bool    $needsIdParam,
     ?string $responseTs = null,
     ?string $accessType = null,
+    ?int    $timeoutMs = null,
 ): string {
     // Return-payload generic: typed DTO when declared, else ApiResponse (unknown).
     $ret = $responseTs ?? 'T.ApiResponse';
 
-    // v4.8: emitted as a trailing options object only when it deviates from
-    // today's only behavior (authorization / the API token) — see the
-    // $accessType docblock above for why this keeps the common case byte-identical.
-    $optionsArg = match ($accessType) {
-        'public'         => ", { tokenMode: 'public' }",
-        'authentication' => ", { tokenMode: 'authentication' }",
-        default          => '', // null or 'authorization' — today's default, unchanged
-    };
+    // v4.8/v4.9: emitted as a trailing options object only when at least one
+    // field deviates from today's defaults (authorization token, unbounded
+    // fetch) — see the $accessType/$timeoutMs docblocks above for why this
+    // keeps the common case byte-identical to every client generated before
+    // either feature existed.
+    $optionsFields = [];
+    if ($accessType === 'public' || $accessType === 'authentication') {
+        $optionsFields[] = "tokenMode: '{$accessType}'";
+    }
+    if ($timeoutMs !== null) {
+        $optionsFields[] = "timeoutMs: {$timeoutMs}";
+    }
+    $optionsArg = $optionsFields ? ', { ' . implode(', ', $optionsFields) . ' }' : '';
 
     $isGet  = $httpMethod === 'GET';
     // POST/PUT/PATCH all carry a body and share the same signature shape.
