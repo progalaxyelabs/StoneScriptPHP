@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Every generated `fetch()` call in `cli/generate-client.php`'s output was previously
 UNBOUNDED — no timeout at all, relying entirely on the browser's own (effectively
-unlimited) default. Found live investigating medstoreapp's `provision-tenant`: the
-route genuinely takes 4.2-5.0s (it creates a whole tenant database + deploys its
+unlimited) default. Found live investigating a downstream platform's `provision-tenant`:
+the route genuinely takes 4.2-5.0s (it creates a whole tenant database + deploys its
 schema via the gateway), and a caller with a shorter expectation of its own gave up
 mid-request — the server had no idea and completed successfully 2.8s later, and the
 caller's retry then collided with the framework's existing-tenant guard (409).

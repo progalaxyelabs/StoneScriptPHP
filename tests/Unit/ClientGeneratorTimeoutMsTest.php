@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
  *
  * Root problem: every generated `fetch()` call was UNBOUNDED — no timeout at
  * all — regardless of how slow the route legitimately is. Found live
- * 2026-08-13 investigating medstoreapp's provision-tenant: the route
+ * 2026-08-13 investigating a downstream platform's provision-tenant: the route
  * genuinely takes 4.2-5.0s (it creates a whole tenant database + deploys its
  * schema via the gateway), and whatever client/test harness called it had
  * its own ~3s expectation and gave up — the server had no idea and completed
