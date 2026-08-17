@@ -35,6 +35,14 @@ class SelectTenantRoute extends BaseExternalAuthRoute
      */
     public function process(): ApiResponse
     {
+        // SECURITY: AccessTokenMiddleware already verified the Authorization
+        // Bearer token's signature/exp/purpose (route access=authentication)
+        // and populated AuthContext — but never checked platform_code. See
+        // PlatformCodeGuard's class docblock.
+        if ($denial = $this->guardPlatformCode(auth()?->platform_code)) {
+            return $denial;
+        }
+
         $input = [
             'selection_token' => $this->selection_token,
             'tenant_id' => $this->tenant_id,

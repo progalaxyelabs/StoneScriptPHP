@@ -39,6 +39,11 @@ class UpdateMembershipRoute extends BaseExternalAuthRoute
      */
     public function process(): ApiResponse
     {
+        // SECURITY: see PlatformCodeGuard's class docblock.
+        if ($denial = $this->guardPlatformCode(auth()?->platform_code)) {
+            return $denial;
+        }
+
         $data = [];
         if ($this->role !== null) {
             $data['role'] = $this->role;

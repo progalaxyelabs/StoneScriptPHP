@@ -149,7 +149,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => [['id' => 'body-tenant']]
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-42'];  // no tenant_id in auth token!
+        $route->stubClaims = ['sub' => 'id-42', 'platform_code' => 'testapp'];  // no tenant_id in auth token!
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 'body-tenant';  // comes from request body
 
@@ -171,7 +171,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => [['id' => 't-1']]
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-10'];
+        $route->stubClaims = ['sub' => 'id-10', 'platform_code' => 'testapp'];
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 't-1';
         $route->role_id    = 'cashier';  // body hint
@@ -192,7 +192,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => [['id' => 't-1']]
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-10'];
+        $route->stubClaims = ['sub' => 'id-10', 'platform_code' => 'testapp'];
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 't-1';
         $route->role_id    = 'admin';  // not in available_roles
@@ -215,7 +215,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => [['id' => 'allowed-tenant']]
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-99'];
+        $route->stubClaims = ['sub' => 'id-99', 'platform_code' => 'testapp'];
         $route->tenant_id  = 'not-my-tenant';  // not in available set
 
         $response = $route->process();
@@ -235,7 +235,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: null  // no tenants_resolver → trust body tenant_id
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-5'];
+        $route->stubClaims = ['sub' => 'id-5', 'platform_code' => 'testapp'];
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 'any-tenant';
 
@@ -257,7 +257,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => [['id' => 't-1']]
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-8'];
+        $route->stubClaims = ['sub' => 'id-8', 'platform_code' => 'testapp'];
         $route->tenant_id  = 't-1';
 
         $response = $route->process();
@@ -317,7 +317,7 @@ class ExchangeRouteTest extends TestCase
             null  // no roles_resolver
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-1'];
+        $route->stubClaims = ['sub' => 'id-1', 'platform_code' => 'testapp'];
         $route->tenant_id  = 't-1';
 
         $response = $route->process();
@@ -362,7 +362,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => [['id' => 't-9']]
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-xyz', 'email' => 'u@test.com'];  // no tenant_id in auth token
+        $route->stubClaims = ['sub' => 'id-xyz', 'email' => 'u@test.com', 'platform_code' => 'testapp'];  // no tenant_id in auth token
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 't-9';  // body
 
@@ -405,7 +405,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => $allTenants
         );
         $tab1->stubToken  = 'passport.jwt';        // same identity's auth token in both tabs
-        $tab1->stubClaims = ['sub' => 'ceo-identity'];
+        $tab1->stubClaims = ['sub' => 'ceo-identity', 'platform_code' => 'testapp'];
         $tab1->stubCard   = 'card.software-dev.signed';
         $tab1->tenant_id  = 't-software-dev';
 
@@ -422,7 +422,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => $allTenants
         );
         $tab2->stubToken  = 'passport.jwt';         // same identity's auth token
-        $tab2->stubClaims = ['sub' => 'ceo-identity'];
+        $tab2->stubClaims = ['sub' => 'ceo-identity', 'platform_code' => 'testapp'];
         $tab2->stubCard   = 'card.marketing.signed';
         $tab2->tenant_id  = 't-marketing';
 
@@ -466,7 +466,7 @@ class ExchangeRouteTest extends TestCase
             tenantsResolver: fn(array $claims) => $allTenants
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'multi-owner'];
+        $route->stubClaims = ['sub' => 'multi-owner', 'platform_code' => 'testapp'];
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 't-2';  // entering second tenant
 
@@ -475,6 +475,130 @@ class ExchangeRouteTest extends TestCase
         $this->assertSame('ok', $response->status);
         $this->assertSame(['id' => 't-2', 'name' => 'Store B'], $response->data['active_tenant']);
         $this->assertSame($allTenants, $response->data['available_tenants']);
+    }
+
+    // ── SECURITY: cross-platform token rejection (PlatformCodeGuard) ────────
+    //
+    // The shared auth issuer means a signature/exp-valid auth token minted for
+    // platform A is cryptographically valid at platform B too — exchange is
+    // the route that actually MINTS the tenant-scoped API token, so this is
+    // the highest-value place to close the gap. See PlatformCodeGuard's class
+    // docblock and BaseExternalAuthRoute::guardPlatformCode().
+
+    public function test_same_platform_token_is_admitted(): void
+    {
+        $route = new TestableExchangeRoute(
+            $this->makeClient(),
+            [],
+            $this->makeConfig(), // platform_code => 'testapp'
+            rolesResolver:   fn(array $claims) => ['owner'],
+            tenantsResolver: fn(array $claims) => [['id' => 't-1']]
+        );
+        $route->stubToken  = 'passport.jwt';
+        $route->stubClaims = ['sub' => 'id-1', 'platform_code' => 'testapp'];
+        $route->stubCard   = 'card.signed';
+        $route->tenant_id  = 't-1';
+
+        $response = $route->process();
+
+        $this->assertSame('ok', $response->status, 'same-platform traffic must pass unchanged');
+    }
+
+    public function test_cross_platform_token_is_rejected_403(): void
+    {
+        $route = new TestableExchangeRoute(
+            $this->makeClient(),
+            [],
+            $this->makeConfig(), // this platform's code is 'testapp'
+            rolesResolver:   fn(array $claims) => ['owner'],
+            tenantsResolver: fn(array $claims) => [['id' => 't-1']]
+        );
+        $route->stubToken  = 'passport.jwt';
+        // Token was minted for a DIFFERENT platform.
+        $route->stubClaims = ['sub' => 'id-1', 'platform_code' => 'otherapp'];
+        $route->tenant_id  = 't-1';
+
+        $response = $route->process();
+
+        $this->assertSame('error', $response->status);
+        $this->assertSame(403, $response->httpStatusCode);
+        $this->assertSame('wrong_platform', $response->data['error']);
+    }
+
+    public function test_missing_platform_code_claim_is_rejected_when_platform_is_configured(): void
+    {
+        $route = new TestableExchangeRoute(
+            $this->makeClient(),
+            [],
+            $this->makeConfig(), // this platform's code is 'testapp'
+            rolesResolver:   fn(array $claims) => ['owner'],
+            tenantsResolver: fn(array $claims) => [['id' => 't-1']]
+        );
+        $route->stubToken  = 'passport.jwt';
+        // No platform_code claim at all — unprovable, must fail closed.
+        $route->stubClaims = ['sub' => 'id-1'];
+        $route->tenant_id  = 't-1';
+
+        $response = $route->process();
+
+        $this->assertSame('error', $response->status);
+        $this->assertSame(403, $response->httpStatusCode);
+        $this->assertSame('wrong_platform', $response->data['error']);
+    }
+
+    public function test_cross_platform_token_never_reaches_the_tenants_resolver(): void
+    {
+        $resolverCalled = false;
+        $route = new TestableExchangeRoute(
+            $this->makeClient(),
+            [],
+            $this->makeConfig(),
+            rolesResolver:   fn(array $claims) => ['owner'],
+            tenantsResolver: function (array $claims) use (&$resolverCalled) {
+                $resolverCalled = true;
+                return [['id' => 't-1']];
+            }
+        );
+        $route->stubToken  = 'passport.jwt';
+        $route->stubClaims = ['sub' => 'id-1', 'platform_code' => 'otherapp'];
+        $route->tenant_id  = 't-1';
+
+        $route->process();
+
+        $this->assertFalse($resolverCalled, 'the guard must reject before any tenant/role resolution — no side effects on a rejected cross-platform token');
+    }
+
+    public function test_unconfigured_platform_code_admits_any_platform_code_claim(): void
+    {
+        // No platform_code option passed — ExternalAuthConfig::$platformCode
+        // defaults to '' unless PLATFORM_CODE is set in the environment.
+        // Deliberate backward-compat fail-open: a deployment that never
+        // opted into platform-scoped tokens must not be bricked by this fix.
+        putenv('PLATFORM_CODE');
+        unset($_ENV['PLATFORM_CODE']);
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $config = new ExternalAuthConfig(['auth_issuer' => 'http://localhost:3139']);
+        $this->assertSame('', $config->platformCode, 'precondition: platform code must be unconfigured for this test');
+
+        $route = new TestableExchangeRoute(
+            new ExternalAuthServiceClient('http://localhost:3139', ''),
+            [],
+            $config,
+            rolesResolver:   fn(array $claims) => ['owner'],
+            tenantsResolver: fn(array $claims) => [['id' => 't-1']]
+        );
+        $route->stubToken  = 'passport.jwt';
+        $route->stubClaims = ['sub' => 'id-1', 'platform_code' => 'some-other-platform'];
+        $route->stubCard   = 'card.signed';
+        $route->tenant_id  = 't-1';
+
+        $response = $route->process();
+
+        $this->assertSame('ok', $response->status, 'an unconfigured PLATFORM_CODE must fail OPEN, not brick unconfigured deployments');
     }
 }
 

@@ -10,6 +10,7 @@ use StoneScriptPHP\Auth\BearerToken;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
 use StoneScriptPHP\Auth\Client\AuthServiceException;
+use StoneScriptPHP\Auth\PlatformCodeGuard;
 
 /**
  * Abstract base class for all ExternalAuth route handlers
@@ -124,5 +125,50 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
         // by construction, instead of two independently-maintained copies of the
         // same regex.
         return BearerToken::strip($headerValue);
+    }
+
+    /**
+     * SECURITY — cross-platform token guard. Call this at the top of
+     * process() (after extracting whatever `platform_code` claim the
+     * verified token carries) on every route that acts on an
+     * identity/API-token-authenticated request. See {@see PlatformCodeGuard}
+     * for the full rationale and decision table.
+     *
+     * @param string|null $tokenPlatformCode The `platform_code` claim off the
+     *   verified token (e.g. `auth()->platform_code`, or a raw JWKS-validated
+     *   claims array's `platform_code` for routes that decode the token
+     *   themselves rather than going through JwtAuthMiddleware, like
+     *   {@see \StoneScriptPHP\Auth\ExternalAuth\Routes\ExchangeRoute}).
+     * @return ApiResponse|null A 403 `wrong_platform` denial when the token
+     *   is inadmissible for this platform, or null to proceed.
+     */
+    protected function guardPlatformCode(?string $tokenPlatformCode): ?ApiResponse
+    {
+        $reason = PlatformCodeGuard::check($tokenPlatformCode, $this->config->platformCode);
+
+        if ($reason === PlatformCodeGuard::UNCONFIGURED) {
+            log_warning(
+                static::class . ': platform_code guard skipped — this server has no PLATFORM_CODE ' .
+                'configured, so tokens minted for ANY platform on the shared auth issuer are accepted ' .
+                'here. Set PLATFORM_CODE to close this gap.'
+            );
+            return null;
+        }
+
+        if (PlatformCodeGuard::isRejection($reason)) {
+            log_warning(
+                static::class . ": rejecting request — platform_code guard failed ($reason); " .
+                'token platform_code=' . ($tokenPlatformCode !== null && $tokenPlatformCode !== '' ? $tokenPlatformCode : '(none)') .
+                ', this platform=' . $this->config->platformCode
+            );
+            return new ApiResponse(
+                'error',
+                'This token is not valid for this platform',
+                ['error' => 'wrong_platform'],
+                403
+            );
+        }
+
+        return null;
     }
 }

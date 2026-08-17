@@ -73,7 +73,7 @@ class CreateMembershipForInviteTest extends TestCase
         ], 'secret');
     }
 
-    public function test_strips_is_tenant_owner_key_before_delegating(): void
+    public function test_forces_is_tenant_owner_false_even_if_caller_supplies_true(): void
     {
         // An invite-accepted membership is never the
         // tenant's owner by construction — this method must never let an
@@ -83,7 +83,8 @@ class CreateMembershipForInviteTest extends TestCase
             ->method('createMembership')
             ->with(
                 $this->callback(function (array $data) {
-                    $this->assertArrayNotHasKey('is_tenant_owner', $data);
+                    $this->assertArrayHasKey('is_tenant_owner', $data);
+                    $this->assertFalse($data['is_tenant_owner']);
                     return true;
                 }),
                 'secret'
@@ -93,7 +94,35 @@ class CreateMembershipForInviteTest extends TestCase
         $client->createMembershipForInvite([
             'identity_id'     => 'identity-1',
             'tenant_id'       => 'tenant-1',
-            'is_tenant_owner' => true, // deliberately included — must be stripped
+            'is_tenant_owner' => true, // deliberately included — must be forced false
+        ], 'secret');
+    }
+
+    /**
+     * BUGFIX (2026-08-17): every create-membership call must carry an
+     * EXPLICIT boolean, never an implicit auth-side default — this pins the
+     * invite path's half of that contract (the creator path's half is
+     * ProvisionTenantRouteBugFixesTest / ProvisionTenantRoutePlatformCodeGuardTest).
+     */
+    public function test_sends_explicit_is_tenant_owner_false_when_caller_omits_it(): void
+    {
+        $client = $this->client();
+        $client->expects($this->once())
+            ->method('createMembership')
+            ->with(
+                $this->callback(function (array $data) {
+                    $this->assertArrayHasKey('is_tenant_owner', $data);
+                    $this->assertFalse($data['is_tenant_owner']);
+                    return true;
+                }),
+                'secret'
+            )
+            ->willReturn([]);
+
+        $client->createMembershipForInvite([
+            'identity_id' => 'identity-1',
+            'tenant_id'   => 'tenant-1',
+            // is_tenant_owner deliberately omitted — must not be left implicit.
         ], 'secret');
     }
 

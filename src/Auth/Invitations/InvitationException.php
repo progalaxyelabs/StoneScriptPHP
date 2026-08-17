@@ -51,6 +51,14 @@ class InvitationException extends \Exception
      */
     public const INVALID_AUTH_TOKEN = 'invite_invalid_passport';
 
+    /**
+     * SECURITY: the auth token's `platform_code` claim does not admit it for
+     * THIS platform — see {@see \StoneScriptPHP\Auth\PlatformCodeGuard}. The
+     * token is otherwise validly signed/unexpired (that's INVALID_AUTH_TOKEN's
+     * job); this is specifically the shared-issuer cross-platform-token guard.
+     */
+    public const WRONG_PLATFORM = 'wrong_platform';
+
     /** The server-to-server create-membership call to auth failed. */
     public const MEMBERSHIP_FAILED = 'invite_membership_failed';
 

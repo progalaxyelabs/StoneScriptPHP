@@ -248,6 +248,48 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         $this->assertTrue($provisioner->provisionCalled, 'a genuinely new tenant must still run the provisioner');
     }
 
+    // ── BUGFIX (2026-08-17): is_tenant_owner must be sent explicit=true ───
+    //
+    // Confirmed in production: 35/36 live memberships had is_tenant_owner=
+    // false, including tenant CREATORS — process() built $data without ever
+    // setting this key, so auth silently defaulted it to false on every
+    // single provision-tenant call. The identity creating a brand-new tenant
+    // IS its owner, structurally, by construction — this must never be an
+    // implicit default.
+
+    public function test_provision_sends_explicit_is_tenant_owner_true_to_create_membership(): void
+    {
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $route = $this->route($client, new SpyTenantProvisioner());
+        $route->tenant_name = 'Acme Store';
+        $route->idempotency_key = 'idem-1';
+
+        $route->process();
+
+        $this->assertArrayHasKey('is_tenant_owner', $client->lastCreateMembershipData ?? []);
+        $this->assertTrue($client->lastCreateMembershipData['is_tenant_owner'] ?? null);
+    }
+
+    public function test_provision_sends_is_tenant_owner_true_even_on_replay(): void
+    {
+        // A replay (existing tenant, same name — see the existing-tenant
+        // guard tests above) still calls createMembership() — must carry the
+        // same explicit true, not silently drop the key on that path.
+        $this->authenticatedUser();
+        $client = new FakeExternalAuthServiceClient();
+        $client->membershipsResponse = ['memberships' => [
+            ['tenant_id' => 'existing-tenant-99', 'tenant_name' => 'Acme Store', 'status' => 'active'],
+        ]];
+        $route = $this->route($client, new SpyTenantProvisioner());
+        $route->tenant_name = 'Acme Store';
+        $route->idempotency_key = 'idem-1';
+
+        $route->process();
+
+        $this->assertTrue($client->lastCreateMembershipData['is_tenant_owner'] ?? null);
+    }
+
     public function test_allow_additional_tenant_bypasses_the_guard(): void
     {
         $this->authenticatedUser();

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Auth\Invitations;
 
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
+use StoneScriptPHP\Auth\PlatformCodeGuard;
 use StoneScriptPHP\Auth\TokenExchangeException;
 use StoneScriptPHP\Auth\TokenExchangeService;
 
@@ -136,6 +137,35 @@ class InvitationCompletionService
                 InvitationException::INVALID_AUTH_TOKEN,
                 401,
                 $e
+            );
+        }
+
+        // Step 3b — SECURITY: reject an auth token minted for a DIFFERENT
+        // platform before this identity is ever granted a membership on
+        // THIS one. See PlatformCodeGuard's class docblock — accept-invite
+        // is exactly the kind of platform-scoped-resource-creation action
+        // the cross-platform-token gap targets: without this, an invite link
+        // sent for platform B could be completed with an auth token minted
+        // at platform A, joining the invitee to B's tenant on the strength
+        // of a token B never issued.
+        $configuredPlatformCode = $platformConfig['platform_code'] ?? null;
+        $guardReason = PlatformCodeGuard::check($authClaims['platform_code'] ?? null, $configuredPlatformCode);
+        if ($guardReason === PlatformCodeGuard::UNCONFIGURED) {
+            log_warning(
+                'InvitationCompletionService: platform_code guard skipped — no platform_code was ' .
+                'passed in $platformConfig, so an auth token minted for ANY platform on the shared ' .
+                'auth issuer is accepted here. Pass platform_code to close this gap.'
+            );
+        } elseif (PlatformCodeGuard::isRejection($guardReason)) {
+            log_warning(
+                "InvitationCompletionService: rejecting accept-invite — platform_code guard failed ({$guardReason}); " .
+                'token platform_code=' . ($authClaims['platform_code'] ?? '(none)') .
+                ', this platform=' . ($configuredPlatformCode ?? '(unset)')
+            );
+            throw new InvitationException(
+                'This invitation link is not valid for the account you are signed in with',
+                InvitationException::WRONG_PLATFORM,
+                403
             );
         }
 

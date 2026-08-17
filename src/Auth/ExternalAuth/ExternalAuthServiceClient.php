@@ -373,22 +373,32 @@ class ExternalAuthServiceClient extends AuthServiceClient
      *     once, at creation, and is never editable afterward.
      *
      * Unlike `createMembership()` (still used, unchanged, by
-     * `ProvisionTenantRoute` with an explicit structural `role: 'owner'`
-     * historically, now `is_tenant_owner: true` — that call is a constant,
-     * not invitation data, so it is NOT affected by this stripping), this
-     * entry point exists specifically so a future reviewer sees the
-     * omission is deliberate.
+     * `ProvisionTenantRoute`, which sends an explicit structural
+     * `is_tenant_owner: true` — that call is a constant, not invitation
+     * data, so it is NOT affected by this stripping), this entry point
+     * exists specifically so a future reviewer sees the omission is
+     * deliberate.
+     *
+     * BUGFIX (2026-08-17): `is_tenant_owner` used to be `unset()` here and
+     * left for auth to default to `false` — an IMPLICIT false, relying on a
+     * downstream default this method's own docblock never actually
+     * guaranteed would stay `false` forever. Every create-membership call
+     * must now carry an EXPLICIT boolean (creator path sends `true`, this
+     * invite path sends `false`) so the field's value is never left to an
+     * unstated default on either path.
      *
      * @param array $data Membership data — identity_id, tenant_id,
-     *   platform_code, tenant_db_schema, email, etc. Any `role`/`roles`/
-     *   `is_tenant_owner` key present is stripped before the call.
+     *   platform_code, tenant_db_schema, email, etc. Any `role`/`roles`
+     *   key present is stripped before the call; `is_tenant_owner` is
+     *   always overwritten to `false`, never left to the caller.
      * @param string $platformSecret X-Platform-Secret header value
      * @return array Auth service response with membership + tokens
      * @throws AuthServiceException
      */
     public function createMembershipForInvite(array $data, string $platformSecret): array
     {
-        unset($data['role'], $data['roles'], $data['is_tenant_owner']);
+        unset($data['role'], $data['roles']);
+        $data['is_tenant_owner'] = false;
         return $this->createMembership($data, $platformSecret);
     }
 

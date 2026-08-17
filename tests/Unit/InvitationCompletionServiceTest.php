@@ -421,4 +421,130 @@ class InvitationCompletionServiceTest extends TestCase
         $e = new InvitationException('boom', InvitationException::EXPIRED, 410);
         $this->assertSame(['error' => 'invite_expired', 'message' => 'boom'], $e->toArray());
     }
+
+    // ── SECURITY: cross-platform token rejection (PlatformCodeGuard) ────────
+    //
+    // The shared auth issuer means a signature/exp-valid auth token minted
+    // for platform A is cryptographically valid at platform B too. An invite
+    // link sent for platform B must not be completable with such a token —
+    // otherwise the invitee joins B's tenant on the strength of a token B
+    // never issued. See PlatformCodeGuard's class docblock.
+
+    public function test_complete_admits_matching_platform_code(): void
+    {
+        $repository = $this->createMock(InvitationRepositoryInterface::class);
+        $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
+
+        $tokenExchange = $this->createMock(TokenExchangeService::class);
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims(['platform_code' => 'testapp']));
+
+        $authClient = $this->createMock(ExternalAuthServiceClient::class);
+        $authClient->method('createMembershipForInvite')->willReturn(['membership_id' => 'mem-1', 'access_token' => 'tok']);
+
+        $service = new InvitationCompletionService($tokenExchange, $authClient);
+
+        $result = $service->complete(
+            'token',
+            'auth-token',
+            $repository,
+            fn($i) => $i->role,
+            fn($i, $c, $r) => ['tenant_id' => 'tenant-1'],
+            $this->authConfig(),
+            ['platform_secret' => 's', 'card' => false, 'platform_code' => 'testapp']
+        );
+
+        $this->assertSame('passthrough', $result['mode'], 'same-platform traffic must pass unchanged');
+    }
+
+    public function test_complete_rejects_cross_platform_token(): void
+    {
+        $repository = $this->createMock(InvitationRepositoryInterface::class);
+        $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
+        $repository->expects($this->never())->method('markAccepted');
+
+        $tokenExchange = $this->createMock(TokenExchangeService::class);
+        // Token was minted at 'otherapp'; this platform is 'testapp'.
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims(['platform_code' => 'otherapp']));
+
+        $authClient = $this->createMock(ExternalAuthServiceClient::class);
+        $authClient->expects($this->never())->method('createMembershipForInvite');
+
+        $service = new InvitationCompletionService($tokenExchange, $authClient);
+
+        try {
+            $service->complete(
+                'token',
+                'auth-token',
+                $repository,
+                fn($i) => $i->role,
+                fn($i, $c, $r) => ['tenant_id' => 'tenant-1'],
+                $this->authConfig(),
+                ['platform_secret' => 's', 'platform_code' => 'testapp']
+            );
+            $this->fail('expected InvitationException');
+        } catch (InvitationException $e) {
+            $this->assertSame(InvitationException::WRONG_PLATFORM, $e->getErrorCode());
+            $this->assertSame(403, $e->getHttpStatusCode());
+        }
+    }
+
+    public function test_complete_rejects_missing_platform_code_claim_when_platform_is_configured(): void
+    {
+        $repository = $this->createMock(InvitationRepositoryInterface::class);
+        $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
+        $repository->expects($this->never())->method('markAccepted');
+
+        $tokenExchange = $this->createMock(TokenExchangeService::class);
+        // authClaims() helper never includes platform_code — unprovable, must fail closed.
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims());
+
+        $authClient = $this->createMock(ExternalAuthServiceClient::class);
+        $authClient->expects($this->never())->method('createMembershipForInvite');
+
+        $service = new InvitationCompletionService($tokenExchange, $authClient);
+
+        try {
+            $service->complete(
+                'token',
+                'auth-token',
+                $repository,
+                fn($i) => $i->role,
+                fn($i, $c, $r) => ['tenant_id' => 'tenant-1'],
+                $this->authConfig(),
+                ['platform_secret' => 's', 'platform_code' => 'testapp']
+            );
+            $this->fail('expected InvitationException');
+        } catch (InvitationException $e) {
+            $this->assertSame(InvitationException::WRONG_PLATFORM, $e->getErrorCode());
+            $this->assertSame(403, $e->getHttpStatusCode());
+        }
+    }
+
+    public function test_complete_admits_any_platform_code_when_platform_code_not_configured(): void
+    {
+        // $platformConfig has no 'platform_code' key at all — every other test
+        // in this file relies on exactly this (backward compat / fail-open).
+        $repository = $this->createMock(InvitationRepositoryInterface::class);
+        $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
+
+        $tokenExchange = $this->createMock(TokenExchangeService::class);
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims(['platform_code' => 'some-other-platform']));
+
+        $authClient = $this->createMock(ExternalAuthServiceClient::class);
+        $authClient->method('createMembershipForInvite')->willReturn(['membership_id' => 'mem-1', 'access_token' => 'tok']);
+
+        $service = new InvitationCompletionService($tokenExchange, $authClient);
+
+        $result = $service->complete(
+            'token',
+            'auth-token',
+            $repository,
+            fn($i) => $i->role,
+            fn($i, $c, $r) => ['tenant_id' => 'tenant-1'],
+            $this->authConfig(),
+            ['platform_secret' => 's', 'card' => false] // no platform_code key
+        );
+
+        $this->assertSame('passthrough', $result['mode'], 'unconfigured platform_code must fail OPEN');
+    }
 }

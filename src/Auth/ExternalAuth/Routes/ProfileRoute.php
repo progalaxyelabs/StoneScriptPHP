@@ -77,6 +77,14 @@ class ProfileRoute extends BaseExternalAuthRoute
             return new ApiResponse('error', 'Unauthorized', ['error' => 'unauthorized'], 401);
         }
 
+        // SECURITY: see PlatformCodeGuard's class docblock. Applies to BOTH
+        // branches below (an API token here has tenant_id set and was minted
+        // at exchange/provision time; if that minting ever happened on a
+        // different platform, /me must not honour it either).
+        if ($denial = $this->guardPlatformCode($user->platform_code)) {
+            return $denial;
+        }
+
         // API-token model response when resolvers are available.
         if ($this->tenantsResolver !== null && $this->rolesResolver !== null && $user->tenant_id) {
             return $this->apiTokenModelResponse($user);

@@ -165,6 +165,15 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         }
         $identityId = (string) $user->user_id;
 
+        // SECURITY: reject a token minted for a DIFFERENT platform before any
+        // membership/tenant write happens — see PlatformCodeGuard's class
+        // docblock for why this exists (shared auth issuer means the token's
+        // signature/exp/iss alone never proved it was meant for THIS
+        // platform). This must run before step 2 onward touches anything.
+        if ($denial = $this->guardPlatformCode($user->platform_code)) {
+            return $denial;
+        }
+
         // AUTH-SPEC §5a: tenant_name is `required` in validation_rules()
         // above — the Router validates $allInput against that BEFORE
         // process() ever runs (Router::executeHandler(), before property
@@ -262,6 +271,17 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             'pincode'          => $this->pincode,
             'country'          => $this->country,
             'role'             => 'owner',
+            // BUGFIX (2026-08-17): this route provisions a BRAND-NEW tenant —
+            // the identity calling it IS that tenant's owner, structurally,
+            // by construction. This key was missing entirely (despite
+            // ExternalAuthServiceClient::createMembershipForInvite()'s own
+            // docblock already claiming "ProvisionTenantRoute ... with an
+            // explicit structural is_tenant_owner: true" — that claim was
+            // aspirational, not actual), so auth defaulted is_tenant_owner to
+            // false on every single tenant-creation call — confirmed in
+            // production: 35/36 live memberships had is_tenant_owner=false,
+            // including tenant creators. Never omit this on the creator path.
+            'is_tenant_owner'  => true,
             // AUTH-SPEC §5a/S9 — threaded to create-membership so auth can dedup
             // on replay and return the existing tenant instead of double-creating.
             'idempotency_key'  => $this->idempotency_key,

@@ -160,6 +160,19 @@ class ExchangeRoute extends BaseExternalAuthRoute
             );
         }
 
+        // SECURITY: reject an auth token minted for a DIFFERENT platform
+        // before minting an API token for THIS one — see PlatformCodeGuard's
+        // class docblock. Exchange is the highest-value target for the
+        // cross-platform-token gap: it is what actually MINTS the
+        // tenant-scoped API token a caller then uses for every subsequent
+        // request, so leaving it unguarded would make closing
+        // ProvisionTenantRoute alone pointless (a token minted at platform A
+        // could still exchange itself into a platform-B API token for any
+        // tenant its tenants_resolver happens to allow).
+        if ($denial = $this->guardPlatformCode($authClaims['platform_code'] ?? null)) {
+            return $denial;
+        }
+
         // 3. Read tenant_id from the request body (not from the token — auth tokens are tenant-less).
         $requestedTenantId = $this->tenant_id;
         $requestedRoleId   = $this->role_id !== '' ? $this->role_id : null;

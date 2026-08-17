@@ -30,6 +30,13 @@ class MembershipsRoute extends BaseExternalAuthRoute
      */
     public function process(): ApiResponse
     {
+        // SECURITY: see PlatformCodeGuard's class docblock — the Bearer token
+        // was already signature/exp/purpose-verified by AccessTokenMiddleware,
+        // but never checked against this platform's own configured code.
+        if ($denial = $this->guardPlatformCode(auth()?->platform_code)) {
+            return $denial;
+        }
+
         return $this->proxyCall(
             fn() => $this->client->getMemberships($this->getBearerToken())
         );

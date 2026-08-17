@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.5.0] - 2026-08-17
+
+### Security — cross-platform identity/API token now rejected (`platform_code` enforcement)
+
+In a deployment where multiple platforms share one auth issuer, every
+signature/issuer/expiry-valid auth or API token is cryptographically valid
+at every platform on that issuer — `platform_code` (the claim recording
+which platform a token was minted for) was carried on every token but never
+compared to the serving platform's own configured code. A token minted at
+platform A could therefore be presented to platform B's
+identity-token-authenticated routes and be accepted as if it had been minted
+there, letting an identity provision a tenant, exchange for a tenant-scoped
+API token, or accept an invitation on a platform it never registered with.
+
+Added `StoneScriptPHP\Auth\PlatformCodeGuard`, a single shared rule now
+enforced by every identity/API-token-authenticated `ExternalAuth` route
+(`ProvisionTenantRoute`, `ExchangeRoute`, `SelectTenantRoute`,
+`MembershipsRoute`, `UpdateMembershipRoute`, `ChangePasswordRoute`,
+`ProfileRoute`) and by `InvitationCompletionService::complete()` (accept-invite):
+
+- Token `platform_code` matches this server's configured `PLATFORM_CODE` →
+  admitted, unchanged behavior.
+- Token `platform_code` present but does not match → rejected, `403
+  wrong_platform`, before any write.
+- Token missing/empty `platform_code` claim while `PLATFORM_CODE` IS
+  configured → rejected (fail closed) — an unprovable token is never treated
+  as trustworthy. Real tokens issued by the shared auth service always carry
+  this claim; only a forged/hand-crafted token would hit this path.
+- `PLATFORM_CODE` not configured on this server at all → the check is
+  skipped (fail open) so unconfigured/T1 deployments are not broken by this
+  release, but a warning is logged on every request that takes this branch —
+  set `PLATFORM_CODE` to close the gap.
+
+Public routes that never consume a Bearer identity/API token
+(`login`, `register`, `logout`, `refresh-token`, `forgot-password`,
+`reset-password`, `verify-email`, `resend-code`, `oauth/*`,
+`check-tenant-slug`, `health`) are credential- or state-based, not
+token-based, and are unaffected.
+
+Backward compatible for same-platform traffic on any deployment that already
+sets `PLATFORM_CODE` — no route signature, config option, or response shape
+changed. `9.5.0` rather than a patch release because deployments that DO set
+`PLATFORM_CODE` will now see previously-accepted cross-platform requests
+rejected, which is the intended fix but is nonetheless a behavior change
+worth a minor version bump.
+
+### Fixed — `is_tenant_owner` was never sent on tenant creation, defaulting every creator to non-owner
+
+`ProvisionTenantRoute::process()` builds the `$data` array it sends to
+`ExternalAuthServiceClient::createMembership()` on the tenant-creation path,
+but never set `is_tenant_owner` on it — despite a comment on the sibling
+`createMembershipForInvite()` method already (incorrectly) claiming this
+route "sends an explicit structural `is_tenant_owner: true`". It never did.
+Auth accepts and threads this field, defaulting to `false` when the key is
+absent, so every single tenant CREATOR silently came out as a non-owner
+membership — confirmed in production (35/36 live memberships had
+`is_tenant_owner=false`, including tenant creators).
+
+- `ProvisionTenantRoute::process()` now sends `is_tenant_owner: true`
+  explicitly — the identity provisioning a brand-new tenant is that tenant's
+  owner, structurally, by construction.
+- `ExternalAuthServiceClient::createMembershipForInvite()` (the accept-invite
+  path) no longer relies on an implicit auth-side default either — it now
+  sends an explicit `is_tenant_owner: false` (previously it `unset()` the key
+  and leaned on auth defaulting it, which happened to be the right value but
+  was never stated). Every create-membership call now carries an explicit
+  boolean on both paths — never an implicit default on either.
+
+No auth-service change required — the internal create-membership handler
+already read and threaded this field; the framework was simply never sending
+it on the path that mattered.
+
 ## [9.4.0] - 2026-08-13
 
 ### Added — opt-in per-route client-side fetch timeout (`client_timeout_ms`)

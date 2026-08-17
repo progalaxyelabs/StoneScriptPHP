@@ -35,6 +35,11 @@ class ChangePasswordRoute extends BaseExternalAuthRoute
      */
     public function process(): ApiResponse
     {
+        // SECURITY: see PlatformCodeGuard's class docblock.
+        if ($denial = $this->guardPlatformCode(auth()?->platform_code)) {
+            return $denial;
+        }
+
         return $this->proxyCall(
             fn() => $this->client->changePassword(
                 $this->current_password,
