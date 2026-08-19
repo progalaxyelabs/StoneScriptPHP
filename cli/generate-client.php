@@ -1,10 +1,21 @@
 <?php
 
 /**
- * API Client Generator — v4.7
+ * API Client Generator — v4.10
  *
  * Generates per-service TypeScript client packages from PHP routes.
  * Implements CLIENT-SDK-SPEC §0 Amendments A1–A6 (approved 2026-06-14).
+ *
+ * v4.10 (framework v9.6.0 — request-DTO reflection + opt-in strict gate):
+ *   - `request:` route declaration mirrors `response:` exactly — reflects a
+ *     DTO's public typed properties into a TS interface and types the
+ *     generated method's body parameter to it instead of the untyped
+ *     `T.ApiRequestBody`. See routeRequestTsType()/buildMethodTs().
+ *   - typedContractViolations() + `--strict-types` / STONE_CLIENT_GEN_STRICT_TYPES
+ *     env var: an opt-in hard gate that turns "route missing a `response:`
+ *     (any method) or `request:` (body verb) DTO" from a silent `unknown`
+ *     fallback into a listed WARNING (default, unchanged) or a hard
+ *     exit(1) (opt-in). See CHANGELOG.md v9.6.0 for the full rationale.
  *
  * v4.7 (T3 tenant-prefix guard — production incident on a downstream platform):
  *   - Added assertT3RoutesCarryTenantPrefix(), called once per T3-tenant-scoped
@@ -132,6 +143,16 @@ $serviceFilter  = null;          // null = all services; string = one service on
 $language       = 'typescript';  // Only TypeScript supported in v4.0
 $scopeArg       = null;          // OPTIONAL positional (deprecated — accepted but no longer used for naming)
 
+// v9.6.0 (Phase 3, CLIENT-SDK-SPEC §10 amendment) — opt-in hard gate for typed
+// contracts. Default OFF (today's warn-and-fall-back-to-unknown behavior,
+// unchanged) so this ships to the whole fleet via composer without breaking
+// platforms that haven't typed their routes yet. A platform
+// turns it on per-generation via `--strict-types`, or persistently via
+// STONE_CLIENT_GEN_STRICT_TYPES=1 in its own environment/.env (read here via
+// getenv(), NOT the framework's Env class — the generator runs standalone,
+// before any platform bootstrap). See typedContractViolations() below.
+$strictTypedContracts = in_array(getenv('STONE_CLIENT_GEN_STRICT_TYPES'), ['1', 'true', 'yes'], true);
+
 // Use the dispatcher-adjusted argv. When invoked via `php stone generate client [scope]`,
 // the `stone` CLI sets $_SERVER['argv'] = [$scriptPath, ...$args_after_subcommand] — so
 // $_SERVER['argv'][1] is the first real argument (e.g. "www"), NOT "generate" or "client".
@@ -142,8 +163,8 @@ $argv = $_SERVER['argv'];
 // Help check first — before positional parsing
 if (array_intersect(['--help', '-h', 'help'], $argv)) {
     echo <<<HELP
-API Client Generator v4.7
-=========================
+API Client Generator v4.10
+==========================
 
 Generates per-service TypeScript client packages (CLIENT-SDK-SPEC §0 A1-A6).
 Package name for each service package is derived as {composer-name}-{service}-client.
@@ -168,6 +189,11 @@ Options:
                       T1: no tenant scope
   --service=<name>    Generate only the named service package (default: all)
   --language=<lang>   typescript (only option in v4.0)
+  --strict-types      Hard-fail (exit 1) instead of warn when a route lacks a
+                      full typed contract (`response:` on any method,
+                      `request:` on POST/PUT/PATCH/DELETE). Default: off —
+                      opt in per-invocation here, or persistently via
+                      STONE_CLIENT_GEN_STRICT_TYPES=1 in your environment.
 
 Each route MUST declare:
   service: 'portal'    (on the group — partition key)
@@ -188,6 +214,7 @@ foreach ($argv as $i => $arg) {
     if (str_starts_with($arg, '--tenancy='))  { $tenancyMode   = strtoupper(substr($arg, 10)); continue; }
     if (str_starts_with($arg, '--service='))  { $serviceFilter = strtolower(substr($arg, 10)); continue; }
     if (str_starts_with($arg, '--language=')) { $language       = strtolower(substr($arg, 11)); continue; }
+    if ($arg === '--strict-types')            { $strictTypedContracts = true; continue; }
     if (str_starts_with($arg, '--'))          { continue; } // unknown flag — skip
 
     // First non-flag argument = <scope>
@@ -392,6 +419,33 @@ ERR
         );
         exit(1);
     }
+}
+
+/**
+ * v9.6.0 (Phase 3, CLIENT-SDK-SPEC §10 amendment). Report every way an
+ * includable route falls short of a FULL typed contract: a missing
+ * `response:` DTO, or (for a body-carrying verb) a missing `request:` DTO.
+ * Pure — returns human-readable violation strings, does not print or exit;
+ * the caller decides whether that's a warning or a hard failure based on
+ * $strictTypedContracts (see top-of-file CLI arg / env parsing).
+ *
+ * @param array<string,mixed> $route
+ * @return string[] Empty when the route is fully typed.
+ */
+function typedContractViolations(array $route): array
+{
+    $violations = [];
+    $method  = strtoupper($route['method'] ?? '?');
+    $hasBody = in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true);
+
+    if (empty($route['response'])) {
+        $violations[] = 'missing `response:` DTO';
+    }
+    if ($hasBody && empty($route['request'])) {
+        $violations[] = "missing `request:` DTO ($method carries a body)";
+    }
+
+    return $violations;
 }
 
 /**
@@ -1401,8 +1455,14 @@ function buildGroupMethods(
         // Resolve typed return (CLIENT-SDK-SPEC §10). null → ApiResponse fallback.
         $responseTs = routeResponseTsType($route);
 
+        // Resolve typed request body (v9.6.0, CLIENT-SDK-SPEC §10 amendment).
+        // null → T.ApiRequestBody fallback. Meaningless on GET (buildMethodTs
+        // only consumes it inside the body-verb branch) — computed unconditionally
+        // for simplicity, same pattern as $responseTs above.
+        $requestTs = routeRequestTsType($route);
+
         // Build method signature and call
-        $methodTs = buildMethodTs($action, $method, $urlTemplate, $needsIdParam, $responseTs, $accessType, $timeoutMs);
+        $methodTs = buildMethodTs($action, $method, $urlTemplate, $needsIdParam, $responseTs, $accessType, $timeoutMs, $requestTs);
         $lines[] = $methodTs;
     }
 
@@ -1510,6 +1570,7 @@ function buildMethodTs(
     ?string $responseTs = null,
     ?string $accessType = null,
     ?int    $timeoutMs = null,
+    ?string $requestTs = null,
 ): string {
     // Return-payload generic: typed DTO when declared, else ApiResponse (unknown).
     $ret = $responseTs ?? 'T.ApiResponse';
@@ -1560,16 +1621,23 @@ TS;
     }
 
     if ($bodyVerb !== null) {
+        // v9.6.0 (CLIENT-SDK-SPEC §10 amendment): a route may declare
+        // `request: SomeDto::class` to type the body parameter instead of the
+        // generic `T.ApiRequestBody` fallback. Mirrors the `response:` DTO
+        // reflection this generator already does — see reflectDto()/
+        // routeRequestTsType() below.
+        $dataTs = $requestTs ?? 'T.ApiRequestBody';
+
         if ($needsIdParam) {
             // Body verb with path id — e.g. inventory.update(id, data?) / routes.start(id, data?)
             return <<<TS
-    {$action}: (id: string | number, data?: T.ApiRequestBody) =>
+    {$action}: (id: string | number, data?: {$dataTs}) =>
       this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data{$optionsArg}),
 TS;
         } else {
             // Body verb without path id — e.g. inventory.create(data?)
             return <<<TS
-    {$action}: (data?: T.ApiRequestBody) =>
+    {$action}: (data?: {$dataTs}) =>
       this.http.{$bodyVerb}<{$ret}>({$urlTemplate}, data{$optionsArg}),
 TS;
         }
@@ -1824,6 +1892,31 @@ function routeResponseTsType(array $route): ?string
     }
     $tsName = 'T.' . $tsName;
     return !empty($route['collection']) ? $tsName . '[]' : $tsName;
+}
+
+/**
+ * Resolve a route's `request` declaration into the TS request-body type used
+ * for the generated method's `data` parameter. Returns null when the route
+ * declares no `request` (caller keeps the `T.ApiRequestBody`/unknown fallback).
+ *
+ * v9.6.0 — mirrors {@see routeResponseTsType()} exactly, using the same
+ * `reflectDto()` machinery (recursive, deduped, cycle-safe). A request body
+ * is always a single object — there is no `collection` concept on the way
+ * IN (unlike `response`, which may legitimately be a bare JSON array).
+ *
+ * @return string|null e.g. 'T.CreateItemRequest', or null.
+ */
+function routeRequestTsType(array $route): ?string
+{
+    $dto = $route['request'] ?? null;
+    if ($dto === null || $dto === '') {
+        return null;
+    }
+    $tsName = reflectDto($dto);
+    if ($tsName === 'unknown') {
+        return null; // class missing — graceful fallback
+    }
+    return 'T.' . $tsName;
 }
 
 /**
@@ -2105,6 +2198,7 @@ echo "Found " . count($allRoutes) . " route(s)\n";
 $included        = [];  // service → [route, ...]
 $skippedReasons  = [];  // path → reason
 $streamingByService = []; // service → [streaming route, ...]
+$typedContractIssues = []; // "METHOD /path: reason" — Phase 3 gate, see typedContractViolations()
 
 foreach ($allRoutes as $route) {
     $service = strtolower($route['service'] ?? 'shared');
@@ -2131,7 +2225,37 @@ foreach ($allRoutes as $route) {
         continue;
     }
 
+    // Phase 3 (v9.6.0): record typed-contract gaps for routes that will
+    // actually be generated this run. Reporting (warn vs hard-fail) happens
+    // once, after the full route list has been classified — see below.
+    foreach (typedContractViolations($route) as $violation) {
+        $typedContractIssues[] = strtoupper($route['method'] ?? '?') . ' ' . ($route['path'] ?? '?') . ': ' . $violation;
+    }
+
     $included[$service][] = $route;
+}
+
+// Phase 3 (v9.6.0): report typed-contract gaps. Default (STONE_CLIENT_GEN_STRICT_TYPES
+// unset, no --strict-types) = WARNING, generation proceeds with the existing
+// ApiResponse/ApiRequestBody (= unknown) fallback — byte-identical to pre-v9.6.0
+// behavior for every platform that hasn't opted in yet. Strict mode = hard
+// failure, exit(1), nothing written — see CLIENT-SDK-SPEC §10 amendment.
+if (!empty($typedContractIssues)) {
+    if ($strictTypedContracts) {
+        fwrite(STDERR, "\n[stone generate client] ERROR: --strict-types (or STONE_CLIENT_GEN_STRICT_TYPES) is enabled and " . count($typedContractIssues) . " route(s) lack a full typed contract:\n\n");
+        foreach ($typedContractIssues as $issue) {
+            fwrite(STDERR, "  - $issue\n");
+        }
+        fwrite(STDERR, "\nDeclare `response:` (and `request:` for POST/PUT/PATCH/DELETE) DTOs on every route above,\n"
+            . "or drop --strict-types / STONE_CLIENT_GEN_STRICT_TYPES for now. Generation aborted — nothing written.\n");
+        exit(1);
+    }
+
+    fwrite(STDERR, "\n[stone generate client] WARNING: " . count($typedContractIssues) . " route(s) lack a full typed contract (falls back to ApiResponse/ApiRequestBody = unknown):\n");
+    foreach ($typedContractIssues as $issue) {
+        fwrite(STDERR, "  - $issue\n");
+    }
+    fwrite(STDERR, "Set --strict-types (or STONE_CLIENT_GEN_STRICT_TYPES=1) to make this a hard failure once every route on this platform is typed.\n\n");
 }
 
 if (empty($included)) {

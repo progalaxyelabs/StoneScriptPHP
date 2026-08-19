@@ -9,6 +9,10 @@ use StoneScriptPHP\Subscriptions\Routes\GetSubscriptionStatusRoute;
 use StoneScriptPHP\Subscriptions\Routes\GetSubscriptionPlansRoute;
 use StoneScriptPHP\Subscriptions\Routes\PostAdminActivateRoute;
 use StoneScriptPHP\Subscriptions\Routes\PostRazorpayWebhookRoute;
+use StoneScriptPHP\Subscriptions\Dto\SubscriptionStatusDto;
+use StoneScriptPHP\Subscriptions\Dto\SubscriptionPlanDto;
+use StoneScriptPHP\Subscriptions\Dto\SubscriptionActivateResponseDto;
+use StoneScriptPHP\Subscriptions\Dto\RazorpayWebhookAckDto;
 
 /**
  * Subscription Route Registration
@@ -60,24 +64,55 @@ class SubscriptionRoutes
         $prefix = $config->prefix;
 
         // Public routes (no JWT required)
+        // service:'webhook' — client-generation exclusion (CLIENT-SDK-SPEC §0
+        // A3): a payment callback is never called by the generated Angular
+        // client, so it's excluded from the emitted package outright rather
+        // than typed for a consumer that will never invoke it.
         if ($config->isEnabled('razorpay_webhook')) {
-            $router->post("$prefix/webhook/razorpay", new PostRazorpayWebhookRoute($config), [], true);
+            $router->post(
+                "$prefix/webhook/razorpay",
+                new PostRazorpayWebhookRoute($config),
+                middleware: [],
+                isPublic: true,
+                group: 'subscription',
+                service: 'webhook',
+                response: RazorpayWebhookAckDto::class,
+            );
             log_debug("SubscriptionRoutes: Registered POST $prefix/webhook/razorpay (public)");
         }
 
         if ($config->isEnabled('admin_activate')) {
-            $router->post("$prefix/admin/activate", new PostAdminActivateRoute($config), [], true);
+            $router->post(
+                "$prefix/admin/activate",
+                new PostAdminActivateRoute($config),
+                middleware: [],
+                isPublic: true,
+                group: 'subscription',
+                service: 'infra',
+                response: SubscriptionActivateResponseDto::class,
+            );
             log_debug("SubscriptionRoutes: Registered POST $prefix/admin/activate (X-Admin-Key)");
         }
 
         // Protected routes (JWT required)
         if ($config->isEnabled('status')) {
-            $router->get("$prefix/status", new GetSubscriptionStatusRoute($config));
+            $router->get(
+                "$prefix/status",
+                new GetSubscriptionStatusRoute($config),
+                group: 'subscription',
+                response: SubscriptionStatusDto::class,
+            );
             log_debug("SubscriptionRoutes: Registered GET $prefix/status (protected)");
         }
 
         if ($config->isEnabled('plans')) {
-            $router->get("$prefix/plans", new GetSubscriptionPlansRoute($config));
+            $router->get(
+                "$prefix/plans",
+                new GetSubscriptionPlansRoute($config),
+                group: 'subscription',
+                response: SubscriptionPlanDto::class,
+                collection: true,
+            );
             log_debug("SubscriptionRoutes: Registered GET $prefix/plans (protected)");
         }
 
@@ -146,17 +181,46 @@ class SubscriptionRoutes
         $isEnabled = fn(string $feature) => $features[$feature] ?? false;
         $routes = ['GET' => [], 'POST' => []];
 
+        // v9.6.0: full array-config format (handler + group + service +
+        // response DTO + collection) instead of a bare handler class string —
+        // Router::normalizeRouteConfig() accepts both forms, so a platform's
+        // routes.php merging these via
+        // `array_merge($routes[$method] ?? [], SubscriptionRoutes::getRouteDefinitions(...)[$method] ?? [])`
+        // keeps working unchanged, but now gets a typed, client-generatable
+        // contract instead of assertGroupDeclared() hard-erroring on a
+        // missing `group`.
         if ($isEnabled('razorpay_webhook')) {
-            $routes['POST']["$prefix/webhook/razorpay"] = PostRazorpayWebhookRoute::class;
+            $routes['POST']["$prefix/webhook/razorpay"] = [
+                'handler' => PostRazorpayWebhookRoute::class,
+                'group' => 'subscription',
+                'service' => 'webhook',
+                'is_public' => true,
+                'response' => RazorpayWebhookAckDto::class,
+            ];
         }
         if ($isEnabled('admin_activate')) {
-            $routes['POST']["$prefix/admin/activate"] = PostAdminActivateRoute::class;
+            $routes['POST']["$prefix/admin/activate"] = [
+                'handler' => PostAdminActivateRoute::class,
+                'group' => 'subscription',
+                'service' => 'infra',
+                'is_public' => true,
+                'response' => SubscriptionActivateResponseDto::class,
+            ];
         }
         if ($isEnabled('status')) {
-            $routes['GET']["$prefix/status"] = GetSubscriptionStatusRoute::class;
+            $routes['GET']["$prefix/status"] = [
+                'handler' => GetSubscriptionStatusRoute::class,
+                'group' => 'subscription',
+                'response' => SubscriptionStatusDto::class,
+            ];
         }
         if ($isEnabled('plans')) {
-            $routes['GET']["$prefix/plans"] = GetSubscriptionPlansRoute::class;
+            $routes['GET']["$prefix/plans"] = [
+                'handler' => GetSubscriptionPlansRoute::class,
+                'group' => 'subscription',
+                'response' => SubscriptionPlanDto::class,
+                'collection' => true,
+            ];
         }
 
         return $routes;

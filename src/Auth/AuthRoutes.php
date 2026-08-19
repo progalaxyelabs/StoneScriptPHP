@@ -5,6 +5,7 @@ namespace StoneScriptPHP\Auth;
 use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Auth\Routes\RefreshRoute;
 use StoneScriptPHP\Auth\Routes\LogoutRoute;
+use StoneScriptPHP\Auth\Dto\RefreshTokenResponseDto;
 use StoneScriptPHP\Auth\TokenStorageInterface;
 use StoneScriptPHP\Auth\JwtHandlerInterface;
 
@@ -81,7 +82,13 @@ class AuthRoutes
             $refreshPath = "$prefix/refresh";
             // Pass JWT handler to RefreshRoute if provided
             $refreshRoute = $jwtHandler ? new RefreshRoute($jwtHandler) : RefreshRoute::class;
-            $router->post($refreshPath, $refreshRoute, $middleware);
+            $router->post(
+                $refreshPath,
+                $refreshRoute,
+                middleware: $middleware,
+                group: 'auth',
+                response: RefreshTokenResponseDto::class,
+            );
             log_debug("AuthRoutes: Registered POST $refreshPath");
         }
 

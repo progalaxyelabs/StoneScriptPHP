@@ -8,6 +8,7 @@ use StoneScriptPHP\IRouteHandler;
 use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\Database;
 use StoneScriptPHP\Subscriptions\SubscriptionConfig;
+use StoneScriptPHP\Webhooks\WebhookQuarantine;
 
 /**
  * POST /subscription/webhook/razorpay
@@ -56,7 +57,18 @@ class PostRazorpayWebhookRoute implements IRouteHandler
 
         $payload = json_decode($rawBody, true);
         if (!$payload || !is_array($payload)) {
-            error_log('[Razorpay Webhook] Invalid JSON payload');
+            // SIGNATURE ALREADY VERIFIED above — this is a genuinely malformed
+            // envelope from an otherwise-authentic sender, not a spoofed request.
+            // Quarantine rather than drop: never lose a signed payment event.
+            WebhookQuarantine::quarantine(
+                $this->config->platformCode ?? '',
+                'razorpay',
+                null,
+                'Signature verified but body is not valid JSON',
+                $this->requestHeaders(),
+                ['raw_body_excerpt' => substr($rawBody, 0, 2000)]
+            );
+            error_log('[Razorpay Webhook] Invalid JSON payload — quarantined');
             return res_error('Invalid payload', 400);
         }
 
@@ -72,23 +84,51 @@ class PostRazorpayWebhookRoute implements IRouteHandler
         return res_ok(['status' => 'received']);
     }
 
+    /**
+     * Current request headers, lowercased-key associative array — used only
+     * to persist alongside a quarantined envelope (see WebhookQuarantine).
+     */
+    private function requestHeaders(): array
+    {
+        if (function_exists('getallheaders')) {
+            $headers = getallheaders();
+            return is_array($headers) ? $headers : [];
+        }
+        return [];
+    }
+
     private function handlePaymentCaptured(array $payload): void
     {
         $payment = $payload['payload']['payment']['entity'] ?? [];
 
-        $paymentId = $payment['id'] ?? 'unknown';
-        $amountPaise = $payment['amount'] ?? 0;
-        $amountCents = (int) $amountPaise; // Razorpay sends in paise = cents for INR
-        $email = strtolower(trim($payment['email'] ?? ''));
-        $phone = $this->normalizePhone($payment['contact'] ?? '');
-        $method = $payment['method'] ?? '';
+        // CONTRACT CHECK — a payment.captured event whose `entity` is missing
+        // the fields this handler NEEDS to act correctly is exactly the case
+        // WebhookQuarantine exists for: this is a payment path, so silently
+        // proceeding with defaulted/guessed values (the old `?? 'unknown'` /
+        // `?? 0` behavior) risked activating the wrong subscription or losing
+        // the ability to ever reconcile the payment. Quarantine instead of
+        // silently-absorbing.
+        $paymentId = $payment['id'] ?? null;
+        $amountPaise = $payment['amount'] ?? null;
+        $email = isset($payment['email']) ? strtolower(trim((string) $payment['email'])) : '';
 
-        error_log("[Razorpay Webhook] Payment captured: id={$paymentId}, amount_paise={$amountPaise}, email={$email}, phone={$phone}");
-
-        if (empty($email)) {
-            error_log("[Razorpay Webhook] No email in payment {$paymentId} — cannot match tenant");
+        if (!is_string($paymentId) || $paymentId === '' || !is_int($amountPaise) || $email === '') {
+            WebhookQuarantine::quarantine(
+                $this->config->platformCode ?? '',
+                'razorpay',
+                'payment.captured',
+                'payment.captured entity missing required id/amount/email field(s) — refusing to guess',
+                $this->requestHeaders(),
+                $payload
+            );
             return;
         }
+
+        $amountCents = $amountPaise; // Razorpay sends in paise = cents for INR
+        $phone = $this->normalizePhone((string) ($payment['contact'] ?? ''));
+        $method = (string) ($payment['method'] ?? '');
+
+        error_log("[Razorpay Webhook] Payment captured: id={$paymentId}, amount_paise={$amountPaise}, email={$email}, phone={$phone}");
 
         try {
             $gw = Database::getGatewayClient();
@@ -111,8 +151,19 @@ class PostRazorpayWebhookRoute implements IRouteHandler
                 }
 
                 if (!$sub || empty($sub['tenant_id'])) {
-                    error_log("[Razorpay Webhook] No subscription found for email={$email}, payment_id={$paymentId}");
-                    error_log("[Razorpay Webhook] MANUAL ACTIVATION NEEDED: email={$email}, phone={$phone}, payment_id={$paymentId}, amount_paise={$amountPaise}");
+                    // A real, signature-verified payment we cannot attribute to any
+                    // tenant is a billing-critical event, not a routine log line —
+                    // quarantine it so it surfaces for manual reconciliation instead
+                    // of being buried in application logs (this is the exact
+                    // "silently-absorbs" anti-pattern WebhookQuarantine exists to end).
+                    WebhookQuarantine::quarantine(
+                        $this->config->platformCode ?? '',
+                        'razorpay',
+                        'payment.captured',
+                        "Verified payment {$paymentId} has no matching subscription for email={$email} — MANUAL ACTIVATION NEEDED",
+                        $this->requestHeaders(),
+                        $payload
+                    );
                     return;
                 }
 

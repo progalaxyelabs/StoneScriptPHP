@@ -6,6 +6,7 @@ namespace StoneScriptPHP\Analytics;
 
 use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Analytics\Routes\PostTrackEventRoute;
+use StoneScriptPHP\Analytics\Dto\TrackEventResponseDto;
 
 /**
  * Analytics Route Registration
@@ -66,11 +67,40 @@ class AnalyticsRoutes
         $router->post(
             "$prefix/track",
             new PostTrackEventRoute($config),
-            [],
-            true // isPublic = true
+            middleware: [],
+            isPublic: true,
+            group: 'analytics',
+            response: TrackEventResponseDto::class,
         );
 
         log_debug("AnalyticsRoutes: Registered POST $prefix/track (public)");
+    }
+
+    /**
+     * Get route definitions in the same format as routes.php. Used by the
+     * client generator to include this framework-level route (mirrors
+     * SubscriptionRoutes::getRouteDefinitions() / ExternalAuthRoutes::getRouteDefinitions()).
+     *
+     * @param array $options Same options passed to register()
+     * @return array Route definitions grouped by HTTP method
+     */
+    public static function getRouteDefinitions(array $options = []): array
+    {
+        $config = new AnalyticsConfig($options);
+        $routes = ['POST' => []];
+
+        if (!$config->enabled) {
+            return $routes;
+        }
+
+        $routes['POST']["{$config->prefix}/track"] = [
+            'handler' => PostTrackEventRoute::class,
+            'group' => 'analytics',
+            'is_public' => true,
+            'response' => TrackEventResponseDto::class,
+        ];
+
+        return $routes;
     }
 
     /**

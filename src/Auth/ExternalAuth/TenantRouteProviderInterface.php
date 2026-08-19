@@ -90,9 +90,11 @@ interface TenantRouteProviderInterface
     public function protectedPaths(string $prefix, ExternalAuthConfig $config): array;
 
     /**
-     * Route class map for the client generator (`ExternalAuthRoutes::getRouteDefinitions()`),
+     * Route definitions for the client generator (`ExternalAuthRoutes::getRouteDefinitions()`),
      * in the same shape Router::loadRoutes() / the generator expect:
-     * `['GET' => ['/path' => HandlerClass::class], 'POST' => [...], ...]`.
+     * `['GET' => ['/path' => ['handler' => HandlerClass::class, 'group' => ..., 'response' => ..., ...]], 'POST' => [...], ...]`.
+     * Router::normalizeRouteConfig() also accepts a bare `HandlerClass::class`
+     * string per route (pre-v9.6.0 shape) — both forms are valid values here.
      *
      * Takes a plain feature-toggle array (not ExternalAuthConfig) because the
      * caller deliberately avoids instantiating ExternalAuthConfig here — it
@@ -102,7 +104,7 @@ interface TenantRouteProviderInterface
      * @param array<string, bool> $features Feature toggle map (same keys as
      *   ExternalAuthConfig's feature toggles: select_tenant, provision_tenant,
      *   invite, memberships, check_slug, accept_invite, ...).
-     * @return array<string, array<string, string>>
+     * @return array<string, array<string, string|array<string, mixed>>>
      */
     public function getRouteDefinitions(string $prefix, array $features): array;
 }

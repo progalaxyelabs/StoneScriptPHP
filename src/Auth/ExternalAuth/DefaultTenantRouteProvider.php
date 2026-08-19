@@ -11,6 +11,9 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\UpdateMembershipRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\MembershipsRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\CheckTenantSlugRoute;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\LoginResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\ProvisionTenantResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\MembershipsResponseDto;
 
 /**
  * DefaultTenantRouteProvider
@@ -54,8 +57,23 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         mixed $tenantsResolver
     ): void {
         // Public (no-auth) tenant routes.
+        //
+        // KNOWN BUG (found during v9.6.0 typing pass, not fixed here — out of
+        // scope for a typing change): CheckTenantSlugRoute proxies to
+        // ExternalAuthServiceClient::checkTenantSlug(), which GETs
+        // `/api/auth/check-tenant-slug/{slug}` — a live audit found this path
+        // does not exist on the configured external auth service. Any
+        // platform with check_slug enabled is calling a 404. No `response:`
+        // DTO — see ExternalAuthRoutes::registerForPrefix()'s matching notes
+        // for the other endpoints this same audit found dead.
         if ($config->isEnabled('check_slug')) {
-            $router->get("$prefix/check-tenant-slug/{slug}", new CheckTenantSlugRoute($client, $config->hooks, $config), [], true);
+            $router->get(
+                "$prefix/check-tenant-slug/{slug}",
+                new CheckTenantSlugRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+            );
             log_debug("DefaultTenantRouteProvider: Registered GET $prefix/check-tenant-slug/{slug}");
         }
 
@@ -73,6 +91,8 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
             $router->post(
                 "$prefix/select-tenant",
                 new SelectTenantRoute($client, $config->hooks, $config),
+                group: 'auth',
+                response: LoginResponseDto::class,
                 access: RouteAccess::AUTHENTICATION
             );
             log_debug("DefaultTenantRouteProvider: Registered POST $prefix/select-tenant (protected, authentication)");
@@ -85,10 +105,17 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
             // already has real $client/$hooks/$config/$provisioner in scope, rather
             // than via routes.php (chronologically impossible — routes.php evaluates
             // before this method ever runs).
+            //
+            // ProvisionTenantResponseDto describes THIS class's response shape.
+            // A platform-specific subclass that overrides process() to build a
+            // different response should register its OWN `response:` DTO on its
+            // own routes.php entry rather than relying on this default.
             $routeClass = $config->provisionTenantRouteClass;
             $router->post(
                 "$prefix/provision-tenant",
                 new $routeClass($client, $config->hooks, $config, $provisioner),
+                group: 'auth',
+                response: $routeClass === ProvisionTenantRoute::class ? ProvisionTenantResponseDto::class : null,
                 access: RouteAccess::AUTHENTICATION
             );
             log_debug("DefaultTenantRouteProvider: Registered POST $prefix/provision-tenant "
@@ -101,8 +128,23 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
             $router->get(
                 "$prefix/memberships",
                 new MembershipsRoute($client, $config->hooks, $config),
+                group: 'auth',
+                response: MembershipsResponseDto::class,
                 access: RouteAccess::AUTHENTICATION
             );
+            // KNOWN BUG (found during v9.6.0 typing pass, not fixed here — out
+            // of scope for a typing change): UpdateMembershipRoute::process()
+            // calls `$this->client->updateMembership(...)`, a method that no
+            // longer exists on ExternalAuthServiceClient (removed — see that
+            // client class's docblock, "inviteMember() and updateMembership()
+            // were REMOVED"). Calling this route as registered below would be
+            // a PHP fatal error (undefined method call). It is not exposed
+            // through any `getRouteDefinitions()`/feature-toggle path a
+            // platform would discover by following the documented config
+            // surface, so it appears unreachable in practice — but the class
+            // is dead code that will fatal if ever wired up. No `response:`
+            // DTO — inventing one for a route that cannot successfully run
+            // would misrepresent it as working.
             $router->addRoute(
                 'PUT',
                 "$prefix/memberships/{id}",
@@ -148,20 +190,24 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         $isEnabled = fn(string $feature) => $features[$feature] ?? false;
         $routes = ['GET' => [], 'POST' => [], 'PUT' => []];
 
+        // v9.6.0: full array-config format — mirrors register()'s runtime
+        // wiring. See ExternalAuthRoutes::getRouteDefinitions() for the
+        // rationale and the KNOWN BUG notes for check_slug/updateMembership.
         // accept-invite REMOVED 2026-07-21 — see class docblock.
         if ($isEnabled('check_slug')) {
-            $routes['GET']["$prefix/check-tenant-slug/{slug}"] = CheckTenantSlugRoute::class;
+            $routes['GET']["$prefix/check-tenant-slug/{slug}"] = ['handler' => CheckTenantSlugRoute::class, 'group' => 'auth', 'is_public' => true];
         }
         if ($isEnabled('select_tenant')) {
-            $routes['POST']["$prefix/select-tenant"] = SelectTenantRoute::class;
+            $routes['POST']["$prefix/select-tenant"] = ['handler' => SelectTenantRoute::class, 'group' => 'auth', 'access' => 'authentication', 'response' => LoginResponseDto::class];
         }
         if ($isEnabled('provision_tenant')) {
-            $routes['POST']["$prefix/provision-tenant"] = ProvisionTenantRoute::class;
+            $routes['POST']["$prefix/provision-tenant"] = ['handler' => ProvisionTenantRoute::class, 'group' => 'auth', 'access' => 'authentication', 'response' => ProvisionTenantResponseDto::class];
         }
         // invite-member REMOVED 2026-07-21 — see class docblock.
         if ($isEnabled('memberships')) {
-            $routes['GET']["$prefix/memberships"] = MembershipsRoute::class;
-            $routes['PUT']["$prefix/memberships/{id}"] = UpdateMembershipRoute::class;
+            $routes['GET']["$prefix/memberships"] = ['handler' => MembershipsRoute::class, 'group' => 'auth', 'access' => 'authentication', 'response' => MembershipsResponseDto::class];
+            // UpdateMembershipRoute — no response DTO, see register()'s KNOWN BUG note.
+            $routes['PUT']["$prefix/memberships/{id}"] = ['handler' => UpdateMembershipRoute::class, 'group' => 'auth', 'access' => 'authentication'];
         }
 
         return $routes;

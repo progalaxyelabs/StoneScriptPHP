@@ -25,9 +25,9 @@ use StoneScriptPHP\Tenancy\TenantProvisioner;
  * POST /admin/database/create with `platform_token_middleware`, which requires a
  * per-platform scoped bearer token (ssdb_pt_...) — NOT the shared admin token.
  * TenantProvisioner was still sending $this->adminToken as the Authorization bearer,
- * so the gateway rejected every provision-tenant call with `403 unknown token` fleet-wide
- * (medstore new-pharmacy signup, restrant new-restaurant signup, etc. — every platform
- * built on the stock base class). Fixed by TenantProvisioner::getPlatformToken(), which
+ * so the gateway rejected every provision-tenant call with `403 unknown token`
+ * (any new-tenant signup on any platform built on the stock base class). Fixed by
+ * TenantProvisioner::getPlatformToken(), which
  * mirrors cli/helpers/gateway-common.php's resolveGatewayPlatformToken() /
  * stepProvisionPlatformToken() (the same flow deploy-manager's CLI-driven
  * register-tenant / migrate-all-tenants steps already use successfully): resolve an

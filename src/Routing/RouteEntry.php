@@ -85,6 +85,19 @@ class RouteEntry
         public readonly bool $collection = false,
 
         /**
+         * Request body DTO class name for typed-request generation (v9.6.0,
+         * mirrors `$response` — CLIENT-SDK-SPEC §10 amendment). When set to a
+         * DTO FQCN, the generator reflects the DTO's public typed properties
+         * into a TypeScript interface and types the generated method's body
+         * parameter as `Dto` instead of the untyped `T.ApiRequestBody`
+         * (`Record<string, unknown> | unknown[] | null`). Only meaningful on
+         * routes whose handler accepts a body (POST/PUT/PATCH/DELETE) — ignored
+         * on GET. When null, the method falls back to `T.ApiRequestBody` — the
+         * incremental-safe default, unchanged from pre-v9.6.0 behavior.
+         */
+        public readonly ?string $request = null,
+
+        /**
          * When true, the route is registered public (no JWT required) — same effect
          * as declaring it under routes.php's 'public' section in Format 1. Only
          * meaningful in Format 2 (flat format), where every route previously had no

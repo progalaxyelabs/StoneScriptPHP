@@ -186,7 +186,12 @@ class TenantRouteProviderSeamTest extends TestCase
 
     /**
      * DefaultTenantRouteProvider's getRouteDefinitions() — used by the client
-     * generator — produces the same class map as before this refactor.
+     * generator — produces the same handler map as before this refactor.
+     *
+     * v9.6.0: each entry became the full array-config format (handler +
+     * group + response DTO + access) instead of a bare handler class string
+     * — see ExternalAuthRoutes::getRouteDefinitions()'s docblock. This test
+     * now asserts against the `handler` key of that array.
      */
     public function test_default_provider_route_definitions_include_tenant_routes(): void
     {
@@ -204,15 +209,15 @@ class TenantRouteProviderSeamTest extends TestCase
 
         $this->assertSame(
             \StoneScriptPHP\Auth\ExternalAuth\Routes\SelectTenantRoute::class,
-            $routes['POST']['/api/auth/select-tenant']
+            $routes['POST']['/api/auth/select-tenant']['handler']
         );
         $this->assertSame(
             \StoneScriptPHP\Auth\ExternalAuth\Routes\MembershipsRoute::class,
-            $routes['GET']['/api/auth/memberships']
+            $routes['GET']['/api/auth/memberships']['handler']
         );
         $this->assertSame(
             \StoneScriptPHP\Auth\ExternalAuth\Routes\UpdateMembershipRoute::class,
-            $routes['PUT']['/api/auth/memberships/{id}']
+            $routes['PUT']['/api/auth/memberships/{id}']['handler']
         );
     }
 

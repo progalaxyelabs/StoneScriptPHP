@@ -7,6 +7,183 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.6.0] - 2026-08-19
+
+### Typed contracts for every framework-owned route + request-DTO reflection + opt-in strict client-gen gate + webhook quarantine module
+
+Owner directive: every route gets a fully-typed request DTO AND response DTO,
+no `array`/`mixed`/raw-passthrough responses. This release closes the gap on
+the framework's OWN 30-ish routes (ExternalAuth, BuiltinOAuth, Auth/Routes,
+Subscriptions, Analytics) and ships the generator machinery a platform needs
+to hold itself to the same standard.
+
+#### 1. Response DTOs for framework routes (`StoneScriptPHP\{Auth,Subscriptions,Analytics}\...\Dto\`)
+
+Added typed response DTOs for every framework route whose payload is under
+the framework's own control (built locally, or proxying to a real,
+verified auth-service endpoint): `ExchangeResponseDto`,
+`ProvisionTenantResponseDto`, `ProfileResponseDto` (api-token-model branch
+only — see its docblock), `RegisterResponseDto`, `LoginResponseDto`,
+`RefreshResponseDto`, `LogoutResponseDto`, `OnboardingStatusResponseDto`,
+`MembershipsResponseDto` (+ `MembershipListItemDto`), `OAuthInitiateResponseDto`,
+`AuthHealthResponseDto`, plus supporting nested DTOs (`TenantSummaryDto`,
+`TenantInfoDto`, `IdentitySummaryDto`, `IdentityInfoDto`, `MembershipSummaryDto`,
+`OAuthVerifiedProfileDto`). `Auth\Dto\RefreshTokenResponseDto` for Model A
+(self-contained) auth. `Subscriptions\Dto\{SubscriptionPlanDto,
+SubscriptionStatusDto, SubscriptionActivateResponseDto, RazorpayWebhookAckDto}`.
+`Analytics\Dto\TrackEventResponseDto`.
+
+Several response shapes are genuinely **unions** at the source (the auth
+service's Rust handlers return `#[serde(untagged)]` enums, e.g.
+`LoginResponse` = success | tenant-selection | new-identity | not-found |
+oauth-no-account). The client generator does not yet support typed unions
+(tracked — see "Not done" below), so these are FLATTENED: every field from
+every variant, all optional, with the discriminating condition documented on
+the DTO class (`LoginResponseDto`, `RefreshResponseDto`, `RegisterResponseDto`).
+
+**KNOWN BUG found during this audit, NOT fixed here (deliberately — out of
+scope for a typing change, needs its own task):** cross-referencing
+`ExternalAuthServiceClient`'s outbound paths against the configured external
+auth service's actual route table found SIX routes calling endpoints that do
+not exist on the current auth service: `ForgotPasswordRoute`/`ResetPasswordRoute`
+(→ `/api/auth/forgot-password`/`reset-password`; real endpoints are
+`/api/account/password-reset/request`/`confirm`), `VerifyEmailRoute`
+(→ `/api/auth/verify-email`, no equivalent found), `ResendVerificationCodeRoute`
+(→ `/api/auth/resend-code`, no equivalent found), `ChangePasswordRoute`
+(→ `/api/auth/change-password`; real endpoint is `POST /api/account/password`),
+`CheckTenantSlugRoute` (→ `/api/auth/check-tenant-slug/{slug}`, no equivalent
+found). Any platform with these features enabled is calling a 404. These
+routes are deliberately left WITHOUT a `response:` DTO — a fabricated typed
+contract for an endpoint that doesn't exist would be worse than none.
+Also found: `UpdateMembershipRoute` calls `ExternalAuthServiceClient::updateMembership()`,
+a method that was already removed from that client class — this route is
+dead code that fatals if ever invoked (it isn't reachable through any
+documented feature-toggle path). See the `KNOWN BUG` comments at each call
+site in `ExternalAuthRoutes.php`/`DefaultTenantRouteProvider.php`.
+
+#### 2. `response:`/`request:` DTOs wired into BOTH runtime registration AND `getRouteDefinitions()`
+
+`ExternalAuthRoutes::register()`/`DefaultTenantRouteProvider::register()`
+(actual `$router->post()`/`get()` calls) and `...::getRouteDefinitions()`
+(the pure-function route list `php stone generate client` consumes when a
+platform merges these into its own `routes.php`) now declare the SAME
+`group`/`service`/`response` per route — they cannot drift apart, because a
+test (`ExternalAuthResponseDtoReflectionTest`) asserts both paths agree.
+
+**Breaking, `getRouteDefinitions()` return shape:** `ExternalAuthRoutes`,
+`DefaultTenantRouteProvider`, `SubscriptionRoutes`, and (new)
+`AnalyticsRoutes::getRouteDefinitions()` now return the full array-config
+format (`['handler' => X::class, 'group' => ..., 'response' => ..., ...]`)
+per route instead of a bare `X::class` string. `Router::normalizeRouteConfig()`
+already accepts both forms, so a platform merging these via
+`array_merge($routes[$method] ?? [], ExternalAuthRoutes::getRouteDefinitions($opts)[$method] ?? [])`
+into its own `routes.php` keeps working unchanged. A platform reading the
+return value directly and assuming a bare string (e.g. `is_string($route)`,
+`new $routes[...]`) will break — no such usage exists on the fleet today
+(these framework routes were never previously merged into any platform's
+`routes.php` in typed form; `getRouteDefinitions()` existed but emitted
+routes with no `group`, which would have hard-errored `assertGroupDeclared()`
+the moment a platform tried to use it for client-gen).
+
+`ProfileRoute`'s `/me` registration now conditionally declares
+`response: ProfileResponseDto::class` ONLY when both `roles_resolver` and
+`tenants_resolver` are configured — mirroring the exact runtime branch
+`ProfileRoute::process()` takes (api-token-model vs. raw-proxy fallback), so
+the declared contract never lies about which shape is actually returned.
+
+#### 3. Request-DTO reflection in `cli/generate-client.php` (the framework gap the task called out)
+
+A route may now declare `request: SomeDto::class` (mirrors `response:`
+exactly — same `reflectDto()` machinery, recursive/deduped/cycle-safe). The
+generated TypeScript method's body parameter is typed to that DTO instead of
+`T.ApiRequestBody` (`Record<string, unknown> | unknown[] | null`). Only
+meaningful on POST/PUT/PATCH/DELETE — ignored on GET. `request` propagates
+through `RouteEntry`, `Router::get()/post()/addRoute()`,
+`Router::normalizeRouteConfig()`, and `Router::getRouteMeta()`, alongside the
+existing `response` plumbing.
+
+#### 4. Opt-in hard gate for typed contracts (`--strict-types` / `STONE_CLIENT_GEN_STRICT_TYPES`)
+
+Every includable, non-streaming route missing a `response:` DTO (any method)
+or a `request:` DTO (POST/PUT/PATCH/DELETE only) is now reported by
+`typedContractViolations()`. Default behavior (env var unset, no CLI flag) —
+**unchanged**: a `WARNING` block listing every gap, generation proceeds with
+the `ApiResponse`/`ApiRequestBody` (`unknown`) fallback, byte-identical
+output to pre-9.6.0 for every platform that hasn't opted in
+(confirmed — all pre-existing generator tests pass unmodified). Set
+`--strict-types` on the CLI invocation, or `STONE_CLIENT_GEN_STRICT_TYPES=1`
+in the platform's own environment, to turn every gap into a hard failure
+(`exit(1)`, nothing written) instead. This is deliberately NOT the new
+default — it ships to every consuming platform via composer immediately, and
+most platforms have zero typed routes today; forcing the gate on them would
+brick `php stone generate client` fleet-wide. A platform that has typed its
+own routes can turn it on today; others adopt it as they type their own routes.
+
+#### 5. Webhook persist-raw + alert + quarantine module (`StoneScriptPHP\Webhooks\WebhookQuarantine`)
+
+New module for the one place a webhook route is allowed to stay untyped: the
+raw third-party envelope, before its signature is verified. Once verified,
+if the payload then fails to match the typed contract the route expects
+(missing/malformed required fields), the route calls
+`WebhookQuarantine::quarantine()` instead of silently proceeding with
+defaulted values OR just `error_log()`-ing and dropping the event. It:
+persists the raw envelope (headers + payload, secrets redacted) to a new
+`webhook_quarantine` table; raises a `log_alert()`; never throws (a
+persist-step failure escalates to `log_emergency()` instead of propagating —
+this is the last line of defense for a payment-path event). Schema:
+`src/Webhooks/Schema/{tables,functions}/` (idempotent — `CREATE TABLE IF NOT
+EXISTS`/`CREATE OR REPLACE FUNCTION`, no destructive DDL), installed the same
+way as `SubscriptionRoutes`/`AnalyticsRoutes::getSchemaFiles()`.
+
+Wired into `PostRazorpayWebhookRoute` (previously the only real
+non-`ExternalAuth` webhook route in the framework) at three points that used
+to silently-absorb: (a) signature-verified-but-non-JSON body, (b)
+`payment.captured` entity missing required `id`/`amount`/`email` fields
+(previously defaulted to `'unknown'`/`0` and proceeded — a payment-path
+correctness hazard), (c) a verified payment with no matching subscription
+(previously a bare `error_log("MANUAL ACTIVATION NEEDED...")`, now also
+quarantined so it's actionable instead of buried in logs).
+
+#### Tests
+
+47 new tests (882 total, up from 835 — full suite green): DTO reflection for
+every new framework DTO class (`ExternalAuthResponseDtoReflectionTest`),
+request-DTO reflection + `typedContractViolations()` + `Router` `request:`
+plumbing (`ClientGeneratorRequestDtoAndStrictGateTest`), `WebhookQuarantine`'s
+never-throws contract + schema-file integrity
+(`WebhookQuarantineTest`), and `PostRazorpayWebhookRoute`'s three new
+contract-violation branches (`PostRazorpayWebhookRouteQuarantineTest`).
+One pre-existing test (`TenantRouteProviderSeamTest`) updated for the
+`getRouteDefinitions()` array-format change (§2).
+
+### Integration steps for consuming platforms once this is published
+
+1. `composer update progalaxyelabs/stonescriptphp` (or `composer require
+   progalaxyelabs/stonescriptphp:^9.6.0`).
+2. If your `routes.php` calls `ExternalAuthRoutes::getRouteDefinitions()` /
+   `SubscriptionRoutes::getRouteDefinitions()` / `AnalyticsRoutes::getRouteDefinitions()`
+   and reads the returned per-route VALUE directly (rather than only passing
+   it through `array_merge(...)` into the array your own `loadRoutes()`
+   consumes), update that code for the new array-config shape — see §2 above.
+   If you only merge-and-forget (the documented pattern), no change needed.
+3. Run `php stone generate client <service>` and diff the output — routes
+   whose framework definitions you merge in now get typed responses
+   automatically (fewer `unknown` fallbacks in your generated client).
+4. To turn on the hard gate for YOUR OWN typed routes:
+   `STONE_CLIENT_GEN_STRICT_TYPES=1 php stone generate client <service>` (or
+   `--strict-types`). Expect it to fail loudly on every route you haven't
+   typed yet — that's the point; type them, or leave the gate off until you
+   have.
+5. If you use `password_reset`/`verify_email`/`resend_code`/`change_password`/
+   `check_slug` features of `ExternalAuthRoutes`: read the KNOWN BUG note in
+   §1 above before relying on them — cross-check against the live auth
+   service's route table, they may be 404ing today.
+6. If you have your own webhook route(s), consider adopting
+   `StoneScriptPHP\Webhooks\WebhookQuarantine` — copy/symlink its schema
+   files (`WebhookQuarantine::getSchemaFiles()`) the same way you already do
+   for `SubscriptionRoutes`/`AnalyticsRoutes`, then call `::quarantine()` at
+   your own contract-violation points.
+
 ## [9.5.0] - 2026-08-17
 
 ### Security — cross-platform identity/API token now rejected (`platform_code` enforcement)

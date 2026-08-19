@@ -21,6 +21,15 @@ use StoneScriptPHP\Auth\ExternalAuth\Routes\AuthHealthRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\VerifyEmailRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\ResendVerificationCodeRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\ExchangeRoute;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\RegisterResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\LoginResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\LogoutResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\RefreshResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\OnboardingStatusResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\OAuthInitiateResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\AuthHealthResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\ExchangeResponseDto;
+use StoneScriptPHP\Auth\ExternalAuth\Dto\ProfileResponseDto;
 
 /**
  * ExternalAuth Route Registration
@@ -115,28 +124,81 @@ class ExternalAuthRoutes
     ): void {
         // Public routes (no auth required)
         if ($config->isEnabled('register') && $config->registrationMode !== 'none') {
-            $router->post("$prefix/register", new RegisterRoute($client, $config->hooks, $config), [], true);
+            $router->post(
+                "$prefix/register",
+                new RegisterRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                response: RegisterResponseDto::class,
+            );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/register (mode={$config->registrationMode})");
         }
 
         if ($config->isEnabled('login')) {
-            $router->post("$prefix/login", new LoginRoute($client, $config->hooks, $config), [], true);
+            $router->post(
+                "$prefix/login",
+                new LoginRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                response: LoginResponseDto::class,
+            );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/login");
         }
 
         if ($config->isEnabled('logout')) {
-            $router->post("$prefix/logout", new LogoutRoute($client, $config->hooks, $config), [], true);
+            $router->post(
+                "$prefix/logout",
+                new LogoutRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                response: LogoutResponseDto::class,
+            );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/logout");
         }
 
         if ($config->isEnabled('refresh')) {
-            $router->post("$prefix/refresh-token", new RefreshTokenRoute($client, $config->hooks, $config), [], true);
+            $router->post(
+                "$prefix/refresh-token",
+                new RefreshTokenRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                response: RefreshResponseDto::class,
+            );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/refresh-token");
         }
 
+        // KNOWN BUG (found during v9.6.0 typing pass, not fixed here — out of
+        // scope for a typing change, needs its own triage/fix task): these two
+        // routes proxy to ExternalAuthServiceClient::requestPasswordReset() /
+        // confirmPasswordReset(), which POST to `/api/auth/forgot-password` and
+        // `/api/auth/reset-password`. A live audit of the configured external
+        // auth service found neither path exists there — the real endpoints
+        // are POST /api/account/password-reset/request and
+        // POST /api/account/password-reset/confirm. Any platform with
+        // password_reset enabled is calling a 404. Deliberately NOT given a
+        // `response:` DTO — inventing a typed shape for an endpoint that
+        // doesn't exist would be a fabricated contract, worse than no
+        // contract. Flag this to your own auth service integration before
+        // relying on it.
         if ($config->isEnabled('password_reset')) {
-            $router->post("$prefix/forgot-password", new ForgotPasswordRoute($client, $config->hooks, $config), [], true);
-            $router->post("$prefix/reset-password", new ResetPasswordRoute($client, $config->hooks, $config), [], true);
+            $router->post(
+                "$prefix/forgot-password",
+                new ForgotPasswordRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+            );
+            $router->post(
+                "$prefix/reset-password",
+                new ResetPasswordRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+            );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/forgot-password, $prefix/reset-password");
         }
 
@@ -146,28 +208,75 @@ class ExternalAuthRoutes
         // DefaultTenantRouteProvider's class docblock.)
 
         if ($config->isEnabled('onboarding_status')) {
-            $router->get("$prefix/onboarding/status", new OnboardingStatusRoute($client, $config->hooks, $config), [], true);
+            $router->get(
+                "$prefix/onboarding/status",
+                new OnboardingStatusRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                response: OnboardingStatusResponseDto::class,
+            );
             log_debug("ExternalAuthRoutes: Registered GET $prefix/onboarding/status");
         }
 
+        // KNOWN BUG (see forgot-password/reset-password note above, same
+        // audit): proxies to `/api/auth/verify-email`, which does not exist
+        // on the current auth service at all (no equivalent endpoint found).
+        // No `response:` DTO for the same reason.
         if ($config->isEnabled('verify_email')) {
-            $router->post("$prefix/verify-email", new VerifyEmailRoute($client, $config->hooks, $config), [], true);
+            $router->post(
+                "$prefix/verify-email",
+                new VerifyEmailRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+            );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/verify-email");
         }
 
+        // KNOWN BUG — same audit: proxies to `/api/auth/resend-code`, which
+        // does not exist on the current auth service. No `response:` DTO.
         if ($config->isEnabled('resend_code')) {
-            $router->post("$prefix/resend-code", new ResendVerificationCodeRoute($client, $config->hooks, $config), [], true);
+            $router->post(
+                "$prefix/resend-code",
+                new ResendVerificationCodeRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+            );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/resend-code");
         }
 
         if ($config->isEnabled('oauth')) {
-            $router->post("$prefix/oauth/initiate", new OAuthInitiateRoute($client, $config->hooks, $config), [], true);
-            $router->post("$prefix/oauth/callback", new OAuthCallbackRoute($client, $config->hooks, $config), [], true);
+            $router->post(
+                "$prefix/oauth/initiate",
+                new OAuthInitiateRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                response: OAuthInitiateResponseDto::class,
+            );
+            $router->post(
+                "$prefix/oauth/callback",
+                new OAuthCallbackRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                response: LoginResponseDto::class,
+            );
             log_debug("ExternalAuthRoutes: Registered OAuth routes at $prefix/oauth/*");
         }
 
         if ($config->isEnabled('health')) {
-            $router->get("$prefix/health", new AuthHealthRoute($client, $config->hooks, $config), [], true);
+            $router->get(
+                "$prefix/health",
+                new AuthHealthRoute($client, $config->hooks, $config),
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                service: 'infra',
+                response: AuthHealthResponseDto::class,
+            );
             log_debug("ExternalAuthRoutes: Registered GET $prefix/health");
         }
 
@@ -179,14 +288,20 @@ class ExternalAuthRoutes
             $router->post(
                 "$prefix/exchange",
                 new ExchangeRoute($client, $config->hooks, $config, $rolesResolver, $tenantsResolver),
-                [],
-                true
+                middleware: [],
+                isPublic: true,
+                group: 'auth',
+                response: ExchangeResponseDto::class,
             );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/exchange (public, API-token model)");
         }
 
         // Protected routes (auth required)
 
+        // KNOWN BUG (see forgot-password/reset-password note above, same
+        // audit): proxies to `/api/auth/change-password`, which does not
+        // exist — the real endpoint is `POST /api/account/password`. No
+        // `response:` DTO for the same reason.
         if ($config->isEnabled('change_password')) {
             // Tier-2 identity route: consumes an AUTH TOKEN (purpose=authentication),
             // never an API token. Typed access=authentication so the 7.x typed-auth
@@ -196,6 +311,7 @@ class ExternalAuthRoutes
             $router->post(
                 "$prefix/change-password",
                 new ChangePasswordRoute($client, $config->hooks, $config),
+                group: 'auth',
                 access: RouteAccess::AUTHENTICATION
             );
             log_debug("ExternalAuthRoutes: Registered POST $prefix/change-password (protected, authentication)");
@@ -222,9 +338,18 @@ class ExternalAuthRoutes
             // /me returns the cross-tenant session context (identity + available
             // tenants/roles) resolved from the auth token — it is NOT a tenant-scoped
             // API-token route. Typed access=authentication (see change-password above).
+            //
+            // ProfileResponseDto is ONLY accurate for ProfileRoute's api-token-model
+            // branch (both resolvers configured) — see that DTO's class docblock.
+            // When either resolver is missing, the route falls back to proxying the
+            // raw auth-service response, a DIFFERENT shape; declaring the DTO there
+            // would be a wrong typed contract, worse than none. Mirror the exact
+            // condition ProfileRoute::process() branches on.
             $router->get(
                 "$prefix/me",
                 new ProfileRoute($client, $config->hooks, $config, $rolesResolver, $tenantsResolver),
+                group: 'auth',
+                response: ($rolesResolver !== null && $tenantsResolver !== null) ? ProfileResponseDto::class : null,
                 access: RouteAccess::AUTHENTICATION
             );
             log_debug("ExternalAuthRoutes: Registered GET $prefix/me (protected, authentication session)");
@@ -434,52 +559,77 @@ class ExternalAuthRoutes
         $isEnabled = fn(string $feature) => $features[$feature] ?? false;
         $routes = ['GET' => [], 'POST' => [], 'PUT' => []];
 
-        // Public routes
+        // v9.6.0: full array-config format (handler + group + response DTO +
+        // collection) instead of a bare handler class string — mirrors
+        // registerForPrefix()'s runtime wiring so a platform merging these
+        // into its own routes.php (`array_merge($routes[$method] ?? [],
+        // ExternalAuthRoutes::getRouteDefinitions($opts)[$method] ?? [])`)
+        // gets the SAME typed contract client-generation would use if these
+        // routes were registered directly on $router. See CHANGELOG.
+        //
+        // Routes marked "no response — see registerForPrefix()" proxy to an
+        // external auth-service endpoint that a live audit found does not
+        // exist on the configured service — declaring a DTO for them would
+        // fabricate a contract for a 404. See the matching comment in
+        // registerForPrefix() for detail.
         if ($isEnabled('register')) {
-            $routes['POST']["$prefix/register"] = RegisterRoute::class;
+            $routes['POST']["$prefix/register"] = ['handler' => RegisterRoute::class, 'group' => 'auth', 'is_public' => true, 'response' => RegisterResponseDto::class];
         }
         if ($isEnabled('login')) {
-            $routes['POST']["$prefix/login"] = LoginRoute::class;
+            $routes['POST']["$prefix/login"] = ['handler' => LoginRoute::class, 'group' => 'auth', 'is_public' => true, 'response' => LoginResponseDto::class];
         }
         if ($isEnabled('logout')) {
-            $routes['POST']["$prefix/logout"] = LogoutRoute::class;
+            $routes['POST']["$prefix/logout"] = ['handler' => LogoutRoute::class, 'group' => 'auth', 'is_public' => true, 'response' => LogoutResponseDto::class];
         }
         if ($isEnabled('refresh')) {
-            $routes['POST']["$prefix/refresh-token"] = RefreshTokenRoute::class;
+            $routes['POST']["$prefix/refresh-token"] = ['handler' => RefreshTokenRoute::class, 'group' => 'auth', 'is_public' => true, 'response' => RefreshResponseDto::class];
         }
         if ($isEnabled('password_reset')) {
-            $routes['POST']["$prefix/forgot-password"] = ForgotPasswordRoute::class;
-            $routes['POST']["$prefix/reset-password"] = ResetPasswordRoute::class;
+            // KNOWN BUG — see registerForPrefix(): dead endpoints, no response DTO.
+            $routes['POST']["$prefix/forgot-password"] = ['handler' => ForgotPasswordRoute::class, 'group' => 'auth', 'is_public' => true];
+            $routes['POST']["$prefix/reset-password"] = ['handler' => ResetPasswordRoute::class, 'group' => 'auth', 'is_public' => true];
         }
         // check_slug is a tenant route — merged below via the configured (or
         // default) TenantRouteProviderInterface. (accept_invite used to live
         // here too — removed 2026-07-21.)
         if ($isEnabled('onboarding_status')) {
-            $routes['GET']["$prefix/onboarding/status"] = OnboardingStatusRoute::class;
+            $routes['GET']["$prefix/onboarding/status"] = ['handler' => OnboardingStatusRoute::class, 'group' => 'auth', 'is_public' => true, 'response' => OnboardingStatusResponseDto::class];
         }
         if ($isEnabled('verify_email')) {
-            $routes['POST']["$prefix/verify-email"] = VerifyEmailRoute::class;
+            // KNOWN BUG — see registerForPrefix(): dead endpoint, no response DTO.
+            $routes['POST']["$prefix/verify-email"] = ['handler' => VerifyEmailRoute::class, 'group' => 'auth', 'is_public' => true];
         }
         if ($isEnabled('resend_code')) {
-            $routes['POST']["$prefix/resend-code"] = ResendVerificationCodeRoute::class;
+            // KNOWN BUG — see registerForPrefix(): dead endpoint, no response DTO.
+            $routes['POST']["$prefix/resend-code"] = ['handler' => ResendVerificationCodeRoute::class, 'group' => 'auth', 'is_public' => true];
         }
         if ($isEnabled('oauth')) {
-            $routes['POST']["$prefix/oauth/initiate"] = OAuthInitiateRoute::class;
-            $routes['POST']["$prefix/oauth/callback"] = OAuthCallbackRoute::class;
+            $routes['POST']["$prefix/oauth/initiate"] = ['handler' => OAuthInitiateRoute::class, 'group' => 'auth', 'is_public' => true, 'response' => OAuthInitiateResponseDto::class];
+            $routes['POST']["$prefix/oauth/callback"] = ['handler' => OAuthCallbackRoute::class, 'group' => 'auth', 'is_public' => true, 'response' => LoginResponseDto::class];
         }
         if ($isEnabled('health')) {
-            $routes['GET']["$prefix/health"] = AuthHealthRoute::class;
+            $routes['GET']["$prefix/health"] = ['handler' => AuthHealthRoute::class, 'group' => 'auth', 'service' => 'infra', 'is_public' => true, 'response' => AuthHealthResponseDto::class];
         }
         if ($isEnabled('exchange')) {
-            $routes['POST']["$prefix/exchange"] = ExchangeRoute::class;
+            $routes['POST']["$prefix/exchange"] = ['handler' => ExchangeRoute::class, 'group' => 'auth', 'is_public' => true, 'response' => ExchangeResponseDto::class];
         }
 
         // Protected routes
         if ($isEnabled('change_password')) {
-            $routes['POST']["$prefix/change-password"] = ChangePasswordRoute::class;
+            // KNOWN BUG — see registerForPrefix(): dead endpoint, no response DTO.
+            $routes['POST']["$prefix/change-password"] = ['handler' => ChangePasswordRoute::class, 'group' => 'auth', 'access' => 'authentication'];
         }
         if ($isEnabled('profile')) {
-            $routes['GET']["$prefix/me"] = ProfileRoute::class;
+            // ProfileResponseDto only fits the api-token-model branch (both
+            // resolvers configured) — see that DTO's docblock and the matching
+            // condition in registerForPrefix().
+            $hasResolvers = ($options['roles_resolver'] ?? null) !== null && ($options['tenants_resolver'] ?? null) !== null;
+            $routes['GET']["$prefix/me"] = array_filter([
+                'handler' => ProfileRoute::class,
+                'group' => 'auth',
+                'access' => 'authentication',
+                'response' => $hasResolvers ? ProfileResponseDto::class : null,
+            ], fn($v) => $v !== null);
         }
 
         // select_tenant, provision_tenant, memberships, check_slug are tenant

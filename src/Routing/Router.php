@@ -131,8 +131,9 @@ class Router
         bool $collection = false,
         ?string $access = null,
         string $tokenType = 'access',
+        ?string $request = null,
     ): self {
-        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection, $access, $tokenType);
+        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection, $access, $tokenType, null, $request);
     }
 
     /**
@@ -154,8 +155,9 @@ class Router
         bool $collection = false,
         ?string $access = null,
         string $tokenType = 'access',
+        ?string $request = null,
     ): self {
-        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection, $access, $tokenType);
+        return $this->addRoute('POST', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection, $access, $tokenType, null, $request);
     }
 
     /**
@@ -189,6 +191,7 @@ class Router
         ?string $access = null,
         string $tokenType = 'access',
         ?int $clientTimeoutMs = null,
+        ?string $request = null,
     ): self {
         $method = strtoupper($method);
         $fullPath = $path;
@@ -234,6 +237,7 @@ class Router
             'response'   => $response,
             'collection' => $collection,
             'client_timeout_ms' => $clientTimeoutMs,
+            'request'    => $request,
         ];
 
         // Track known services/scopes
@@ -282,6 +286,7 @@ class Router
             access:    $config['access']     ?? null,
             tokenType: $config['token_type'] ?? 'access',
             clientTimeoutMs: isset($config['client_timeout_ms']) ? (int) $config['client_timeout_ms'] : null,
+            request:   $config['request']    ?? null,
         );
     }
 
@@ -327,7 +332,7 @@ class Router
             $method = strtoupper($method);
             foreach ($routes as $path => $config) {
                 $entry = self::normalizeRouteConfig($config);
-                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection, $entry->access, $entry->tokenType, $entry->clientTimeoutMs);
+                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection, $entry->access, $entry->tokenType, $entry->clientTimeoutMs, $entry->request);
             }
         }
         return $this;
@@ -376,6 +381,7 @@ class Router
                     'access'     => $meta['access']     ?? null,
                     'token_type' => $meta['token_type'] ?? 'access',
                     'client_timeout_ms' => $meta['client_timeout_ms'] ?? null,
+                    'request'    => $meta['request']    ?? null,
                 ];
             }
         }
