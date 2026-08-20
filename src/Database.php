@@ -327,6 +327,25 @@ class Database
         return self::$_instance;
     }
 
+    /**
+     * Low-level primitive: call a PostgreSQL function and return its raw
+     * result rows ($params in, rows out — both plain `array`). This is NOT
+     * deprecated and is not going anywhere — it's the one call surface every
+     * generated `Fn*::run()` wrapper and every transport is built on.
+     *
+     * What IS being steered toward the typed boundary (deprecate-then-migrate,
+     * see {@see serializeParams()} and {@see result_as_typed_table()}):
+     *   - IN: pass a {@see \StoneScriptPHP\Binding\TypedArray} or a DTO for a
+     *     data argument, not a raw PHP array — a raw non-empty array is still
+     *     accepted (unchanged wire behavior) but now emits an
+     *     E_USER_DEPRECATED notice pointing at the typed alternative.
+     *   - OUT: once you have `$rows` back from this method, map them with
+     *     {@see result_as_typed_table()} (multi-row → `TypedArray<Model>`) or
+     *     {@see result_as_object()}/{@see result_as_single()} (single-row →
+     *     `?Model`) rather than consuming the raw row arrays directly.
+     *     Generated `Fn*::run()` wrappers for `RETURNS TABLE` functions
+     *     already target `result_as_typed_table()`.
+     */
     public static function fn(string $function_name, array $params): array
     {
         $start_time = microtime(true);
@@ -432,6 +451,27 @@ class Database
         }
 
         if (is_array($value)) {
+            // Deprecation signal (NOT a behavior change): a raw, non-empty PHP
+            // array as a Database::fn() data param is the untyped-blob
+            // antipattern this typed-boundary work exists to close — nothing
+            // stops a stray/mis-shaped element, and it carries no element type
+            // for the DB-wire marshalling this method owns. Still serialized
+            // exactly as before (pass-through, unchanged wire bytes) so no
+            // existing call site breaks; this is deprecate-then-migrate, not a
+            // hard cut. New/updated call sites should pass a {@see TypedArray}
+            // or a DTO instead. An empty array is exempt — `[]` is
+            // indistinguishable from "no elements of any type" and is a
+            // common, harmless default/optional-param value.
+            if ($value !== []) {
+                trigger_error(
+                    'Database::fn(): a raw PHP array was passed as a data parameter. ' .
+                    'Raw-array params are DEPRECATED — pass a StoneScriptPHP\\Binding\\TypedArray ' .
+                    'or a DTO instead, so the DB boundary can marshal it with a known element type. ' .
+                    'This still works today (pass-through, unchanged), but will be rejected in a ' .
+                    'future major version.',
+                    E_USER_DEPRECATED
+                );
+            }
             return $value;
         }
 
@@ -517,6 +557,14 @@ class Database
         return self::array_to_class_object($function_name, $rows[0], $class);
     }
 
+    /**
+     * @deprecated Prefer {@see result_as_typed_table()}, which returns a
+     *   `TypedArray<$class>` instead of a bare `array` — the element type
+     *   (every entry is guaranteed a $class instance) is otherwise only a
+     *   convention, not a runtime/static guarantee. Kept fully working and
+     *   unmigrated existing callers are NOT broken; new/regenerated code
+     *   should target result_as_typed_table().
+     */
     public static function result_as_table(string $function_name, array $rows, string $class): array
     {
         $data = [];
