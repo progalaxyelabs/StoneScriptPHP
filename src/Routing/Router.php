@@ -435,6 +435,7 @@ class Router
                 'token_type'    => $match['token_type'] ?? 'access',
                 'service'       => $match['service'] ?? 'shared',
                 'handler_class' => is_object($match['handler']) ? get_class($match['handler']) : $match['handler'],
+                'request'       => $match['request'] ?? null,
             ] : null,
         ];
 
@@ -516,6 +517,7 @@ class Router
                     'access'     => $this->routeMeta[$routeKey]['access'] ?? null,
                     'token_type' => $this->routeMeta[$routeKey]['token_type'] ?? 'access',
                     'service'   => $this->routeMeta[$routeKey]['service'] ?? 'shared',
+                    'request'   => $this->routeMeta[$routeKey]['request'] ?? null,
                 ];
             }
 
@@ -533,6 +535,7 @@ class Router
                     'access'     => $this->routeMeta[$routeKey]['access'] ?? null,
                     'token_type' => $this->routeMeta[$routeKey]['token_type'] ?? 'access',
                     'service'   => $this->routeMeta[$routeKey]['service'] ?? 'shared',
+                    'request'   => $this->routeMeta[$routeKey]['request'] ?? null,
                 ];
             }
         }
@@ -601,14 +604,24 @@ class Router
                 $handler = new $handlerClass();
             }
 
+            // Merge input and params
+            $allInput = array_merge($request['input'] ?? [], $request['params'] ?? []);
+
+            // Typed-request-binder path (SPEC-typed-request-binder.md). A handler
+            // opting into this pattern implements ONLY ITypedRouteHandler + a
+            // single `execute(FooRequest $request): FooResponse` method — no
+            // process(), no validation_rules(), no public ?array properties.
+            // Checked BEFORE the legacy IRouteHandler check below since a typed
+            // handler is not required to implement IRouteHandler at all.
+            if ($handler instanceof \StoneScriptPHP\ITypedRouteHandler) {
+                return $this->executeTypedHandler($handler, $handlerClass, $allInput, $request);
+            }
+
             // Check if handler implements IRouteHandler interface
             if (!($handler instanceof \StoneScriptPHP\IRouteHandler)) {
                 log_debug("Handler does not implement IRouteHandler: $handlerClass");
                 return $this->error404('Handler not implemented correctly');
             }
-
-            // Merge input and params
-            $allInput = array_merge($request['input'] ?? [], $request['params'] ?? []);
 
             // Honor the handler's declared validation_rules() at the edge. Without
             // this, declared required-field rules were dead code under the new
@@ -635,6 +648,9 @@ class Router
             $reflection = new \ReflectionClass($handler);
             $properties = $reflection->getProperties(\ReflectionProperty::IS_PUBLIC);
 
+            /** @var array<int, array{line: ?int, field: string, message: string}> $bindingErrors */
+            $bindingErrors = [];
+
             foreach ($properties as $property) {
                 $propertyName = $property->getName();
                 if (array_key_exists($propertyName, $allInput)) {
@@ -643,16 +659,38 @@ class Router
                     if ($value !== null && $property->hasType()) {
                         $type = $property->getType();
                         $typeName = $type instanceof \ReflectionNamedType ? $type->getName() : null;
+                        $isBuiltin = $type instanceof \ReflectionNamedType && $type->isBuiltin();
+
                         if ($typeName === 'int' && is_string($value) && is_numeric($value)) {
                             $value = (int) $value;
                         } elseif ($typeName === 'float' && is_string($value) && is_numeric($value)) {
                             $value = (float) $value;
                         } elseif ($typeName === 'bool' && is_string($value)) {
                             $value = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? $value;
+                        } elseif ($typeName !== null && !$isBuiltin && class_exists($typeName)) {
+                            // Property typed as a userland DTO class — previously this
+                            // raw-assigned the decoded array straight onto a typed-object
+                            // property, throwing an uncaught TypeError under
+                            // strict_types on every real request (regression #7399).
+                            // Hydrate it recursively instead, same engine the typed
+                            // ITypedRouteHandler path uses below, collecting errors so
+                            // a shape problem is a clean 400, never a 500.
+                            try {
+                                $value = \StoneScriptPHP\Binding\DtoHydrator::hydrate($typeName, $value, $propertyName);
+                            } catch (\StoneScriptPHP\Binding\BindingException $e) {
+                                $bindingErrors = [...$bindingErrors, ...$e->errors()];
+                                continue;
+                            }
                         }
                     }
                     $handler->$propertyName = $value;
                 }
+            }
+
+            if ($bindingErrors !== []) {
+                log_debug('Binding failed: ' . json_encode($bindingErrors));
+                http_response_code(400);
+                return new ApiResponse('error', 'Validation failed', null, 400, $bindingErrors);
             }
 
             // Execute handler
@@ -673,6 +711,112 @@ class Router
             log_debug('Exception in handler: ' . $e->getMessage());
             return $this->error500($e->getMessage());
         }
+    }
+
+    /**
+     * Dispatch a {@see \StoneScriptPHP\ITypedRouteHandler} route — hydrate its
+     * `execute()` method's single request-DTO parameter, call it, wrap the
+     * returned response DTO into the standard ApiResponse envelope. See
+     * SPEC-typed-request-binder.md for the full design.
+     *
+     * @param array<array-key, mixed> $allInput
+     * @param array<string, mixed> $request
+     */
+    private function executeTypedHandler(object $handler, string $handlerClass, array $allInput, array $request): ApiResponse
+    {
+        $methodRef = new \ReflectionMethod($handler, 'execute');
+        $params = $methodRef->getParameters();
+
+        if (count($params) !== 1) {
+            throw new \LogicException("$handlerClass::execute() must declare exactly one parameter (the request DTO).");
+        }
+
+        $paramType = $params[0]->getType();
+        if (!($paramType instanceof \ReflectionNamedType) || $paramType->isBuiltin()) {
+            throw new \LogicException("$handlerClass::execute() parameter must be typed as a concrete request DTO class.");
+        }
+        $requestClass = $paramType->getName();
+
+        // Enforce that the class the binder hydrates is the SAME class
+        // cli/generate-client.php reflects for the TS `request:` interface —
+        // the runtime-side counterpart to the build-time --strict-types gate.
+        // Only checked when the route declares `request:` in routes.php (it
+        // may be legitimately absent on a route excluded from client
+        // generation, e.g. service: 'infra'/'webhook').
+        $declaredRequestClass = $request['route']['request'] ?? null;
+        if ($declaredRequestClass !== null && ltrim((string) $declaredRequestClass, '\\') !== ltrim($requestClass, '\\')) {
+            throw new \LogicException(
+                "$handlerClass::execute() parameter type ($requestClass) does not match the route's declared " .
+                "request: {$declaredRequestClass} — these must be the same class so the generated TS client and " .
+                'the runtime binder never drift apart.'
+            );
+        }
+
+        try {
+            $requestDto = \StoneScriptPHP\Binding\DtoHydrator::hydrate($requestClass, $allInput);
+        } catch (\StoneScriptPHP\Binding\BindingException $e) {
+            log_debug('Binding failed: ' . json_encode($e->errors()));
+            http_response_code(400);
+            return new ApiResponse('error', 'Validation failed', null, 400, $e->errors());
+        }
+
+        try {
+            /** @var object $responseDto */
+            $responseDto = $handler->execute($requestDto);
+        } catch (\StoneScriptPHP\Binding\BindingException $e) {
+            // A handler's execute() may throw this for a structured
+            // BUSINESS-rule rejection (not a shape/type problem) that wants
+            // the same {line,field,message}[] wire shape as a hydration
+            // failure — e.g. a 409 duplicate-key conflict.
+            log_debug('Structured business validation failed: ' . json_encode($e->errors()));
+            http_response_code($e->httpCode());
+            return new ApiResponse('error', 'Validation failed', null, $e->httpCode(), $e->errors());
+        } catch (\RuntimeException $e) {
+            $code = $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500;
+            log_debug('RuntimeException in typed handler: ' . $e->getMessage());
+            http_response_code($code);
+            return new ApiResponse('error', $code < 500 || DEBUG_MODE ? $e->getMessage() : 'Internal server error', null, $code);
+        }
+
+        // Convention: a response DTO's `message` property (if it declares
+        // one) is promoted to ApiResponse's top-level `message` field and
+        // excluded from `data`, matching the wire shape every hand-written
+        // `process()`/`res_ok($data, $message)` route already produced
+        // (`data` = the business payload; `message` = a separate top-level
+        // human-readable string) — see PostDistributorInvoiceSubmitResponse
+        // for a real example.
+        $data = self::dtoToArray($responseDto);
+        $message = '';
+        if (is_array($data) && array_key_exists('message', $data) && is_string($data['message'])) {
+            $message = $data['message'];
+            unset($data['message']);
+        }
+
+        return new ApiResponse('ok', $message, $data);
+    }
+
+    /**
+     * Recursively converts a response DTO (and any nested DTOs/backed enums)
+     * into a plain array for JSON encoding via ApiResponse.
+     *
+     * @return mixed
+     */
+    private static function dtoToArray(mixed $value): mixed
+    {
+        if ($value instanceof \BackedEnum) {
+            return $value->value;
+        }
+        if (is_object($value)) {
+            $out = [];
+            foreach (get_object_vars($value) as $key => $v) {
+                $out[$key] = self::dtoToArray($v);
+            }
+            return $out;
+        }
+        if (is_array($value)) {
+            return array_map([self::class, 'dtoToArray'], $value);
+        }
+        return $value;
     }
 
     /**

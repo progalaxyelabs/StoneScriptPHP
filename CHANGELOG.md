@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.7.0-rc] - 2026-08-20
+
+### Typed request binder — `DtoHydrator` + `ITypedRouteHandler`
+
+New, additive, backward-compatible binder that hydrates typed DTOs from a
+request body/query, replacing the fleet-wide `public ?array` +
+hand-written `fromArray()` convention. Design doc:
+`work-management/.claude/SPEC-typed-request-binder.md`.
+
+- `StoneScriptPHP\Binding\DtoHydrator` — generic, recursive, reflection-based
+  hydrator. Strict scalar coercion (never a silent wrong-cast — a non-numeric
+  string for an `int` field is a structured 400, not `(int)"abc"` → 0),
+  nested userland-class DTOs, backed-enum binding (`Enum::from()`),
+  array-of-DTO via a new `#[ArrayOf(RowDto::class)]` attribute (with a
+  `@param X[] $name` constructor-docblock fallback for zero-edit adoption on
+  existing DTOs). Collects every error across the whole object graph before
+  throwing — one 400 lists every broken field/row, not just the first.
+- `StoneScriptPHP\Binding\BindingException` — carries
+  `array<{line, field, message}>`, the same shape every hand-rolled
+  per-line validator in the fleet already emits.
+- `StoneScriptPHP\ITypedRouteHandler` — marker interface for the recommended
+  pattern: a handler declares ONLY `execute(FooRequest $r): FooResponse` — no
+  `process()`, no `validation_rules()`, no `public ?array` properties, no
+  `fromArray()`. `Router::executeHandler()` reflects `execute()`'s parameter
+  type at dispatch time (an interface method cannot be typed this way — PHP
+  enforces parameter contravariance on interface implementations, confirmed
+  by direct repro), hydrates, calls it, wraps the response DTO into the
+  standard `ApiResponse` envelope. Cross-checked at dispatch time against the
+  route's `request:` metadata (already used for TS client generation since
+  v9.6.0) so the two can never silently drift apart.
+- Legacy `IRouteHandler` routes are unaffected except for one strict
+  improvement: a public property typed as a userland class now hydrates
+  recursively (structured 400 on a shape problem) instead of raw-assigning
+  and throwing an uncaught `TypeError` under `strict_types` (previously a
+  bare 500 on every request — confirmed live regression, see below).
+- Fixes a LIVE PROD REVENUE OUTAGE on medstoreapp
+  (`PostDistributorInvoiceSubmitRoute`, every real invoice submit 500ing):
+  the route's hand-written request DTO typed `distributor_id` as `?string`
+  while every real caller sends a JSON number — an uncaught constructor
+  `TypeError`. Converted to the typed-binder pattern; `distributor_id` is now
+  `int` (required, matching the real `invoice_master.distributor_id` DB
+  column) and the hydrator casts a numeric wire value or returns a clean
+  400. Pilot conversion deletes both hand-written `fromArray()`s on this
+  route. Verified against the live API with a real submit (200 + real
+  `invoice_master`/`invoice_detail` rows).
+- `tests/Unit/DtoHydratorTest.php` + `tests/Unit/RouterTypedHandlerTest.php` —
+  full test matrix (scalar/nested/array-of-DTO/enum/nullable/required cases).
+  `phpstan-binding.neon` — PHPStan `level: max` scoped to the new code,
+  passing clean. Full framework suite (911 tests) green, zero new baseline
+  PHPStan errors on `Router.php`.
+
 ## [9.6.0] - 2026-08-19
 
 ### Typed contracts for every framework-owned route + request-DTO reflection + opt-in strict client-gen gate + webhook quarantine module
