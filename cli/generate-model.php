@@ -288,6 +288,50 @@ function get_input_params(string $str, array $type_map): array
     return [$typed_input_params, $input_params];
 }
 
+/**
+ * Ordered per-parameter specs for the generated typed params object
+ * (`{Class}Params`, see the FnXxx::run()/Database::fnTyped() typed-boundary
+ * work) -- name, PHP type, and whether the SQL parameter declared a DEFAULT
+ * (=> nullable property with a `= null` default in PHP, since we have no way
+ * to reproduce an arbitrary SQL default expression as a PHP literal; a
+ * DEFAULT'd SQL param is, by definition, optional to the caller).
+ *
+ * DECLARATION ORDER IS LOAD-BEARING: Database::fnTyped() reflects the params
+ * object's public properties in declaration order to build the positional
+ * wire call, so this must walk the SQL parameter list in the exact order
+ * PostgreSQL declared it.
+ *
+ * @return array<int, array{name: string, type: string, nullable: bool}>
+ */
+function get_input_param_specs(string $str, array $type_map): array
+{
+    $params_str = trim(preg_replace('#[\s]+#', ' ', $str));
+    $lines = split_parameters($params_str);
+    $specs = [];
+
+    foreach ($lines as $line) {
+        $trimmed_line = trim($line);
+        if (empty($trimmed_line)) {
+            continue;
+        }
+        if (stripos($trimmed_line, 'out ') === 0) {
+            continue;
+        }
+
+        $has_default = preg_match('/\s+default\s+/i', $trimmed_line) === 1;
+        $clean_line = strtolower(preg_replace('/\s+default\s+.*$/i', '', $trimmed_line));
+
+        $parts = explode(' ', trim($clean_line));
+        $name = preg_replace('#^i_#', '', $parts[0]);
+        $raw_type = preg_replace('/\(.*\)/', '', $parts[1] ?? '');
+        $type = $type_map[$raw_type] ?? 'mixed';
+
+        $specs[] = ['name' => $name, 'type' => $type, 'nullable' => $has_default];
+    }
+
+    return $specs;
+}
+
 function get_output_params(string $input_str, string $returns_columns_str, array $type_map): array
 {
     $input_str_clean = strtolower(trim(preg_replace('#[\s]+#', ' ', $input_str)));
@@ -352,12 +396,15 @@ $type_map = [
 ];
 
 list($typed_input_params, $input_params) = get_input_params($matches[4], $type_map);
+$input_param_specs = get_input_param_specs($matches[4], $type_map);
 list($output_params, $is_return_table) = get_output_params($matches[4], $matches[6], $type_map);
 
 $sql_fn_name = strtolower($matches[2]);
 $class_name = implode('', array_map(fn ($item) => ucfirst($item), explode('_', $sql_fn_name)));
 $model_class_name = $class_name . 'Model';
+$params_class_name = $class_name . 'Params';
 $fn_class_name = 'Fn' . $class_name;
+$has_params = count($input_param_specs) > 0;
 
 $lines = [];
 $lines[] = '<?php';
@@ -376,19 +423,45 @@ foreach ($output_params as $name => $type) {
 }
 $lines[] = '}';
 $lines[] = '';
+
+// Typed params-object input (the Database typed boundary's IN side, see
+// Database::fnTyped()'s docblock): one public property per SQL argument, IN
+// DECLARATION ORDER (Database::fnTyped() reflects declaration order to build
+// the positional wire call -- this order is load-bearing, not cosmetic). A
+// SQL parameter with a DEFAULT becomes a nullable property defaulted to
+// null in PHP -- we cannot reproduce an arbitrary SQL default expression as
+// a PHP literal, and a DEFAULT'd SQL param is, by definition, optional to
+// the caller, so `null` is the correct "caller didn't set this" sentinel.
+// No params class is emitted for a zero-argument function -- run() just
+// takes no arguments in that case.
+if ($has_params) {
+    $lines[] = "class $params_class_name";
+    $lines[] = '{';
+    foreach ($input_param_specs as $spec) {
+        $prop_type = $spec['nullable'] ? '?' . $spec['type'] : $spec['type'];
+        $default = $spec['nullable'] ? ' = null' : '';
+        $lines[] = "    public $prop_type \${$spec['name']}$default;";
+    }
+    $lines[] = '}';
+    $lines[] = '';
+}
+
 $lines[] = "class $fn_class_name";
 $lines[] = '{';
 
-$typed_input_params_str = join(', ', $typed_input_params);
-$input_params_str = join(', ', $input_params);
+$run_arg = $has_params ? "$params_class_name \$params" : '';
 
 $lines[] = '    /**';
 $lines[] = '     * @return ' . ($is_return_table ? "TypedArray<$model_class_name>" : $model_class_name);
 $lines[] = '     */';
-$lines[] = "    public static function run($typed_input_params_str): " . ($is_return_table ? 'TypedArray' : $model_class_name);
+$lines[] = "    public static function run($run_arg): " . ($is_return_table ? 'TypedArray' : $model_class_name);
 $lines[] = '    {';
 $lines[] = '        $function_name = ' . "'" . $sql_fn_name . "'" . ';';
-$lines[] = '        $rows = Database::fn($function_name, [' . $input_params_str . ']);';
+if ($has_params) {
+    $lines[] = '        $rows = Database::fnTyped($function_name, $params);';
+} else {
+    $lines[] = '        $rows = Database::fn($function_name, []);';
+}
 $lines[] = '        return Database::' . ($is_return_table ? 'result_as_typed_table' : 'result_as_object') . '($function_name, $rows, ' . $model_class_name . '::class);';
 $lines[] = '    }';
 $lines[] = '}';

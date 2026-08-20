@@ -115,6 +115,78 @@ final class DatabaseTypedBoundaryTest extends TestCase
         $this->assertSame(['x', 'y'], json_decode($received[1], true));
     }
 
+    public function test_fnTyped_reflects_params_object_into_correctly_ordered_positional_call(): void
+    {
+        $received = null;
+        Database::fake([
+            'create_widget' => function (array $params) use (&$received): array {
+                $received = $params;
+                return [['ok' => true]];
+            },
+        ]);
+
+        // Declaration order is c, a, b -- deliberately non-alphabetical, to
+        // prove Database::fnTyped() reflects DECLARATION order, not sorted
+        // order or any other incidental ordering.
+        $params = new class {
+            public ?string $p_c = 'hello';
+            public string $p_a = 'A1';
+            public int $p_b = 7;
+        };
+
+        Database::fnTyped('create_widget', $params);
+
+        $this->assertSame(['hello', 'A1', 7], $received);
+    }
+
+    public function test_fnTyped_serializes_typed_array_property_to_json(): void
+    {
+        $received = null;
+        Database::fake([
+            'create_widget_with_rows' => function (array $params) use (&$received): array {
+                $received = $params;
+                return [['ok' => true]];
+            },
+        ]);
+
+        $params = new class {
+            public string $p_name = 'widget';
+            public TypedArray $p_tags;
+
+            public function __construct()
+            {
+                $this->p_tags = new TypedArray('string', ['red', 'blue']);
+            }
+        };
+
+        Database::fnTyped('create_widget_with_rows', $params);
+
+        $this->assertSame('widget', $received[0]);
+        $this->assertIsString($received[1]);
+        $this->assertSame(['red', 'blue'], json_decode($received[1], true));
+    }
+
+    public function test_fnTyped_nullable_defaulted_property_passes_through_as_null(): void
+    {
+        $received = null;
+        Database::fake([
+            'create_widget' => function (array $params) use (&$received): array {
+                $received = $params;
+                return [['ok' => true]];
+            },
+        ]);
+
+        $params = new class {
+            public ?string $p_c = null;
+            public string $p_a = 'A1';
+            public int $p_b = 1;
+        };
+
+        Database::fnTyped('create_widget', $params);
+
+        $this->assertSame([null, 'A1', 1], $received);
+    }
+
     public function test_jsonserializable_dto_data_param_serializes_to_json(): void
     {
         $dto = new class implements \JsonSerializable {

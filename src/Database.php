@@ -356,6 +356,56 @@ class Database
         return $data;
     }
 
+    /**
+     * The typed-boundary IN side's sanctioned entry point: call a PostgreSQL
+     * function with a typed PARAMS OBJECT instead of a raw positional array —
+     * the heterogeneous positional argument tuple itself becomes a typed
+     * value, not a bare `array`, closing the last untyped seam on the way in
+     * (individual complex arguments were already steered to TypedArray/DTOs
+     * via {@see serializeParams()}; this is the wrapper array around them).
+     *
+     * $params' PUBLIC properties are reflected in DECLARATION ORDER to build
+     * the positional wire call — PostgreSQL function calls are positional, so
+     * property order on the params class is load-bearing, not cosmetic.
+     * `php stone generate model` emits a `{Function}Params` class with
+     * properties in the exact SQL argument order for exactly this reason;
+     * hand-authored params objects must preserve that same order.
+     *
+     * Each property value then goes through the SAME {@see serializeParams()}
+     * marshalling `fn()` already applies — a TypedArray/DTO-valued property is
+     * JSON-encoded, a scalar passes through, and (deprecated, see
+     * serializeParam()) a raw-array-valued property still works but emits the
+     * same E_USER_DEPRECATED notice as a raw-array Database::fn() call.
+     *
+     * @param object $params Public properties in SQL argument declaration order.
+     * @return array<int, array<string, mixed>> Raw result rows — same shape
+     *   {@see fn()} returns; consume via result_as_typed_table()/
+     *   result_as_object() as usual.
+     */
+    public static function fnTyped(string $function_name, object $params): array
+    {
+        return self::fn($function_name, self::objectToPositionalParams($params));
+    }
+
+    /**
+     * @return array<int, mixed> Positional values, in $params' public
+     *   property DECLARATION order (not alphabetical, not visitation order of
+     *   any internal storage — {@see \ReflectionClass::getProperties()}
+     *   returns properties in declaration order, which for a constructor-
+     *   promoted class matches constructor-parameter order).
+     */
+    private static function objectToPositionalParams(object $params): array
+    {
+        $reflect = new ReflectionClass($params);
+        $positional = [];
+
+        foreach ($reflect->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            $positional[] = $property->getValue($params);
+        }
+
+        return $positional;
+    }
+
     private static function _fn(string $function_name, array $params): array
     {
         // Serialize typed/object params to their PG-wire (JSON text) form
