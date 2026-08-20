@@ -13,6 +13,7 @@ use StoneScriptPHP\Subscriptions\Dto\SubscriptionStatusDto;
 use StoneScriptPHP\Subscriptions\Dto\SubscriptionPlanDto;
 use StoneScriptPHP\Subscriptions\Dto\SubscriptionActivateResponseDto;
 use StoneScriptPHP\Subscriptions\Dto\RazorpayWebhookAckDto;
+use StoneScriptPHP\Binding\TypedArray;
 
 /**
  * Subscription Route Registration
@@ -233,25 +234,25 @@ class SubscriptionRoutes
      * files into their own postgresql/main/postgresql/tables/ and functions/ directories,
      * then run `php stone migrate up`.
      *
-     * @return array{tables: string[], functions: string[]} Grouped by type
+     * @return array{tables: TypedArray<string>, functions: TypedArray<string>} Grouped by type
      */
     public static function getSchemaFiles(): array
     {
         $schemaDir = __DIR__ . '/Schema';
 
         return [
-            'tables' => [
+            'tables' => new TypedArray('string', [
                 $schemaDir . '/tables/sub_010_subscription_plans.pgsql',
                 $schemaDir . '/tables/sub_011_subscriptions.pgsql',
                 $schemaDir . '/tables/sub_012_subscription_payments.pgsql',
-            ],
-            'functions' => [
+            ]),
+            'functions' => new TypedArray('string', [
                 $schemaDir . '/functions/sub_get_status.pgsql',
                 $schemaDir . '/functions/sub_activate.pgsql',
                 $schemaDir . '/functions/sub_list_plans.pgsql',
                 $schemaDir . '/functions/sub_find_by_email.pgsql',
                 $schemaDir . '/functions/sub_get_plan.pgsql',
-            ],
+            ]),
         ];
     }
 }

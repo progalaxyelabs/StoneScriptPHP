@@ -4,6 +4,7 @@ namespace StoneScriptPHP\Database;
 
 use PDO;
 use PDOException;
+use StoneScriptPHP\Binding\TypedArray;
 
 /**
  * Global Database Connection Pool
@@ -205,10 +206,10 @@ class DbConnectionPool
     /**
      * Get list of databases with active connections
      *
-     * @return array
+     * @return TypedArray<string>
      */
-    public function getActiveConnections(): array
+    public function getActiveConnections(): TypedArray
     {
-        return array_keys($this->connections);
+        return new TypedArray('string', array_keys($this->connections));
     }
 }

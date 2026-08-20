@@ -56,7 +56,7 @@ class WebhookQuarantineTest extends TestCase
         $this->assertNotEmpty($files['tables']);
         $this->assertNotEmpty($files['functions']);
 
-        foreach (array_merge($files['tables'], $files['functions']) as $path) {
+        foreach ([...$files['tables']->all(), ...$files['functions']->all()] as $path) {
             $this->assertFileExists($path, "Schema file declared by getSchemaFiles() must exist: $path");
         }
     }

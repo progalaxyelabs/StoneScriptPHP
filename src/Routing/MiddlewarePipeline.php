@@ -3,6 +3,7 @@
 namespace StoneScriptPHP\Routing;
 
 use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Binding\TypedArray;
 
 class MiddlewarePipeline
 {
@@ -42,11 +43,11 @@ class MiddlewarePipeline
      * AuthMiddlewareRegistrar::assertFullyWired) to verify the pipeline enforces
      * every declared route access model.
      *
-     * @return array<int, MiddlewareInterface>
+     * @return TypedArray<MiddlewareInterface>
      */
-    public function getMiddleware(): array
+    public function getMiddleware(): TypedArray
     {
-        return $this->middleware;
+        return new TypedArray(MiddlewareInterface::class, $this->middleware);
     }
 
     /**

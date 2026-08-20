@@ -103,7 +103,9 @@ class AttributeAuthMiddleware implements MiddlewareInterface
             return new ApiResponse('error', 'Unauthorized: Authentication required');
         }
 
-        $permissions = $attribute->getPermissions();
+        // ->all(): App\Models\User (platform-authored) and implode() both expect
+        // a native array — TypedArray is the framework-internal carrier only.
+        $permissions = $attribute->getPermissions()->all();
         $requireAll = $attribute->requiresAll();
 
         if ($requireAll) {
@@ -133,7 +135,9 @@ class AttributeAuthMiddleware implements MiddlewareInterface
             return new ApiResponse('error', 'Unauthorized: Authentication required');
         }
 
-        $roles = $attribute->getRoles();
+        // ->all(): App\Models\User (platform-authored) and implode() both expect
+        // a native array — TypedArray is the framework-internal carrier only.
+        $roles = $attribute->getRoles()->all();
         $requireAll = $attribute->requiresAll();
 
         if ($requireAll) {

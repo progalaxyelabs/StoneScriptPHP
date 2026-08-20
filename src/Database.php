@@ -16,6 +16,7 @@ use StoneScriptPHP\Db\DbTransportException;
 use StoneScriptPHP\Db\DirectTransport;
 use StoneScriptPHP\Db\GatewayTransport;
 use StoneScriptPHP\Db\PgandroidTransport;
+use StoneScriptPHP\Binding\TypedArray;
 use Throwable;
 
 class Database
@@ -338,6 +339,13 @@ class Database
 
     private static function _fn(string $function_name, array $params): array
     {
+        // Serialize typed/object params to their PG-wire (JSON text) form
+        // BEFORE anything else, so both the real transport and fake mode see
+        // identical, already-marshalled params — and so call sites stop
+        // hand-rolling json_encode(...) before Database::fn(). See
+        // serializeParams() for exactly what is (and isn't) touched.
+        $params = self::serializeParams($params);
+
         try {
             // Fake mode check lives INSIDE this try block deliberately: a fake
             // Closure that throws a GatewayException (to simulate a business-rule
@@ -381,6 +389,64 @@ class Database
 
             throw new Exception("Database function call failed: " . $e->getMessage(), $e->getCode(), $e);
         }
+    }
+
+    /**
+     * Marshal each Database::fn() parameter to its PostgreSQL-wire form.
+     *
+     * The typed-request work introduced {@see TypedArray} and readonly DTOs
+     * as first-class values a route can hold. This lets a call site pass one
+     * of those straight into Database::fn() — e.g.
+     * `Database::fn('create_vendor_invoice', [$invoiceDto, $processStock])` —
+     * instead of hand-writing `json_encode(...)` at every call site (the
+     * pattern that let a field be mis-shaped or mis-cast per route). The DB
+     * boundary now owns that conversion in ONE place.
+     *
+     * Deliberately surgical — this is purely ADDITIVE and cannot change the
+     * wire bytes of any call that works today:
+     *   - `null` and scalars (int/float/bool/string) pass straight through —
+     *     including the JSON strings call sites already build by hand.
+     *   - {@see TypedArray}, {@see \JsonSerializable} DTOs, and plain objects
+     *     are `json_encode()`d to text (a PG json/jsonb param receives it,
+     *     PG casts text→json exactly as before).
+     *   - a plain PHP `array` is left UNTOUCHED — existing raw-array params
+     *     keep whatever handling the transport/gateway gives them today; the
+     *     typed path is opt-in via objects, so we never risk double-encoding.
+     *
+     * @param array<int|string, mixed> $params
+     * @return array<int|string, mixed>
+     */
+    private static function serializeParams(array $params): array
+    {
+        $out = [];
+        foreach ($params as $key => $value) {
+            $out[$key] = self::serializeParam($value);
+        }
+        return $out;
+    }
+
+    private static function serializeParam(mixed $value): mixed
+    {
+        if ($value === null || is_scalar($value)) {
+            return $value;
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof TypedArray || $value instanceof \JsonSerializable || is_object($value)) {
+            $json = json_encode($value);
+            if ($json === false) {
+                throw new Exception(
+                    'Database::fn(): failed to JSON-encode a ' . get_debug_type($value) .
+                    ' parameter: ' . json_last_error_msg()
+                );
+            }
+            return $json;
+        }
+
+        return $value;
     }
 
     /**
@@ -459,6 +525,32 @@ class Database
         }
 
         return $data;
+    }
+
+    /**
+     * Deserialize a multi-row PostgreSQL function result into a typed
+     * collection — the OUT side of the same "Database owns the marshalling"
+     * boundary that {@see serializeParams()} owns on the IN side.
+     *
+     * Identical row-to-model mapping as {@see result_as_table()}, but returns
+     * a {@see TypedArray} of $class instead of a bare `array`, so the result
+     * carries its element type: every element is guaranteed a $class instance,
+     * it iterates typed, and it serializes straight back to a JSON list
+     * through `res_ok()`. Generated `Fn*::run()` return-table wrappers should
+     * target this; existing callers of result_as_table() are untouched.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @param class-string $class
+     * @return TypedArray<object>
+     */
+    public static function result_as_typed_table(string $function_name, array $rows, string $class): TypedArray
+    {
+        $items = [];
+        foreach ($rows as $row) {
+            $items[] = self::array_to_class_object($function_name, $row, $class);
+        }
+
+        return new TypedArray($class, $items);
     }
 
     public static function array_to_class_object(string $function_name, array $row, string $class, bool $as_out_param = false): object

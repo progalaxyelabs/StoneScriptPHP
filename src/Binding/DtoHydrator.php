@@ -196,6 +196,30 @@ final class DtoHydrator
             }
         }
 
+        // TypedArray<T> — a constructor parameter explicitly typed `TypedArray`
+        // (as opposed to the legacy `array $x` + #[ArrayOf] combo handled by
+        // bindBuiltin()'s 'array' case, which stays bare-array for backward
+        // compatibility). The element type is REQUIRED via #[ArrayOf(...)] —
+        // there is no docblock fallback here (TypedArray already carries its
+        // own runtime type, so guessing from a docblock would be redundant
+        // and error-prone); a `TypedArray $x` param with no #[ArrayOf] is a
+        // DTO-authoring mistake, not a data problem, so it's a loud
+        // UnsupportedDtoShapeException rather than a per-request 400.
+        if ($typeName === TypedArray::class) {
+            if (!is_array($value) || !array_is_list($value)) {
+                self::addError($errors, $path, 'must be an array');
+                return [null, false];
+            }
+            $elementType = self::resolveArrayOfElementClass($param, $ctor);
+            if ($elementType === null) {
+                throw new UnsupportedDtoShapeException(
+                    "DtoHydrator: TypedArray parameter \${$param->getName()} requires " .
+                    '#[ArrayOf(...)] to declare its element type.'
+                );
+            }
+            return self::bindTypedArrayOf($elementType, $value, $path, $errors, $param, $ctor);
+        }
+
         // Nested userland DTO
         if (class_exists($typeName) || interface_exists($typeName)) {
             if (!is_array($value)) {
@@ -319,6 +343,75 @@ final class DtoHydrator
         }
 
         return [$result, $ok];
+    }
+
+    /**
+     * Bind a JSON list into a {@see TypedArray} of $elementType — the
+     * TypedArray-typed-parameter counterpart to {@see bindArrayOf()} (which
+     * stays bare-array for the legacy `array $x` + #[ArrayOf] case).
+     * $elementType may be a scalar keyword (int|float|bool|string), bound via
+     * the existing {@see bindBuiltin()} scalar cases (reused as-is — those
+     * cases never touch $param, only $path/$errors), or a class/interface,
+     * bound recursively via {@see bindObject()}.
+     *
+     * @param class-string|'int'|'float'|'bool'|'string' $elementType
+     * @param array<array-key, mixed> $list
+     * @param array<int, int|string> $path
+     * @param array<int, array{line: ?int, field: string, message: string}> $errors
+     * @return array{0: mixed, 1: bool}
+     */
+    private static function bindTypedArrayOf(
+        string $elementType,
+        array $list,
+        array $path,
+        array &$errors,
+        \ReflectionParameter $param,
+        \ReflectionMethod $ctor
+    ): array {
+        $isScalar = in_array($elementType, ['int', 'float', 'bool', 'string'], true);
+
+        if (!$isScalar && !class_exists($elementType) && !interface_exists($elementType)) {
+            throw new UnsupportedDtoShapeException(
+                "DtoHydrator: TypedArray element type '$elementType' declared via #[ArrayOf(...)] " .
+                'on $' . $param->getName() . ' is not a supported scalar keyword ' .
+                '(int|float|bool|string) or an existing class/interface.'
+            );
+        }
+
+        $result = [];
+        $ok = true;
+
+        foreach ($list as $idx => $element) {
+            $elementPath = [...$path, is_int($idx) ? $idx : (int) $idx];
+
+            if ($isScalar) {
+                [$bound, $success] = self::bindBuiltin($elementType, $param, $element, $elementPath, $errors, $ctor);
+            } else {
+                if (!is_array($element)) {
+                    self::addError($errors, $elementPath, 'must be an object');
+                    $ok = false;
+                    continue;
+                }
+                $bound = self::bindObject($elementType, $element, $elementPath, $errors);
+                $success = $bound !== null;
+            }
+
+            if (!$success) {
+                $ok = false;
+                continue;
+            }
+            $result[] = $bound;
+        }
+
+        if (!$ok) {
+            return [null, false];
+        }
+
+        // The element-level binding above already guarantees every $result
+        // entry matches $elementType, so this construction cannot throw —
+        // TypedArray's own runtime check is a second, redundant-by-design
+        // safety net, not the primary validation path here.
+        return [new TypedArray($elementType, $result), true];
     }
 
     /**

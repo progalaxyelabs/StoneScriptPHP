@@ -5,6 +5,7 @@ namespace StoneScriptPHP\Tenancy;
 use PDO;
 use PDOException;
 use StoneScriptPHP\Database\DbConnectionPool;
+use StoneScriptPHP\Binding\TypedArray;
 
 /**
  * Tenant Connection Manager
@@ -101,9 +102,9 @@ class TenantConnectionManager
     /**
      * Get list of tenant database names with active connections
      *
-     * @return array
+     * @return TypedArray<string>
      */
-    public static function getActiveTenants(): array
+    public static function getActiveTenants(): TypedArray
     {
         return DbConnectionPool::getInstance()->getActiveConnections();
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Webhooks;
 
 use StoneScriptPHP\Database;
+use StoneScriptPHP\Binding\TypedArray;
 
 /**
  * Ingestion-seam safety net for inbound third-party webhooks (payments, job
@@ -158,19 +159,19 @@ class WebhookQuarantine
      * directories, then run `php stone migrate up` — same convention as
      * SubscriptionRoutes::getSchemaFiles() / AnalyticsRoutes::getSchemaFiles().
      *
-     * @return array{tables: string[], functions: string[]}
+     * @return array{tables: TypedArray<string>, functions: TypedArray<string>}
      */
     public static function getSchemaFiles(): array
     {
         $schemaDir = __DIR__ . '/Schema';
 
         return [
-            'tables' => [
+            'tables' => new TypedArray('string', [
                 $schemaDir . '/tables/webhook_001_quarantine.pgsql',
-            ],
-            'functions' => [
+            ]),
+            'functions' => new TypedArray('string', [
                 $schemaDir . '/functions/webhook_quarantine_insert.pgsql',
-            ],
+            ]),
         ];
     }
 }

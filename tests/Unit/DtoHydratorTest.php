@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Binding\ArrayOf;
 use StoneScriptPHP\Binding\BindingException;
 use StoneScriptPHP\Binding\DtoHydrator;
+use StoneScriptPHP\Binding\TypedArray;
 use StoneScriptPHP\Binding\UnsupportedDtoShapeException;
 
 enum HydratorTestStatus: string
@@ -83,6 +84,34 @@ final class HydratorTestUnionUnsupported
 {
     public function __construct(
         public readonly int|string $mixed,
+    ) {
+    }
+}
+
+/** A `TypedArray`-typed constructor param — the new (additive) binding path
+ * alongside the legacy `array $x` + #[ArrayOf] case above. */
+final class HydratorTestTypedArrayOfObjects
+{
+    public function __construct(
+        #[ArrayOf(HydratorTestRow::class)]
+        public readonly TypedArray $rows,
+    ) {
+    }
+}
+
+final class HydratorTestTypedArrayOfScalars
+{
+    public function __construct(
+        #[ArrayOf('string')]
+        public readonly TypedArray $tags,
+    ) {
+    }
+}
+
+final class HydratorTestTypedArrayMissingAttribute
+{
+    public function __construct(
+        public readonly TypedArray $rows,
     ) {
     }
 }
@@ -341,5 +370,57 @@ final class DtoHydratorTest extends TestCase
     {
         $this->expectException(UnsupportedDtoShapeException::class);
         DtoHydrator::hydrate(HydratorTestUnionUnsupported::class, ['mixed' => 5]);
+    }
+
+    // ── TypedArray-typed parameter (new, additive) ────────────────────
+
+    public function test_typed_array_param_hydrates_to_typed_array_of_dto(): void
+    {
+        $r = DtoHydrator::hydrate(HydratorTestTypedArrayOfObjects::class, [
+            'rows' => [
+                ['sku' => 'A1', 'qty' => 2.0],
+                ['sku' => 'B2', 'qty' => 3.5],
+            ],
+        ]);
+
+        $this->assertInstanceOf(TypedArray::class, $r->rows);
+        $this->assertSame(HydratorTestRow::class, $r->rows->type());
+        $this->assertSame(2, $r->rows->count());
+        $this->assertInstanceOf(HydratorTestRow::class, $r->rows->first());
+        $this->assertSame('A1', $r->rows->first()->sku);
+        $this->assertSame('B2', $r->rows->last()->sku);
+    }
+
+    public function test_typed_array_param_hydrates_to_typed_array_of_scalars(): void
+    {
+        $r = DtoHydrator::hydrate(HydratorTestTypedArrayOfScalars::class, ['tags' => ['a', 'b', 'c']]);
+
+        $this->assertInstanceOf(TypedArray::class, $r->tags);
+        $this->assertSame('string', $r->tags->type());
+        $this->assertSame(['a', 'b', 'c'], $r->tags->all());
+    }
+
+    public function test_typed_array_param_rejects_bad_row_with_field_error(): void
+    {
+        try {
+            DtoHydrator::hydrate(HydratorTestTypedArrayOfObjects::class, [
+                'rows' => [['sku' => 'A1', 'qty' => 'not-a-number']],
+            ]);
+            $this->fail('expected BindingException');
+        } catch (BindingException $e) {
+            $this->assertSame('qty', $e->errors()[0]['field']);
+        }
+    }
+
+    public function test_typed_array_param_without_array_of_attribute_is_dev_time_error(): void
+    {
+        $this->expectException(UnsupportedDtoShapeException::class);
+        DtoHydrator::hydrate(HydratorTestTypedArrayMissingAttribute::class, ['rows' => [['sku' => 'A1', 'qty' => 1.0]]]);
+    }
+
+    public function test_typed_array_param_non_list_value_is_binding_error(): void
+    {
+        $this->expectException(BindingException::class);
+        DtoHydrator::hydrate(HydratorTestTypedArrayOfObjects::class, ['rows' => 'not-an-array']);
     }
 }

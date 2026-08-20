@@ -76,6 +76,42 @@ class DatabaseTest extends TestCase
     }
 
     /**
+     * result_as_typed_table() is the TypedArray<Model> successor to
+     * result_as_table() (§ Database typed boundary) — same row-to-model
+     * mapping, but the return carries its element type at runtime.
+     */
+    public function test_result_as_typed_table_returns_typed_array_of_class(): void
+    {
+        $testClass = new class {
+            public string $name = '';
+            public int $age = 0;
+        };
+        $class = get_class($testClass);
+
+        $rows = [
+            ['name' => 'Alice', 'age' => '30'],
+            ['name' => 'Bob', 'age' => '40'],
+        ];
+
+        $result = \StoneScriptPHP\Database::result_as_typed_table('test_fn', $rows, $class);
+
+        $this->assertInstanceOf(\StoneScriptPHP\Binding\TypedArray::class, $result);
+        $this->assertSame($class, $result->type());
+        $this->assertSame(2, $result->count());
+        $this->assertInstanceOf($class, $result->first());
+        $this->assertSame('Alice', $result->first()->name);
+        $this->assertSame('Bob', $result->last()->name);
+    }
+
+    public function test_result_as_typed_table_empty_rows_returns_empty_typed_array(): void
+    {
+        $result = \StoneScriptPHP\Database::result_as_typed_table('test_fn', [], 'stdClass');
+
+        $this->assertInstanceOf(\StoneScriptPHP\Binding\TypedArray::class, $result);
+        $this->assertTrue($result->isEmpty());
+    }
+
+    /**
      * Test that array_to_class_object creates object from array
      */
     public function test_array_to_class_object_creates_object(): void

@@ -7,6 +7,7 @@ namespace StoneScriptPHP\Analytics;
 use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Analytics\Routes\PostTrackEventRoute;
 use StoneScriptPHP\Analytics\Dto\TrackEventResponseDto;
+use StoneScriptPHP\Binding\TypedArray;
 
 /**
  * Analytics Route Registration
@@ -131,19 +132,19 @@ class AnalyticsRoutes
      * into their own postgresql/tenant/postgresql/tables/ and functions/
      * directories, then run `php stone migrate up`.
      *
-     * @return array{tables: string[], functions: string[]}
+     * @return array{tables: TypedArray<string>, functions: TypedArray<string>}
      */
     public static function getSchemaFiles(): array
     {
         $schemaDir = __DIR__ . '/Schema';
 
         return [
-            'tables' => [
+            'tables' => new TypedArray('string', [
                 $schemaDir . '/tables/ana_001_analytics_events.pgsql',
-            ],
-            'functions' => [
+            ]),
+            'functions' => new TypedArray('string', [
                 $schemaDir . '/functions/ana_insert_event.pgsql',
-            ],
+            ]),
         ];
     }
 }

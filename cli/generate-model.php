@@ -365,6 +365,9 @@ $lines[] = '';
 $lines[] = 'namespace App\Database\Functions;';
 $lines[] = '';
 $lines[] = 'use StoneScriptPHP\Database;';
+if ($is_return_table) {
+    $lines[] = 'use StoneScriptPHP\Binding\TypedArray;';
+}
 $lines[] = '';
 $lines[] = "class $model_class_name";
 $lines[] = '{';
@@ -380,13 +383,13 @@ $typed_input_params_str = join(', ', $typed_input_params);
 $input_params_str = join(', ', $input_params);
 
 $lines[] = '    /**';
-$lines[] = '     * @return ' . $model_class_name . ($is_return_table ? '[]' : '');
+$lines[] = '     * @return ' . ($is_return_table ? "TypedArray<$model_class_name>" : $model_class_name);
 $lines[] = '     */';
-$lines[] = "    public static function run($typed_input_params_str): " . ($is_return_table ? 'array' : $model_class_name);
+$lines[] = "    public static function run($typed_input_params_str): " . ($is_return_table ? 'TypedArray' : $model_class_name);
 $lines[] = '    {';
 $lines[] = '        $function_name = ' . "'" . $sql_fn_name . "'" . ';';
 $lines[] = '        $rows = Database::fn($function_name, [' . $input_params_str . ']);';
-$lines[] = '        return Database::' . ($is_return_table ? 'result_as_table' : 'result_as_object') . '($function_name, $rows, ' . $model_class_name . '::class);';
+$lines[] = '        return Database::' . ($is_return_table ? 'result_as_typed_table' : 'result_as_object') . '($function_name, $rows, ' . $model_class_name . '::class);';
 $lines[] = '    }';
 $lines[] = '}';
 

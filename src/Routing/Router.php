@@ -10,6 +10,7 @@ use StoneScriptPHP\TenantDatabaseUnavailableException;
 use StoneScriptPHP\Routing\MiddlewarePipeline;
 use StoneScriptPHP\Routing\MiddlewareInterface;
 use StoneScriptPHP\Routing\RouteEntry;
+use StoneScriptPHP\Binding\TypedArray;
 
 class Router
 {
@@ -57,9 +58,9 @@ class Router
     /**
      * The global middleware instances, in pipe order (read-only introspection).
      *
-     * @return array<int, MiddlewareInterface>
+     * @return TypedArray<MiddlewareInterface>
      */
-    public function getGlobalMiddleware(): array
+    public function getGlobalMiddleware(): TypedArray
     {
         return $this->globalMiddleware->getMiddleware();
     }

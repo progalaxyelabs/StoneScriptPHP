@@ -17,10 +17,18 @@ use Attribute;
  * see SPEC-typed-request-binder.md §4) because it is statically checkable
  * and immune to docblock drift/typos.
  *
- * Usage:
+ * Usage (legacy — `array $rows`, bare array, back-compat, unchanged):
  *   public function __construct(
  *       #[ArrayOf(DistributorInvoiceRowInput::class)]
  *       public readonly array $rows,
+ *   ) {}
+ *
+ * Usage (typed — `TypedArray $rows`, new: hydrates to {@see TypedArray} of
+ * $class; $class may also be a scalar keyword int|float|bool|string for a
+ * homogeneous scalar list):
+ *   public function __construct(
+ *       #[ArrayOf(DistributorInvoiceRowInput::class)]
+ *       public readonly TypedArray $rows,
  *   ) {}
  */
 #[Attribute(Attribute::TARGET_PARAMETER | Attribute::TARGET_PROPERTY)]
