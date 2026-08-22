@@ -50,6 +50,38 @@ class Validator
 
         foreach ($this->rules as $field => $ruleSet) {
             $rules = is_string($ruleSet) ? explode('|', $ruleSet) : $ruleSet;
+
+            // Dotted array-wildcard paths (e.g. "items.*.quantity") are resolved
+            // against the nested $data structure and expanded into one concrete
+            // entry per matching array element (e.g. "items.0.quantity",
+            // "items.1.quantity", ...). A PLAIN dotted path with no wildcard
+            // segment (e.g. "address.city") is resolved the same way, walking
+            // straight down without expansion.
+            //
+            // Before this, `$field` was used as a literal top-level array key —
+            // "items.*.quantity" never matches any key in $data (nested arrays
+            // don't have literal dotted keys), so `$value` was always null and
+            // every rule silently evaluated against that null. A `required`
+            // rule then failed for every request no matter the payload (see
+            // PostInvoicesRoute regression), while non-required rules (numeric,
+            // min, etc.) silently no-op'd on null and never actually checked
+            // the real per-item data.
+            if (str_contains($field, '.')) {
+                $resolved = $this->resolvePaths($field);
+
+                foreach ($resolved as $resolvedField => $value) {
+                    foreach ($rules as $rule) {
+                        $this->applyRule($resolvedField, $value, $rule);
+                    }
+                }
+
+                // No matches at all (e.g. the parent array itself is missing) —
+                // leave it to the parent field's own rule (e.g. "items" =>
+                // "required|array") to report that; emitting a synthetic error
+                // here under a fabricated field name would just duplicate it.
+                continue;
+            }
+
             $value = $this->data[$field] ?? null;
 
             foreach ($rules as $rule) {
@@ -58,6 +90,60 @@ class Validator
         }
 
         return empty($this->errors);
+    }
+
+    /**
+     * Resolve a dotted field path (optionally containing "*" wildcard
+     * segments meaning "every element of the array at this position")
+     * against $this->data, returning a flat map of concrete resolved field
+     * label => value for every match found.
+     *
+     * Example: "items.*.item_id" against
+     *   ['items' => [['item_id' => 1], ['item_id' => 2]]]
+     * resolves to ['items.0.item_id' => 1, 'items.1.item_id' => 2].
+     *
+     * @return array<string, mixed>
+     */
+    private function resolvePaths(string $field): array
+    {
+        $results = [];
+        $this->resolveSegments($this->data, explode('.', $field), '', $results);
+        return $results;
+    }
+
+    /**
+     * @param mixed $current
+     * @param array<int, string> $segments
+     * @param array<string, mixed> $results
+     */
+    private function resolveSegments($current, array $segments, string $pathSoFar, array &$results): void
+    {
+        if (empty($segments)) {
+            $results[$pathSoFar] = $current;
+            return;
+        }
+
+        $segment = array_shift($segments);
+
+        if ($segment === '*') {
+            if (!is_array($current)) {
+                return;
+            }
+
+            foreach ($current as $key => $item) {
+                $newPath = $pathSoFar === '' ? (string)$key : "$pathSoFar.$key";
+                $this->resolveSegments($item, $segments, $newPath, $results);
+            }
+
+            return;
+        }
+
+        if (!is_array($current) || !array_key_exists($segment, $current)) {
+            return;
+        }
+
+        $newPath = $pathSoFar === '' ? $segment : "$pathSoFar.$segment";
+        $this->resolveSegments($current[$segment], $segments, $newPath, $results);
     }
 
     /**

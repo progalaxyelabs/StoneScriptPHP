@@ -240,4 +240,34 @@ class PgandroidTransportTest extends TestCase
         $transport = new PgandroidTransport(fn (): string => json_encode([]));
         $this->assertFalse($transport->isConnected());
     }
+
+    /**
+     * Regression guard for the "boolean inversion" investigation: the wire
+     * bridge (pgandroid's simple-query response parser) emits EVERY column
+     * value as a JSON string, including booleans — Postgres text mode 't'/
+     * 'f', never native JSON true/false. This transport MUST pass that raw
+     * 't'/'f' string through completely unmangled (no premature/incorrect
+     * cast here) so that Database::array_to_class_object()'s single
+     * marshal-boundary bool check (`=== true || === 't'`, see DatabaseTest
+     * ::test_array_to_class_object_converts_pg_bool_*) is what performs the
+     * real typing — not this transport, and not any per-callsite cast.
+     * If this transport ever started coercing values itself (e.g. naive
+     * `(bool)$value` on the string 'f', which is truthy in PHP), that
+     * coercion would happen BEFORE the correct marshal-boundary check ever
+     * sees the value, silently inverting every false boolean. This test
+     * fails loud if that regression is ever introduced.
+     */
+    public function test_boolean_text_columns_pass_through_unmangled(): void
+    {
+        $bridge = fn (): string => json_encode([
+            ['id' => 1, 'is_active' => 't', 'is_deleted' => 'f', 'note' => null],
+        ]);
+
+        $transport = new PgandroidTransport($bridge);
+        $rows = $transport->callFunction('get_item', [1]);
+
+        $this->assertSame('t', $rows[0]['is_active']);
+        $this->assertSame('f', $rows[0]['is_deleted']);
+        $this->assertNotSame(true, $rows[0]['is_deleted'], 'PHP truthy-string footgun: "f" must never become boolean true here.');
+    }
 }

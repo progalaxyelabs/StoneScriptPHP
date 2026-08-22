@@ -563,4 +563,93 @@ class ValidatorTest extends TestCase
         $this->assertTrue($validator->validate());
         $this->assertEmpty($validator->errors());
     }
+
+    /**
+     * Regression guard: dotted array-wildcard rules (e.g. "items.*.quantity")
+     * MUST actually resolve against each array element, not against a
+     * literal ("items.*.quantity" doesn't exist as a top-level key) lookup
+     * that always evaluates to null. Before the fix, this exact shape made
+     * PostInvoicesRoute::validation_rules() (items.*.item_id required|integer,
+     * etc.) fail "required" on every single request, valid or not.
+     */
+    public function test_wildcard_array_rule_passes_for_valid_items(): void
+    {
+        $data = [
+            'items' => [
+                ['item_id' => 1, 'quantity' => 5],
+                ['item_id' => 2, 'quantity' => 3.5],
+            ],
+        ];
+        $rules = [
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|integer',
+            'items.*.quantity' => 'required|numeric|min:0.01',
+        ];
+
+        $validator = new Validator($data, $rules);
+
+        $this->assertTrue($validator->validate(), 'Expected valid nested items to pass: ' . json_encode($validator->errors()));
+        $this->assertEmpty($validator->errors());
+    }
+
+    /**
+     * A genuinely missing/invalid per-item field must still be caught, with
+     * an error keyed to the resolved concrete path (not the wildcard
+     * template) so the caller can tell WHICH line item is bad.
+     */
+    public function test_wildcard_array_rule_fails_for_missing_item_field(): void
+    {
+        $data = [
+            'items' => [
+                ['item_id' => 1, 'quantity' => 5],
+                ['item_id' => null, 'quantity' => 3],
+            ],
+        ];
+        $rules = [
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|integer',
+        ];
+
+        $validator = new Validator($data, $rules);
+
+        $this->assertFalse($validator->validate());
+        $errors = $validator->errors();
+        $this->assertArrayHasKey('items.1.item_id', $errors);
+        $this->assertArrayNotHasKey('items.0.item_id', $errors);
+    }
+
+    /**
+     * When the parent array field is entirely absent, the wildcard rule
+     * must not fabricate a spurious error under a made-up field name —
+     * the parent's own "required|array" rule already reports that.
+     */
+    public function test_wildcard_array_rule_no_op_when_parent_array_missing(): void
+    {
+        $data = [];
+        $rules = [
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|integer',
+        ];
+
+        $validator = new Validator($data, $rules);
+
+        $this->assertFalse($validator->validate());
+        $errors = $validator->errors();
+        $this->assertArrayHasKey('items', $errors);
+        $this->assertCount(1, $errors, 'Only the parent "items" rule should report an error, not a fabricated wildcard entry: ' . json_encode($errors));
+    }
+
+    /**
+     * Plain (non-wildcard) dotted paths, e.g. a nested object field, must
+     * also resolve correctly since the same "." split now drives both.
+     */
+    public function test_plain_dotted_path_resolves_nested_value(): void
+    {
+        $data = ['address' => ['city' => 'Mumbai']];
+        $rules = ['address.city' => 'required|string'];
+
+        $validator = new Validator($data, $rules);
+
+        $this->assertTrue($validator->validate());
+    }
 }
