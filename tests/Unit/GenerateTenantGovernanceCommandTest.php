@@ -127,6 +127,17 @@ class GenerateTenantGovernanceCommandTest extends TestCase
             $this->assertFileExists($mainBase . 'functions/' . $fn . '.pgsql', "missing function $fn");
         }
 
+        // Creator-protection trigger still refuses a normal hard DELETE of
+        // an is_tenant_creator row, but now carves out a single, narrow,
+        // named bypass for `php stone generate soft-delete`'s system purge
+        // path (see that function's own header comment for the mechanism).
+        $protectCreatorFn = file_get_contents($mainBase . 'functions/_tenant_memberships_protect_creator.pgsql');
+        $this->assertStringContainsString('tenant_creator_row_undeletable', $protectCreatorFn);
+        $this->assertStringContainsString("current_setting('stonescriptphp.tenant_purge_in_progress', true) = 'on'", $protectCreatorFn);
+        // The UPDATE branch (is_tenant_creator flag immutability) must
+        // remain unconditional — never bypassable, not even by the purge GUC.
+        $this->assertStringContainsString('tenant_creator_flag_immutable', $protectCreatorFn);
+
         // Model wrappers — exactly the 12 public functions, valid syntax.
         foreach (self::PUBLIC_FUNCTIONS as $fn) {
             $wrapper = $fixture . 'src/App/Database/Functions/Fn' . $this->studly($fn) . '.php';

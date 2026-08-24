@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — soft-deleted tenants could never be purged (`generate soft-delete` × `generate tenant-governance`)
+
+`purge_expired_deletions()`'s tenants block relies on `tenants(uuid) ON
+DELETE CASCADE` to clean up a purged tenant's `tenant_memberships` rows —
+but `generate tenant-governance`'s `trg_protect_tenant_creator` trigger
+unconditionally refused any hard `DELETE` of the founder's
+`is_tenant_creator` row, so that cascade (and therefore the whole tenant
+purge) always failed with `tenant_creator_row_undeletable`, forever, on
+every platform running both generators.
+
+- `_tenant_memberships_protect_creator()` now recognizes ONE sanctioned
+  bypass on its `DELETE` branch: a request-scoped GUC
+  (`stonescriptphp.tenant_purge_in_progress`) that `purge_expired_deletions()`
+  sets via `set_config(..., true)` immediately around the tenants `DELETE`
+  and clears right after. The `UPDATE` branch (creator-flag immutability)
+  is never bypassed. A normal user/admin `remove_member()` call, or any
+  other raw hard `DELETE`, still refuses exactly as before.
+- Honestly documented, not hidden: on today's single, undifferentiated
+  database role (no gateway role-split yet), `set_config()` is a plain
+  built-in an app role could in principle call itself before its own raw
+  `DELETE`, within the same transaction, to spoof this same bypass — this
+  narrows the previous "purge is permanently and universally stuck" failure
+  to a named, scoped trade-off, no worse than this database's existing
+  trust boundary. Full spoof-resistance needs the (separate, not yet
+  shipped) gateway role-split; see the trigger's own header comment.
+- Proven against a real, non-superuser app role: soft-delete → fast-forward
+  `purge_after` → purge succeeds, tenant + membership rows gone, `audit`
+  trigger's DELETE row retained, `_deletion_archive` marked purged; and a
+  normal admin `remove_member()` / raw DELETE attempt on a live tenant's
+  creator still raises `cannot_remove_tenant_creator` /
+  `tenant_creator_row_undeletable`.
+
 ## [9.7.0-rc] - 2026-08-20
 
 ### Typed request binder — `DtoHydrator` + `ITypedRouteHandler`

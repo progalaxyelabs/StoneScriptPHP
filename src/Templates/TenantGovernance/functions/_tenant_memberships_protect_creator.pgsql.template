@@ -8,10 +8,46 @@
 -- creator immutability also checks explicitly and returns a typed error
 -- (see remove_member.pgsql / promote_to_owner.pgsql etc.) — this trigger
 -- exists to catch anything a function author missed, not as the primary UX.
+--
+-- ONE sanctioned bypass: `php stone generate soft-delete`'s
+-- purge_expired_deletions() (SECURITY DEFINER) needs to hard-delete a
+-- tenant that is itself past its 7-day purge window — which cascades into a
+-- hard DELETE of that tenant's founder membership row here. Rather than
+-- weaken this trigger for every caller, purge_expired_deletions() sets a
+-- request-scoped GUC (`stonescriptphp.tenant_purge_in_progress`, via
+-- set_config(..., true) — is_local=true, so it self-reverts at the end of
+-- the current transaction / on any subtransaction rollback, never leaks to
+-- another session) immediately around the `DELETE FROM tenants` statement
+-- that triggers this cascade, and clears it again right after. This trigger
+-- checks that GUC ONLY on the DELETE branch — the UPDATE branch below
+-- (is_tenant_creator flag immutability) is never bypassed, by anyone, for
+-- any reason.
+--
+-- Known, honestly-documented limitation of this mechanism (not hidden):
+-- set_config() is a plain built-in, not itself privilege-gated, so on a
+-- platform running with a single, undifferentiated database role (the
+-- current default — see the framework's separate, not-yet-shipped gateway
+-- role-split workstream) an application role COULD in principle set this
+-- same GUC itself before issuing a raw DELETE, and this trigger cannot
+-- currently distinguish that from the real purge path. This is a
+-- deliberate, scoped trade-off: it closes the "purge is permanently stuck"
+-- failure (the previous state, where NO tenant could EVER be purged) in
+-- favor of a narrow, named, audited bypass, and it stays exactly as
+-- unspoofable as the rest of this database's trust boundary — no worse.
+-- Full spoof-resistance (e.g. the bypass provably only reachable by a
+-- distinct, lower-privileged app role) requires that role-split; revisit
+-- this trigger when it lands.
 CREATE OR REPLACE FUNCTION _tenant_memberships_protect_creator()
 RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'DELETE' AND OLD.is_tenant_creator THEN
+        IF current_setting('stonescriptphp.tenant_purge_in_progress', true) = 'on' THEN
+            -- Sanctioned system-purge bypass — see header comment. Still a
+            -- real DELETE, still caught by `php stone generate audit`'s own
+            -- trigger on this table if installed; nothing here skips that.
+            RETURN OLD;
+        END IF;
+
         RAISE EXCEPTION 'tenant_creator_row_undeletable'
             USING HINT = 'Suspend the creator''s membership (set_membership_status) instead of '
                          'deleting the row — remove_member() itself already refuses on '

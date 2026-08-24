@@ -15,14 +15,19 @@
 -- o_error for THAT table only and does not wedge or roll back any other
 -- table's already-completed purge in the same run.
 --
--- KNOWN LIMITATION, documented rather than hidden: a tenant currently
--- cannot be purged while `php stone generate tenant-governance`'s
--- tenant_memberships.tenant_id -> tenants(uuid) ON DELETE CASCADE tries to
--- cascade-delete its founder's membership row — that row's own
--- trg_protect_tenant_creator trigger unconditionally refuses any hard
--- DELETE of an is_tenant_creator row. See the tenants-specific purge
--- block's EXCEPTION comment for the full explanation; resolving it requires
--- a coordinated change to tenant-governance itself (out of scope here).
+-- Tenant purging: when `php stone generate tenant-governance` is also
+-- installed, deleting a tenant cascades (tenant_memberships.tenant_id ->
+-- tenants(uuid) ON DELETE CASCADE) into a hard DELETE of its founder's
+-- tenant_memberships row — which that table's own
+-- trg_protect_tenant_creator trigger would normally refuse outright. The
+-- tenants-specific purge block below sets a request-scoped GUC
+-- (stonescriptphp.tenant_purge_in_progress) immediately around that DELETE
+-- that ONLY this trigger checks and ONLY on its DELETE branch, so this
+-- sanctioned system path clears while a normal user/admin removal of a
+-- tenant creator still refuses exactly as before. See that trigger's own
+-- header comment for the full mechanism, and the tenants purge block's
+-- comment for the honestly-documented caveat on how spoof-resistant this
+-- currently is on a single-role database.
 --
 -- The DELETE is what makes this real: if `php stone generate audit` is
 -- installed on a given table, that DELETE fires the AFTER-row trigger and

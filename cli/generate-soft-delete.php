@@ -80,12 +80,14 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "It returns (table, purged_count, error) per table — ANY failure on one\n";
     echo "table (FK violation, or a custom trigger exception) is reported there\n";
     echo "and does NOT block any other table's purge in the same run.\n\n";
-    echo "KNOWN LIMITATION: a tenant currently cannot be purged while\n";
-    echo "tenant-governance's creator-protection trigger still has its founder's\n";
-    echo "membership row (which is always, by design) — see\n";
-    echo "purge_expired_deletions()'s own comment. Reported via o_error, not\n";
-    echo "silently swallowed; resolving it needs a coordinated change to\n";
-    echo "tenant-governance itself.\n";
+    echo "If `php stone generate tenant-governance` is also installed, purging a\n";
+    echo "tenant now correctly cascades through its founder membership row too\n";
+    echo "(a narrow, named, request-scoped bypass of that trigger's creator-\n";
+    echo "protection — see purge_expired_deletions()'s own comment and\n";
+    echo "_tenant_memberships_protect_creator.pgsql's header for the mechanism\n";
+    echo "and its honestly-documented current spoofing caveat). A normal\n";
+    echo "user/admin attempt to remove a tenant creator still refuses exactly\n";
+    echo "as before — only this system purge path is exempted.\n";
     exit(0);
 }
 
@@ -350,11 +352,11 @@ foreach ($tables as $table => $pk) {
 }
 
 // purge_expired_deletions() — one shared function, per-table blocks inside.
-// 'tenants' gets a DIFFERENT block with a WHEN OTHERS handler documenting a
-// known, unresolved conflict with tenant-governance's creator-protection
-// trigger (see that block template's own comment — it blocks purging any
-// tenant with an active founder membership row); every other table gets
-// the generic block.
+// 'tenants' gets a DIFFERENT block that also sets a request-scoped GUC
+// around its DELETE so tenant-governance's creator-protection trigger lets
+// the resulting founder-membership cascade delete through (see that block
+// template's own comment for the mechanism); every other table gets the
+// generic block.
 $purgeBlockTpl = file_get_contents($templatesPath . 'functions' . DIRECTORY_SEPARATOR . '_purge_table_block.pgsql.template');
 $purgeBlockTenantsTpl = file_get_contents($templatesPath . 'functions' . DIRECTORY_SEPARATOR . '_purge_table_block_tenants.pgsql.template');
 $purgeBlocks = [];

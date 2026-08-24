@@ -1,5 +1,13 @@
     BEGIN
         IF to_regclass('tenants') IS NOT NULL THEN
+            -- Sanctioned bypass for tenant-governance's
+            -- trg_protect_tenant_creator (see that trigger's own header
+            -- comment for the full mechanism + its documented limitation).
+            -- is_local=true: self-reverts at end of transaction OR if this
+            -- BEGIN/EXCEPTION sub-block rolls back — never leaks past this
+            -- purge call, never touches another session's GUCs.
+            PERFORM set_config('stonescriptphp.tenant_purge_in_progress', 'on', true);
+
             WITH deleted_rows AS (
                 DELETE FROM tenants
                  WHERE deleted_at IS NOT NULL AND purge_after < NOW()
@@ -10,6 +18,10 @@
                 COALESCE(array_agg(deleted_at), ARRAY[]::timestamptz[])
               INTO v_deleted_ids, v_deleted_ats
               FROM deleted_rows;
+
+            -- Clear it immediately — minimizes the window this GUC is 'on'
+            -- for the rest of the (possibly longer-lived) outer transaction.
+            PERFORM set_config('stonescriptphp.tenant_purge_in_progress', 'off', true);
 
             v_count := COALESCE(array_length(v_deleted_ids, 1), 0);
 
@@ -29,30 +41,33 @@
             RETURN QUERY SELECT 'tenants'::TEXT, v_count, NULL::TEXT;
         END IF;
     EXCEPTION WHEN OTHERS THEN
-        -- KNOWN, DOCUMENTED LIMITATION (not silently papered over): the
-        -- DELETE above relies on tenant_memberships.tenant_id REFERENCES
-        -- tenants(uuid) ON DELETE CASCADE (from `php stone generate
-        -- tenant-governance`) to clean up memberships automatically. That
-        -- CASCADE performs a real per-row DELETE on tenant_memberships,
-        -- which fires THAT table's own trg_protect_tenant_creator trigger —
-        -- and that trigger unconditionally REFUSES to hard-delete any row
-        -- with is_tenant_creator=true (by design: "Suspend... instead of
-        -- deleting", see its own source comment). Since every tenant has
-        -- exactly one such row (its founder), this means a tenant can
-        -- currently NEVER be purged while tenant-governance's
-        -- creator-protection trigger is active, until tenant-governance
-        -- itself ships a sanctioned way to release that protection for a
-        -- legitimate whole-tenant purge (e.g. an explicit signal the
-        -- trigger checks, or a dedicated release-creator function) — a
-        -- coordinated fix in THAT generator, out of scope here.
+        -- The DELETE above relies on tenant_memberships.tenant_id
+        -- REFERENCES tenants(uuid) ON DELETE CASCADE (from `php stone
+        -- generate tenant-governance`) to clean up memberships
+        -- automatically. That CASCADE performs a real per-row DELETE on
+        -- tenant_memberships, which fires THAT table's own
+        -- trg_protect_tenant_creator trigger — normally a hard backstop
+        -- against deleting an is_tenant_creator row, but that trigger now
+        -- recognizes THIS purge path (via the
+        -- stonescriptphp.tenant_purge_in_progress GUC set just above — see
+        -- its own header comment for the full mechanism and its honestly-
+        -- documented spoofing caveat) and lets it through. This EXCEPTION
+        -- block therefore now only catches a genuinely UNEXPECTED blocker —
+        -- a platform-added FK/trigger with its own RESTRICT/custom
+        -- exception on tenants or tenant_memberships, not this trigger.
         --
-        -- WHEN OTHERS (not just foreign_key_violation) is deliberate: it
-        -- also catches that trigger's custom RAISE EXCEPTION (a different
-        -- SQLSTATE), and any OTHER platform-added trigger/constraint that
-        -- might similarly block this table's purge — reporting it via
-        -- o_error for 'tenants' ONLY, without wedging or rolling back any
-        -- other table's already-completed purge in the same run (this
-        -- BEGIN/EXCEPTION is its own sub-transaction/savepoint). Retried
-        -- automatically on the next scheduled run.
+        -- Because a plpgsql exception rolls back this BEGIN block's own
+        -- subtransaction, the set_config('...', 'on', true) above is
+        -- already undone by the time we get here — this explicit 'off' is
+        -- redundant-but-cheap belt-and-suspenders, not load-bearing.
+        PERFORM set_config('stonescriptphp.tenant_purge_in_progress', 'off', true);
+        --
+        -- WHEN OTHERS (not just foreign_key_violation) is deliberate: any
+        -- OTHER platform-added trigger/constraint that blocks this table's
+        -- purge raises its own SQLSTATE — reporting it via o_error for
+        -- 'tenants' ONLY, without wedging or rolling back any other table's
+        -- already-completed purge in the same run (this BEGIN/EXCEPTION is
+        -- its own sub-transaction/savepoint). Retried automatically on the
+        -- next scheduled run.
         RETURN QUERY SELECT 'tenants'::TEXT, 0, SQLERRM;
     END;

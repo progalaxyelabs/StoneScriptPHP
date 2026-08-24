@@ -123,12 +123,16 @@ class GenerateSoftDeleteCommandTest extends TestCase
         // see _purge_table_block.pgsql.template's comment for why.
         $this->assertStringContainsString('unnest(v_deleted_ids, v_deleted_ats)', $purgeFn);
         $this->assertStringContainsString('a.deleted_at = d.deleted_at', $purgeFn);
-        // Known, documented limitation: tenant-governance's creator-protection
-        // trigger currently blocks purging a tenant with an active founder
-        // membership row — WHEN OTHERS (not just foreign_key_violation)
-        // catches that custom exception too, isolated to the tenants block.
+        // Tenants purge sanctioned-bypass mechanism: a request-scoped GUC
+        // set immediately around the tenants DELETE lets
+        // trg_protect_tenant_creator's cascade-triggered membership delete
+        // through for THIS system path only — WHEN OTHERS (not just
+        // foreign_key_violation) still catches any OTHER, unexpected
+        // blocker, isolated to the tenants block.
         $this->assertStringContainsString('WHEN OTHERS', $purgeFn);
-        $this->assertStringContainsString('trg_protect_tenant_creator', $purgeFn);
+        $this->assertStringContainsString('stonescriptphp.tenant_purge_in_progress', $purgeFn);
+        $this->assertStringContainsString("set_config('stonescriptphp.tenant_purge_in_progress', 'on', true)", $purgeFn);
+        $this->assertStringContainsString("set_config('stonescriptphp.tenant_purge_in_progress', 'off', true)", $purgeFn);
 
         $migration = $mainBase . 'migrations/038_create_soft_delete.pgsql';
         $this->assertFileExists($migration);
