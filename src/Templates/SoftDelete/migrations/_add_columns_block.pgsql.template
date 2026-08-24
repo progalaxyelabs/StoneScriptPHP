@@ -1,0 +1,10 @@
+DO $$
+BEGIN
+    IF to_regclass('__TABLE__') IS NOT NULL THEN
+        ALTER TABLE __TABLE__
+            ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS purge_after TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS delete_requested_by TEXT;
+        CREATE INDEX IF NOT EXISTS idx___TABLE___deleted_at ON __TABLE__(deleted_at) WHERE deleted_at IS NOT NULL;
+    END IF;
+END $$;

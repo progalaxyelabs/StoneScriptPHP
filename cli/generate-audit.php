@@ -1,0 +1,265 @@
+<?php
+
+/**
+ * Audit Generator
+ *
+ * Scaffolds an immutable, append-only `_audit_log` table + a single
+ * AFTER-row capture trigger function into the CONSUMING platform's OWN
+ * database (main or tenant — run it against whichever database you want
+ * 100% mutation capture on), plus the migration that attaches that trigger
+ * to a configurable list of tables (default: identities, tenants,
+ * tenant_memberships — this platform's own identity/tenant model, per the
+ * "gateway = pure infra, identities+tenants owned by each platform" split).
+ *
+ * Same precedent as `php stone generate tenant-governance` /
+ * `php stone generate invitations`: copies static template files, plus one
+ * small piece of generated text (the per-table trigger-attach blocks) built
+ * from a tiny template with a single __TABLE__ placeholder substitution —
+ * there is no other templating mechanism in this codebase to reuse, so this
+ * is intentionally minimal.
+ *
+ * Usage:
+ *   php stone generate audit
+ *   php stone generate audit --tables=identities,tenants,tenant_memberships
+ */
+
+if (!defined('ROOT_PATH')) {
+    // Identical detection block to cli/generate-tenant-governance.php /
+    // cli/generate-invitations.php / cli/generate-auth.php — kept
+    // byte-for-byte so all generators agree on where "the project" is
+    // regardless of how this package is installed.
+    $cliDir = __DIR__;
+    $frameworkDir = dirname($cliDir);
+    $potentialApiDir = dirname(dirname(dirname($frameworkDir))); // vendor/progalaxyelabs/stonescriptphp -> api
+
+    if (basename($potentialApiDir) === 'api' && file_exists($potentialApiDir . DIRECTORY_SEPARATOR . 'composer.json')) {
+        define('ROOT_PATH', $potentialApiDir . DIRECTORY_SEPARATOR);
+    } else {
+        define('ROOT_PATH', dirname($frameworkDir) . DIRECTORY_SEPARATOR);
+    }
+}
+if (!defined('SRC_PATH')) define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
+
+$vendorPath = ROOT_PATH . 'vendor' . DIRECTORY_SEPARATOR . 'progalaxyelabs' . DIRECTORY_SEPARATOR . 'stonescriptphp' . DIRECTORY_SEPARATOR;
+if (!is_dir($vendorPath)) {
+    // Development mode — framework is a sibling directory.
+    $vendorPath = dirname(ROOT_PATH) . DIRECTORY_SEPARATOR . 'StoneScriptPHP' . DIRECTORY_SEPARATOR;
+}
+
+$argv = $_SERVER['argv'] ?? $argv;
+$argc = $_SERVER['argc'] ?? $argc;
+
+$DEFAULT_AUDITED_TABLES = ['identities', 'tenants', 'tenant_memberships'];
+
+if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
+    echo "Audit Generator\n";
+    echo "================\n\n";
+    echo "Scaffolds an immutable, append-only _audit_log table + a single\n";
+    echo "capture trigger function into THIS database, and attaches an\n";
+    echo "AFTER-row trigger to every table you name (default: " . implode(', ', $DEFAULT_AUDITED_TABLES) . ").\n\n";
+    echo "Usage:\n";
+    echo "  php stone generate audit\n";
+    echo "  php stone generate audit --tables=identities,tenants,tenant_memberships\n\n";
+    echo "This will create:\n";
+    echo "  - migrations/{N}_create_audit_log.pgsql\n";
+    echo "  - src/postgresql/{main/postgresql/,}tables/_audit_log.pgsql\n";
+    echo "  - src/postgresql/{main/postgresql/,}functions/_audit_capture_row.pgsql\n\n";
+    echo "No model wrapper is generated — _audit_capture_row is an internal\n";
+    echo "trigger function, never called directly from PHP.\n\n";
+    echo "\"Who\" (actor_id) is captured via set_config('app.actor_id', <id>,\n";
+    echo "true) — add that line yourself at the top of any mutating SQL\n";
+    echo "function that has an acting identity available. Left unset (cron,\n";
+    echo "raw psql, gateway migrate, admin tooling) -> actor_source='system'.\n";
+    exit(0);
+}
+
+// ── Parse --tables ─────────────────────────────────────────────────────
+$auditedTables = $DEFAULT_AUDITED_TABLES;
+foreach ($argv as $arg) {
+    if (is_string($arg) && str_starts_with($arg, '--tables=')) {
+        $list = substr($arg, strlen('--tables='));
+        $auditedTables = array_values(array_filter(array_map('trim', explode(',', $list))));
+        foreach ($auditedTables as $t) {
+            if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $t)) {
+                echo "Error: invalid table name in --tables: '$t' (must be a bare SQL identifier)\n";
+                exit(1);
+            }
+        }
+        if (empty($auditedTables)) {
+            echo "Error: --tables list is empty\n";
+            exit(1);
+        }
+    }
+}
+
+echo "Generating immutable audit log (tables: " . implode(', ', $auditedTables) . ")...\n\n";
+
+$templatesPath = $vendorPath . 'src' . DIRECTORY_SEPARATOR . 'Templates' . DIRECTORY_SEPARATOR . 'Audit' . DIRECTORY_SEPARATOR;
+if (!is_dir($templatesPath)) {
+    echo "Error: Audit templates not found at $templatesPath\n";
+    echo "Your progalaxyelabs/stonescriptphp version may be too old — run:\n";
+    echo "  composer update progalaxyelabs/stonescriptphp\n";
+    exit(1);
+}
+
+// ── Layout detection — identical approach to generate-tenant-governance.php.
+$nestedMainBase = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'main' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR;
+$useNested = is_dir($nestedMainBase);
+
+if ($useNested) {
+    $tablesDir     = $nestedMainBase . 'tables';
+    $functionsDir  = $nestedMainBase . 'functions';
+    $migrationsDir = $nestedMainBase . 'migrations';
+    echo "Detected nested main-DB layout: src/postgresql/main/postgresql/\n";
+} else {
+    $tablesDir     = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'tables';
+    $functionsDir  = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'functions';
+    $migrationsDir = ROOT_PATH . 'migrations';
+    echo "Using flat layout: src/postgresql/{tables,functions} + migrations/\n";
+}
+
+foreach (['tables' => $tablesDir, 'functions' => $functionsDir, 'migrations' => $migrationsDir] as $name => $dir) {
+    if (!is_dir($dir)) {
+        if (!mkdir($dir, 0755, true)) {
+            echo "Error: Failed to create $name directory: $dir\n";
+            exit(1);
+        }
+        echo "Created directory: $dir\n";
+    }
+}
+
+/**
+ * Mirrors resolveGovernanceMigrationFilename() in
+ * cli/generate-tenant-governance.php exactly — continue the target's
+ * existing sequential numbering if any; else use the fleet's timestamp
+ * convention rather than inventing 001_ with no basis.
+ *
+ * @return array{0: string, 1: string} [filename, note]
+ */
+function resolveAuditMigrationFilename(string $migrationsDir): array
+{
+    if (!is_dir($migrationsDir)) {
+        return [
+            '001_create_audit_log.pgsql',
+            'no existing migrations directory — starting fresh sequential numbering',
+        ];
+    }
+
+    $numbers = [];
+    $widths = [];
+    $extCounts = [];
+
+    foreach (scandir($migrationsDir) ?: [] as $entry) {
+        if (preg_match('/^(\d+)_.*\.(pgsql|sql)$/i', $entry, $m)) {
+            $numbers[] = (int) $m[1];
+            $widths[] = strlen($m[1]);
+            $ext = strtolower($m[2]);
+            $extCounts[$ext] = ($extCounts[$ext] ?? 0) + 1;
+        }
+    }
+
+    if (!empty($numbers)) {
+        $next = max($numbers) + 1;
+        $width = max($widths);
+        arsort($extCounts);
+        $ext = array_key_first($extCounts) ?? 'pgsql';
+        $number = str_pad((string) $next, $width, '0', STR_PAD_LEFT);
+
+        return [
+            "{$number}_create_audit_log.{$ext}",
+            "sequential numbering detected ({$width}-digit) — next number is {$number}",
+        ];
+    }
+
+    $timestamp = date('Y-m-d_H-i-s');
+
+    return [
+        "{$timestamp}_create_audit_log.sql",
+        'no sequential-numbered migrations found — used the fleet timestamp convention',
+    ];
+}
+
+// ── 1. Table (declarative — gateway schema-sync source of truth) ─────────
+echo "\n→ Creating declarative table file...\n";
+$tableDst = $tablesDir . DIRECTORY_SEPARATOR . '_audit_log.pgsql';
+if (file_exists($tableDst)) {
+    echo "  Skipped (already exists): " . relativeToRoot(ROOT_PATH, $tableDst) . "\n";
+} else {
+    copy($templatesPath . 'tables' . DIRECTORY_SEPARATOR . '_audit_log.pgsql.template', $tableDst);
+    echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $tableDst) . "\n";
+}
+
+// ── 2. Trigger function ────────────────────────────────────────────────
+echo "\n→ Creating trigger capture function...\n";
+$fnDst = $functionsDir . DIRECTORY_SEPARATOR . '_audit_capture_row.pgsql';
+if (file_exists($fnDst)) {
+    echo "  Skipped (already exists): " . relativeToRoot(ROOT_PATH, $fnDst) . "\n";
+} else {
+    copy($templatesPath . 'functions' . DIRECTORY_SEPARATOR . '_audit_capture_row.pgsql.template', $fnDst);
+    echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $fnDst) . "\n";
+}
+
+// ── 3. Migration (table + REVOKE + per-table trigger-attach blocks) ───────
+echo "\n→ Creating migration...\n";
+$existingMigration = null;
+foreach (scandir($migrationsDir) ?: [] as $entry) {
+    if (preg_match('/create_audit_log\.(pgsql|sql)$/i', $entry)) {
+        $existingMigration = $entry;
+        break;
+    }
+}
+if ($existingMigration !== null) {
+    echo "  Skipped (already exists): " . relativeToRoot(ROOT_PATH, $migrationsDir . DIRECTORY_SEPARATOR . $existingMigration) . "\n";
+    echo "  (--tables is only honored on first generation — edit the existing\n";
+    echo "   migration by hand to audit additional tables, or write a follow-on\n";
+    echo "   migration with more __TABLE___attach blocks.)\n";
+} else {
+    $blockTemplate = file_get_contents($templatesPath . 'migrations' . DIRECTORY_SEPARATOR . '_attach_trigger_block.pgsql.template');
+    $blocks = [];
+    foreach ($auditedTables as $table) {
+        $blocks[] = str_replace('__TABLE__', $table, $blockTemplate);
+    }
+
+    $migrationSql = str_replace(
+        '__AUDITED_TABLE_TRIGGERS__',
+        implode("\n", $blocks),
+        file_get_contents($templatesPath . 'migrations' . DIRECTORY_SEPARATOR . 'create_audit_log.pgsql.template')
+    );
+
+    [$migrationFilename, $migrationNote] = resolveAuditMigrationFilename($migrationsDir);
+    $migrationDst = $migrationsDir . DIRECTORY_SEPARATOR . $migrationFilename;
+    file_put_contents($migrationDst, $migrationSql);
+    echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $migrationDst) . "\n";
+    echo "    ($migrationNote)\n";
+}
+
+echo "\n✅ Audit scaffolding complete!\n\n";
+echo "Next steps:\n";
+echo "1. Run migrations: php stone gateway:migrate-main (or php stone migrate up /\n";
+echo "   gateway:migrate-tenant, whichever database you generated this against).\n";
+echo "2. Any mutating SQL function that has an acting identity available should\n";
+echo "   set it at the top of the function body:\n";
+echo "     PERFORM set_config('app.actor_id', p_actor_identity_id::text, true);\n";
+echo "   Left unset -> actor_source='system' (honest for cron/admin/migrate paths).\n";
+echo "3. Re-run this generator with --tables to attach capture to more tables\n";
+echo "   later, or hand-edit the migration if the target table didn't exist yet\n";
+echo "   on first run (the trigger-attach blocks are self-skipping and idempotent).\n";
+echo "4. Query examples:\n";
+echo "     SELECT * FROM _audit_log WHERE table_name='identities' AND subject_id=\$1 ORDER BY occurred_at;\n";
+echo "     SELECT * FROM _audit_log WHERE operation='DELETE' AND table_name='identities';\n";
+
+/**
+ * Render an absolute path relative to ROOT_PATH for tidy output.
+ * Named distinctly from generate-tenant-governance.php's relativeTo() —
+ * both files may be require()'d in the same PHP process during the test
+ * suite's fixture runs (via the dispatcher), and PHP has no per-file
+ * function scoping, so a shared name would collide.
+ */
+function relativeToRoot(string $root, string $path): string
+{
+    $root = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+    if (str_starts_with($path, $root)) {
+        return substr($path, strlen($root));
+    }
+    return $path;
+}

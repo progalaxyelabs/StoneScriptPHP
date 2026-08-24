@@ -1,0 +1,10 @@
+    IF to_regclass('__TABLE__') IS NOT NULL THEN
+        DELETE FROM __TABLE__ WHERE deleted_at IS NOT NULL AND purge_after < NOW();
+        GET DIAGNOSTICS v_count = ROW_COUNT;
+
+        UPDATE _deletion_archive
+           SET purged = true, purged_at = NOW()
+         WHERE source_table = '__TABLE__' AND purged = false AND purge_after < NOW();
+
+        RETURN QUERY SELECT '__TABLE__'::TEXT, v_count;
+    END IF;
