@@ -1,0 +1,84 @@
+-- enqueue_data_export_job: fast INSERT only — NO synchronous export work
+-- happens on this path (owner constraint: the request path must never
+-- choke the platform). Called from the checkbox-driven close-account /
+-- delete-tenant flow (see routes/PostEnqueueDataExportRoute.php.template),
+-- returns immediately with a job_uuid the caller can poll.
+--
+-- AUTHORIZATION is NOT this function's job — by the time this function is
+-- called, the caller (the PHP route) has already verified: (a) p_requested_by
+-- is the actual authenticated identity, and (b) for export_scope='tenant',
+-- that identity is an owner/admin of p_tenant_id. This function only
+-- enforces the STRUCTURAL contract (scope/tenant_id pairing — belt-and-
+-- braces on top of the table's own CHECK constraint) and admission control.
+--
+-- Admission control: race-free via the table's partial unique index
+-- (idx_data_export_jobs_one_open_per_scope) — an INSERT-and-catch-
+-- unique-violation shape (this codebase's standard "one open job per key"
+-- enqueue pattern), never an application-level SELECT-then-INSERT (which
+-- would TOCTOU-race two near-simultaneous enqueue calls for the same
+-- requester+scope+tenant).
+CREATE OR REPLACE FUNCTION enqueue_data_export_job(
+    p_requested_by  TEXT,
+    p_export_scope  TEXT,
+    p_tenant_id     TEXT DEFAULT NULL,
+    p_format        TEXT DEFAULT 'csv'
+)
+RETURNS TABLE (
+    o_job_uuid    UUID,
+    o_status      TEXT,
+    o_enqueued_at TIMESTAMPTZ,
+    o_error       TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_job_uuid UUID;
+    v_conflict RECORD;
+BEGIN
+    IF p_export_scope NOT IN ('account', 'tenant') THEN
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, NULL::TIMESTAMPTZ, 'invalid_export_scope'::TEXT;
+        RETURN;
+    END IF;
+
+    IF p_export_scope = 'tenant' AND p_tenant_id IS NULL THEN
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, NULL::TIMESTAMPTZ, 'tenant_id_required'::TEXT;
+        RETURN;
+    END IF;
+
+    IF p_export_scope = 'account' AND p_tenant_id IS NOT NULL THEN
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, NULL::TIMESTAMPTZ, 'tenant_id_must_be_null_for_account_scope'::TEXT;
+        RETURN;
+    END IF;
+
+    IF p_format NOT IN ('csv', 'xlsx') THEN
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, NULL::TIMESTAMPTZ, 'invalid_format'::TEXT;
+        RETURN;
+    END IF;
+
+    BEGIN
+        INSERT INTO data_export_jobs (requested_by, export_scope, tenant_id, format, status)
+        VALUES (p_requested_by, p_export_scope, p_tenant_id, p_format, 'queued')
+        RETURNING data_export_jobs.job_uuid INTO v_job_uuid;
+    EXCEPTION WHEN unique_violation THEN
+        SELECT j.job_uuid, j.status INTO v_conflict
+        FROM data_export_jobs j
+        WHERE j.requested_by = p_requested_by
+          AND j.export_scope = p_export_scope
+          AND COALESCE(j.tenant_id, '') = COALESCE(p_tenant_id, '')
+          AND j.status IN ('queued', 'running')
+        ORDER BY j.enqueued_at DESC
+        LIMIT 1;
+
+        RETURN QUERY SELECT v_conflict.job_uuid, v_conflict.status, NULL::TIMESTAMPTZ,
+            ('export_already_in_progress: job_uuid=' || COALESCE(v_conflict.job_uuid::text, '?'))::TEXT;
+        RETURN;
+    END;
+
+    RETURN QUERY
+    SELECT j.job_uuid, j.status, j.enqueued_at, NULL::TEXT
+    FROM data_export_jobs j
+    WHERE j.job_uuid = v_job_uuid;
+END;
+$$;

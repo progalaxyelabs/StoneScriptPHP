@@ -42,7 +42,8 @@
     },
     "suggest": {
         "ext-redis": "Required for Redis caching support",
-        "ext-pdo_pgsql": "Required for DB_MODE=direct (pluggable database transport — talks to PostgreSQL directly via PDO instead of the gateway)",
+        "ext-pdo_pgsql": "Required for DB_MODE=direct (pluggable database transport — talks to PostgreSQL directly via PDO instead of the gateway); also required by the `php stone generate data-export` worker for genuine server-side cursor streaming",
+        "openspout/openspout": "Required for `php stone generate data-export`'s XLSX output — a genuinely constant-memory streaming writer (phpoffice/phpspreadsheet is not)",
         "google/apiclient": "Required for Google OAuth authentication (install via: php stone generate auth:google)",
         "phpoffice/phpspreadsheet": "Required for Excel/CSV export features"
     },

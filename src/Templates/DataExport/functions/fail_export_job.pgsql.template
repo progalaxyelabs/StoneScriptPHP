@@ -1,0 +1,47 @@
+-- fail_export_job: called by the worker's catch-all around the export loop
+-- (any exception — cursor error, disk-full, XLSX writer error, row-cap
+-- exceeded) so a failed job always reaches a durable terminal state instead
+-- of being stranded in 'running' forever (the same job-lifecycle LAW every
+-- durable queue in this codebase follows — every job reaches terminal, no
+-- exceptions). Guarded the same way as complete_export_job(): only applies
+-- while status='running'; a duplicate/late call is a safe no-op.
+--
+-- Same "plain sequential PL/pgSQL statements, not a data-modifying-CTE +
+-- base-table-rescan" shape as complete_export_job() — see that function's
+-- header comment for why the CTE form returns a stale status.
+CREATE OR REPLACE FUNCTION fail_export_job(
+    p_job_uuid UUID,
+    p_error    TEXT
+)
+RETURNS TABLE (
+    o_job_uuid  UUID,
+    o_applied   BOOLEAN,
+    o_status    TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_applied BOOLEAN := FALSE;
+    v_status  TEXT;
+BEGIN
+    UPDATE data_export_jobs
+       SET status = 'failed',
+           error_detail = p_error,
+           terminal_at = NOW()
+     WHERE data_export_jobs.job_uuid = p_job_uuid
+       AND data_export_jobs.status = 'running';
+
+    IF FOUND THEN
+        v_applied := TRUE;
+        v_status := 'failed';
+    ELSE
+        SELECT data_export_jobs.status INTO v_status
+        FROM data_export_jobs
+        WHERE data_export_jobs.job_uuid = p_job_uuid;
+    END IF;
+
+    RETURN QUERY SELECT p_job_uuid, v_applied, v_status;
+END;
+$$;

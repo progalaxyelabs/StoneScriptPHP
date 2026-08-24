@@ -178,6 +178,8 @@ if ($command === 'generate' && !empty($args)) {
         $commands['generate']['file'] = 'cli/generate-audit.php';
     } elseif ($subCommand === 'soft-delete') {
         $commands['generate']['file'] = 'cli/generate-soft-delete.php';
+    } elseif ($subCommand === 'data-export') {
+        $commands['generate']['file'] = 'cli/generate-data-export.php';
     } elseif ($subCommand === 'client') {
         $commands['generate']['file'] = 'cli/generate-client.php';
     } elseif ($subCommand === 'contract') {
@@ -213,6 +215,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone generate tenant-governance    # Scaffold platform-owned tenant membership + governance\n";
     echo "  php stone generate audit                # Scaffold immutable append-only audit log + capture trigger\n";
     echo "  php stone generate soft-delete          # Scaffold soft-delete columns + 7-day purge + read filters\n";
+    echo "  php stone generate data-export          # Scaffold async streaming data-export jobs + worker\n";
     echo "  php stone generate auth:google          # Generate Google OAuth\n";
     echo "  php stone generate cache:redis          # Generate Redis caching\n";
     echo "  php stone generate jwt                  # Generate JWT RSA keys\n";

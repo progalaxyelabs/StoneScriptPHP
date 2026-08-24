@@ -1,0 +1,52 @@
+-- claim_export_job: the per-platform worker's dequeue call (see
+-- worker/ExportWorker.php.template's claim loop). Atomically transitions
+-- the OLDEST queued job to 'running' and returns it — FOR UPDATE SKIP
+-- LOCKED means concurrent worker processes (the worker enforces a
+-- concurrency cap of 1-2 in-flight itself, but this function is safe even
+-- if that cap is ever raised or a second worker instance is started by
+-- mistake) never block on or double-claim the same row; a second concurrent
+-- caller simply skips the locked row and claims the next one, or gets zero
+-- rows back if none are free.
+--
+-- p_limit bounds how many jobs a single call claims (default 1 — the worker
+-- calls this once per loop iteration, per its own concurrency cap; a worker
+-- that wants small batches can raise p_limit, never lower than 1).
+CREATE OR REPLACE FUNCTION claim_export_job(
+    p_limit INTEGER DEFAULT 1
+)
+RETURNS TABLE (
+    o_job_uuid     UUID,
+    o_requested_by TEXT,
+    o_export_scope TEXT,
+    o_tenant_id    TEXT,
+    o_format       TEXT,
+    o_picked_up_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    RETURN QUERY
+    WITH claimed AS (
+        SELECT j.job_uuid
+        FROM data_export_jobs j
+        WHERE j.status = 'queued'
+        ORDER BY j.enqueued_at
+        LIMIT GREATEST(p_limit, 1)
+        FOR UPDATE SKIP LOCKED
+    ),
+    updated AS (
+        UPDATE data_export_jobs
+        SET status = 'running', picked_up_at = NOW()
+        WHERE data_export_jobs.job_uuid IN (SELECT claimed.job_uuid FROM claimed)
+        RETURNING data_export_jobs.job_uuid, data_export_jobs.requested_by,
+                  data_export_jobs.export_scope, data_export_jobs.tenant_id,
+                  data_export_jobs.format, data_export_jobs.picked_up_at
+    )
+    SELECT updated.job_uuid, updated.requested_by, updated.export_scope,
+           updated.tenant_id, updated.format, updated.picked_up_at
+    FROM updated
+    ORDER BY updated.picked_up_at;
+END;
+$$;

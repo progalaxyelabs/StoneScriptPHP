@@ -1,0 +1,58 @@
+-- complete_export_job: called by the worker after it has FINISHED writing
+-- the artifact to durable storage (never before — artifact_ref must always
+-- point at a fully-written file by the time any reader can see
+-- status='succeeded'). Guarded exactly like this codebase's standard
+-- "only-if-still-running" job-transition posture (see claim_export_job()):
+-- only
+-- applies while status='running'. A duplicate/late call is a safe,
+-- idempotent no-op (o_applied=false), never a second write.
+--
+-- Deliberately PL/pgSQL statements, NOT a single `WITH updated AS (UPDATE
+-- ... RETURNING ...) SELECT ... FROM data_export_jobs` query — Postgres
+-- data-modifying CTEs are only visible to OTHER parts of the SAME query that
+-- reference them BY NAME; a sibling clause that re-scans the base table
+-- directly (as the natural "look up current status for the o_applied=false
+-- case" shape would) still sees the PRE-update snapshot and returns a stale
+-- status. Confirmed empirically while building this generator — the
+-- CTE-join form returned status='running' even on a successful
+-- o_applied=true transition. Two ordinary sequential statements avoid this
+-- entirely: PL/pgSQL statements within one function body share the same
+-- transaction and each sees the previous statement's own writes.
+CREATE OR REPLACE FUNCTION complete_export_job(
+    p_job_uuid    UUID,
+    p_artifact_ref TEXT,
+    p_expires_at   TIMESTAMPTZ
+)
+RETURNS TABLE (
+    o_job_uuid  UUID,
+    o_applied   BOOLEAN,
+    o_status    TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_applied BOOLEAN := FALSE;
+    v_status  TEXT;
+BEGIN
+    UPDATE data_export_jobs
+       SET status = 'succeeded',
+           artifact_ref = p_artifact_ref,
+           download_expires_at = p_expires_at,
+           terminal_at = NOW()
+     WHERE data_export_jobs.job_uuid = p_job_uuid
+       AND data_export_jobs.status = 'running';
+
+    IF FOUND THEN
+        v_applied := TRUE;
+        v_status := 'succeeded';
+    ELSE
+        SELECT data_export_jobs.status INTO v_status
+        FROM data_export_jobs
+        WHERE data_export_jobs.job_uuid = p_job_uuid;
+    END IF;
+
+    RETURN QUERY SELECT p_job_uuid, v_applied, v_status;
+END;
+$$;
