@@ -23,25 +23,39 @@
 -- (is_tenant_creator flag immutability) is never bypassed, by anyone, for
 -- any reason.
 --
--- Known, honestly-documented limitation of this mechanism (not hidden):
--- set_config() is a plain built-in, not itself privilege-gated, so on a
--- platform running with a single, undifferentiated database role (the
--- current default — see the framework's separate, not-yet-shipped gateway
--- role-split workstream) an application role COULD in principle set this
--- same GUC itself before issuing a raw DELETE, and this trigger cannot
--- currently distinguish that from the real purge path. This is a
--- deliberate, scoped trade-off: it closes the "purge is permanently stuck"
--- failure (the previous state, where NO tenant could EVER be purged) in
--- favor of a narrow, named, audited bypass, and it stays exactly as
--- unspoofable as the rest of this database's trust boundary — no worse.
--- Full spoof-resistance (e.g. the bypass provably only reachable by a
--- distinct, lower-privileged app role) requires that role-split; revisit
--- this trigger when it lands.
+-- TWO conditions authorize the bypass now (either is sufficient), to stay
+-- compatible with BOTH fleet states:
+--
+-- 1. The GUC check above (`stonescriptphp.tenant_purge_in_progress`).
+--    Honestly-documented limitation (not hidden): set_config() is a plain
+--    built-in, not itself privilege-gated, so on a platform running with a
+--    single, undifferentiated database role (today's default everywhere
+--    until the gateway audit-owner role-split below is ENABLED) an
+--    application role COULD in principle set this same GUC itself before
+--    issuing a raw DELETE, and this trigger cannot currently distinguish
+--    that from the real purge path. Kept for exactly that fleet state —
+--    removing it would make purge permanently stuck (no tenant EVER
+--    purgeable) on every platform that hasn't yet had the role-split
+--    enabled, which would be a functional regression on today's default.
+--
+-- 2. `current_user = '__AUDIT_OWNER_ROLE__'` — closes the GUC's spoofability
+--    the moment stonescriptdb-gateway's gated audit-owner role-split IS
+--    enabled (see `src/audit_provision/mod.rs` in stonescriptdb-gateway and
+--    `php stone generate audit`'s audit/protected.json). Once enabled,
+--    purge_expired_deletions() is owned by (and, being SECURITY DEFINER,
+--    executes AS) the privileged NOLOGIN `__AUDIT_OWNER_ROLE__` role — a
+--    role identity the runtime app role can never assume (it is not even a
+--    member), so this condition is authoritative and un-spoofable, unlike
+--    the GUC. `__AUDIT_OWNER_ROLE__` is substituted by the generator from
+--    this project's DB_GATEWAY_PLATFORM at generation time; if that could
+--    not be detected, it resolves to a placeholder role name that will
+--    simply never match any real `current_user` (safe no-op, not a bypass).
 CREATE OR REPLACE FUNCTION _tenant_memberships_protect_creator()
 RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'DELETE' AND OLD.is_tenant_creator THEN
-        IF current_setting('stonescriptphp.tenant_purge_in_progress', true) = 'on' THEN
+        IF current_setting('stonescriptphp.tenant_purge_in_progress', true) = 'on'
+           OR current_user = '__AUDIT_OWNER_ROLE__' THEN
             -- Sanctioned system-purge bypass — see header comment. Still a
             -- real DELETE, still caught by `php stone generate audit`'s own
             -- trigger on this table if installed; nothing here skips that.

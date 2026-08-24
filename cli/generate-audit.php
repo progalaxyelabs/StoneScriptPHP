@@ -66,9 +66,15 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "  - migrations/{N}_create_audit_log.pgsql\n";
     echo "  - src/postgresql/{main/postgresql/,}tables/_audit_log.pgsql\n";
     echo "  - src/postgresql/{main/postgresql/,}functions/_audit_capture_row.pgsql\n";
-    echo "  - src/postgresql/{main/postgresql/,}functions/_audit_capture_truncate.pgsql\n\n";
+    echo "  - src/postgresql/{main/postgresql/,}functions/_audit_capture_truncate.pgsql\n";
+    echo "  - src/postgresql/{main/postgresql/,}audit/protected.json\n\n";
     echo "No model wrapper is generated — both trigger functions are internal,\n";
     echo "never called directly from PHP.\n\n";
+    echo "protected.json is the contract for stonescriptdb-gateway's GATED\n";
+    echo "audit-owner role-split (TAMPER-PROOF, not just tamper-evident —\n";
+    echo "requires gateway operator opt-in via AUDIT_PROVISIONING_DATABASE_URL;\n";
+    echo "inert file otherwise). Override the runtime DB role it names with\n";
+    echo "--runtime-role=<role> (default: gateway_user).\n\n";
     echo "\"Who\" (actor_id) is captured via set_config('app.actor_id', <id>,\n";
     echo "true) — add that line yourself at the top of any mutating SQL\n";
     echo "function that has an acting identity available. Left unset (cron,\n";
@@ -84,8 +90,9 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     exit(0);
 }
 
-// ── Parse --tables ─────────────────────────────────────────────────────
+// ── Parse --tables / --runtime-role ──────────────────────────────────────
 $auditedTables = $DEFAULT_AUDITED_TABLES;
+$runtimeRoleOverride = null;
 foreach ($argv as $arg) {
     if (is_string($arg) && str_starts_with($arg, '--tables=')) {
         $list = substr($arg, strlen('--tables='));
@@ -101,6 +108,55 @@ foreach ($argv as $arg) {
             exit(1);
         }
     }
+    if (is_string($arg) && str_starts_with($arg, '--runtime-role=')) {
+        $runtimeRoleOverride = trim(substr($arg, strlen('--runtime-role=')));
+    }
+}
+
+/**
+ * Reads the DB connecting role name the stonescriptdb-gateway's regular pool
+ * uses for THIS platform's databases — needed only by the (flag-gated, OFF by
+ * default) audit-owner role-split manifest (audit/protected.json), so the
+ * gateway knows which role to grant DML-only access to. The gateway's regular
+ * pool is built from ONE set of DB_HOST/DB_USER/... env vars shared across the
+ * whole fleet (see stonescriptdb-gateway's src/config.rs Config::from_env),
+ * defaulting to "gateway_user" — that is the correct default here too. Override
+ * with --runtime-role= if a given deployment's gateway uses a non-default
+ * DB_USER.
+ */
+function detectRuntimeRole(?string $override): string
+{
+    if ($override !== null && $override !== '') {
+        return $override;
+    }
+    return 'gateway_user';
+}
+
+/**
+ * Reads DB_GATEWAY_PLATFORM from this project's .env (same variable
+ * `php stone migrate` already prints — see cli/migrate.php). Needed to name
+ * this platform's `{platform}_audit_owner` role in the manifest. A plain
+ * regex read (not Env::load(), which needs the full framework boot/autoload
+ * context this standalone CLI script doesn't have) — same lightweight
+ * approach the ROOT_PATH detection block above already uses for filesystem
+ * layout.
+ */
+function detectPlatformCode(string $rootPath): ?string
+{
+    $envPath = $rootPath . '.env';
+    if (!is_file($envPath)) {
+        return null;
+    }
+    foreach (file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#')) {
+            continue;
+        }
+        if (preg_match('/^DB_GATEWAY_PLATFORM\s*=\s*(.+)$/', $line, $m)) {
+            return trim($m[1], " \t\n\r\0\x0B\"'");
+        }
+    }
+    return null;
 }
 
 echo "Generating immutable audit log (tables: " . implode(', ', $auditedTables) . ")...\n\n";
@@ -121,15 +177,17 @@ if ($useNested) {
     $tablesDir     = $nestedMainBase . 'tables';
     $functionsDir  = $nestedMainBase . 'functions';
     $migrationsDir = $nestedMainBase . 'migrations';
+    $auditDir      = $nestedMainBase . 'audit';
     echo "Detected nested main-DB layout: src/postgresql/main/postgresql/\n";
 } else {
     $tablesDir     = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'tables';
     $functionsDir  = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'functions';
     $migrationsDir = ROOT_PATH . 'migrations';
+    $auditDir      = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'audit';
     echo "Using flat layout: src/postgresql/{tables,functions} + migrations/\n";
 }
 
-foreach (['tables' => $tablesDir, 'functions' => $functionsDir, 'migrations' => $migrationsDir] as $name => $dir) {
+foreach (['tables' => $tablesDir, 'functions' => $functionsDir, 'migrations' => $migrationsDir, 'audit' => $auditDir] as $name => $dir) {
     if (!is_dir($dir)) {
         if (!mkdir($dir, 0755, true)) {
             echo "Error: Failed to create $name directory: $dir\n";
@@ -250,6 +308,49 @@ if ($existingMigration !== null) {
     file_put_contents($migrationDst, $migrationSql);
     echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $migrationDst) . "\n";
     echo "    ($migrationNote)\n";
+}
+
+// ── 4. audit/protected.json manifest (gated audit-owner role-split) ──────
+//
+// Consumed ONLY by stonescriptdb-gateway's audit_provision module (src/audit_
+// provision/mod.rs), and ONLY when the gateway operator has set
+// AUDIT_PROVISIONING_DATABASE_URL — absent that flag this file is inert
+// (loaded, found "no manifest"-equivalent behaviour never triggers because the
+// gateway checks the flag FIRST). Domain-agnostic contract: the gateway learns
+// audited table/function names ONLY from this file, never from gateway code.
+// `php stone generate soft-delete` appends "purge_expired_deletions" to
+// `functions` here (idempotently) if this file already exists when it runs.
+echo "\n→ Writing audit/protected.json manifest (gated role-split contract)...\n";
+$manifestDst = $auditDir . DIRECTORY_SEPARATOR . 'protected.json';
+$runtimeRole = detectRuntimeRole($runtimeRoleOverride);
+$platformCode = detectPlatformCode(ROOT_PATH);
+if ($platformCode === null) {
+    echo "  Warning: could not read DB_GATEWAY_PLATFORM from .env — protected.json\n";
+    echo "  omits the platform hint; the gateway derives {platform}_audit_owner from\n";
+    echo "  the /v2/migrate request's own 'platform' field regardless, so this is\n";
+    echo "  informational only (not required for the manifest to function).\n";
+}
+if (file_exists($manifestDst)) {
+    $existing = json_decode((string) file_get_contents($manifestDst), true) ?: [];
+    $existing['audited_tables'] = $auditedTables;
+    $existing['audit_log_table'] = $existing['audit_log_table'] ?? '_audit_log';
+    $existingFns = is_array($existing['functions'] ?? null) ? $existing['functions'] : [];
+    $existing['functions'] = array_values(array_unique(array_merge($existingFns, ['_audit_capture_row', '_audit_capture_truncate'])));
+    $existing['runtime_role'] = $runtimeRole;
+    file_put_contents($manifestDst, json_encode($existing, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+    echo "  ✓ Updated: " . relativeToRoot(ROOT_PATH, $manifestDst) . "\n";
+} else {
+    $manifest = [
+        'audited_tables'  => $auditedTables,
+        'audit_log_table' => '_audit_log',
+        'functions'       => ['_audit_capture_row', '_audit_capture_truncate'],
+        'runtime_role'    => $runtimeRole,
+    ];
+    if ($platformCode !== null) {
+        $manifest['_platform_hint'] = $platformCode; // informational only — see comment above
+    }
+    file_put_contents($manifestDst, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+    echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $manifestDst) . "\n";
 }
 
 echo "\n✅ Audit scaffolding complete!\n\n";

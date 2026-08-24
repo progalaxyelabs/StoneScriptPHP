@@ -95,7 +95,12 @@ class GenerateAuditCommandTest extends TestCase
         $sql = file_get_contents($migration);
 
         $this->assertStringContainsString('CREATE TABLE IF NOT EXISTS _audit_log', $sql);
-        $this->assertStringContainsString("REVOKE UPDATE, DELETE, TRUNCATE ON _audit_log", $sql);
+        // Immutability enforcement moved to the gateway's gated audit-owner
+        // role-split (audit_provision) — this migration no longer REVOKEs
+        // from current_user (that would self-revoke the single connecting
+        // role on a flag-off/today's-default fleet). See
+        // audit/protected.json + stonescriptdb-gateway's src/audit_provision.
+        $this->assertStringNotContainsString("REVOKE UPDATE, DELETE, TRUNCATE ON _audit_log", $sql);
         // Default table set, each guarded by to_regclass so partial rollout
         // (a table that doesn't exist yet on this DB) doesn't fail the migration
         // -- non-silently: RAISE WARNING, not a quiet skip.
@@ -103,9 +108,19 @@ class GenerateAuditCommandTest extends TestCase
             $this->assertStringContainsString("to_regclass('$table')", $sql);
             $this->assertStringContainsString("trg_audit_$table", $sql);
             $this->assertStringContainsString("trg_audit_truncate_$table", $sql);
-            $this->assertStringContainsString("REVOKE TRUNCATE ON $table FROM", $sql);
+            $this->assertStringNotContainsString("REVOKE TRUNCATE ON $table FROM", $sql);
         }
         $this->assertStringContainsString('RAISE WARNING', $sql);
+
+        // audit/protected.json — the gated role-split manifest (gateway
+        // reads this ONLY when its operator opts in; inert otherwise).
+        $manifestPath = $mainBase . 'audit/protected.json';
+        $this->assertFileExists($manifestPath);
+        $manifest = json_decode((string) file_get_contents($manifestPath), true);
+        $this->assertSame(['identities', 'tenants', 'tenant_memberships'], $manifest['audited_tables']);
+        $this->assertSame('_audit_log', $manifest['audit_log_table']);
+        $this->assertSame(['_audit_capture_row', '_audit_capture_truncate'], $manifest['functions']);
+        $this->assertSame('gateway_user', $manifest['runtime_role']);
 
         // Mandatory destructive-DDL self-check (system prompt §7).
         $this->assertDoesNotMatchRegularExpression(

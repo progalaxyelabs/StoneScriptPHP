@@ -376,6 +376,28 @@ $purgeDst = $functionsDir . DIRECTORY_SEPARATOR . 'purge_expired_deletions.pgsql
 writeIfMissing($purgeDst, $purgeContent, ROOT_PATH);
 $modelFunctions[] = 'purge_expired_deletions';
 
+// Gated audit-owner role-split (see cli/generate-audit.php's own comment on
+// audit/protected.json): purge_expired_deletions() must be owned by
+// {platform}_audit_owner too — same rationale as the capture trigger
+// functions (SECURITY DEFINER + owned by a role the runtime role cannot
+// touch), since a purge that could be re-pointed or disabled by the runtime
+// role would let it silently suppress the immutable DELETE proof this
+// function's own DELETEs are supposed to generate via the audit trigger.
+// Only touches the manifest if `php stone generate audit` already ran here
+// (this generator does not create audit/protected.json on its own — soft-
+// delete has no dependency on audit being installed).
+foreach ([$nestedMainBase . 'audit', SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'audit'] as $candidateAuditDir) {
+    $candidateManifest = $candidateAuditDir . DIRECTORY_SEPARATOR . 'protected.json';
+    if (is_file($candidateManifest)) {
+        $existing = json_decode((string) file_get_contents($candidateManifest), true) ?: [];
+        $existingFns = is_array($existing['functions'] ?? null) ? $existing['functions'] : [];
+        $existing['functions'] = array_values(array_unique(array_merge($existingFns, ['purge_expired_deletions'])));
+        file_put_contents($candidateManifest, json_encode($existing, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+        echo "  ✓ Updated " . relativeToRoot2(ROOT_PATH, $candidateManifest) . " (added purge_expired_deletions to the audit-owner role-split manifest)\n";
+        break;
+    }
+}
+
 // is_email_blocked() — only if an email table is configured.
 if ($emailTable !== null) {
     $emailBlockedContent = str_replace(['__EMAIL_TABLE__', '__EMAIL_COLUMN__'], [$emailTable, $emailColumn], file_get_contents($templatesPath . 'functions' . DIRECTORY_SEPARATOR . 'is_email_blocked.pgsql.template'));

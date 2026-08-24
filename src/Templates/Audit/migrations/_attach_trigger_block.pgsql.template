@@ -13,9 +13,12 @@ BEGIN
 
         -- TRUNCATE bypasses row triggers entirely (see
         -- _audit_capture_truncate()'s comment) — the statement trigger above
-        -- logs it IF it happens, but the stronger, primary defense is not
-        -- letting the app role issue TRUNCATE on an audited table at all.
-        EXECUTE format('REVOKE TRUNCATE ON __TABLE__ FROM %I', current_user);
+        -- logs it IF it happens. Denying TRUNCATE to the runtime role itself
+        -- is now the GATEWAY's job (role-split REVOKE/GRANT, see the header
+        -- comment above) when the role-split is enabled — a `REVOKE ... FROM
+        -- current_user` here would self-revoke the single connecting role on
+        -- a flag-off fleet, which is why it has been removed from this
+        -- per-table block.
     ELSE
         -- Per the gateway's real deploy order (extensions -> types ->
         -- TABLES -> FUNCTIONS -> MIGRATIONS -> verify_schema, every

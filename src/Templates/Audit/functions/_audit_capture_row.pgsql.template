@@ -5,24 +5,22 @@
 -- (migrations/*_create_audit_log.pgsql), one trigger per table, all sharing
 -- this single function.
 --
--- What actually makes this append-only in THIS framework's typical
--- single-role gateway deployment (one connecting role per database, no
--- separate migration-user vs runtime-user split) is simpler than SECURITY
--- DEFINER: the migration REVOKEs UPDATE, DELETE, TRUNCATE ON _audit_log
--- FROM that one role while leaving INSERT granted — so this trigger's own
--- INSERT keeps working (it was never revoked) and any ordinary application
--- code (hand-written SQL function, route, ORM-style call, or a raw UPDATE/
--- DELETE against _audit_log itself) is rejected outright. SECURITY DEFINER
--- + the locked-down search_path are kept anyway as harmless defense in
--- depth for any deployment that DOES provision a separate, more-privileged
--- owner role — but do not rely on SECURITY DEFINER alone to bypass a
--- REVOKE against its own owning role; it cannot (Postgres privilege checks
--- apply to the owner too — SECURITY DEFINER only changes anything when
--- invoker and owner are genuinely different roles). Neither mechanism
--- defends against a role with GRANT-back privileges deliberately undoing
--- the REVOKE — that is a deployment/ops control, not something SQL alone
--- can prevent, and is documented as an operational risk (see the
--- generator's --help output and README).
+-- Two-role model (stonescriptdb-gateway's gated audit-owner role-split, see
+-- `src/audit_provision/mod.rs`): when enabled, this function — along with
+-- `_audit_log` and the audited base tables — is owned by a privileged NOLOGIN
+-- `{platform}_audit_owner` role that the runtime role is NOT a member of and
+-- holds ZERO grants on `_audit_log`. SECURITY DEFINER is what makes this
+-- function's own INSERT work in that world: it executes as its OWNER
+-- (audit_owner), not as the caller, so the runtime role never needs (and
+-- never gets) any privilege on `_audit_log` at all — there is no REVOKE to
+-- rely on, no privilege for a compromised runtime credential to have in the
+-- first place. The locked-down search_path prevents a runtime role from
+-- shadowing pg_catalog/public objects this function calls.
+--
+-- On a fleet WITHOUT the role-split enabled (flag off), there is only the one
+-- connecting role, SECURITY DEFINER is a no-op (invoker == owner), and
+-- `_audit_log` is only tamper-EVIDENT, same as every other table on that
+-- fleet — documented, not silent (see the generator's --help output).
 CREATE OR REPLACE FUNCTION _audit_capture_row()
 RETURNS trigger
 LANGUAGE plpgsql

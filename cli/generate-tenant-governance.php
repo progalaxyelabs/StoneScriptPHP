@@ -218,6 +218,39 @@ $publicFunctions = [
     'resolve_role_id.pgsql',
 ];
 
+/**
+ * Reads DB_GATEWAY_PLATFORM from this project's .env — needed only to name
+ * the `{platform}_audit_owner` role inside _tenant_memberships_protect_creator's
+ * sanctioned purge bypass (see that template's header comment and
+ * cli/generate-audit.php's identical helper, which this mirrors). A plain
+ * regex read, not Env::load() — this standalone CLI script doesn't have the
+ * full framework boot/autoload context.
+ */
+function detectPlatformCodeForGovernance(string $rootPath): ?string
+{
+    $envPath = $rootPath . '.env';
+    if (!is_file($envPath)) {
+        return null;
+    }
+    foreach (file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#')) {
+            continue;
+        }
+        if (preg_match('/^DB_GATEWAY_PLATFORM\s*=\s*(.+)$/', $line, $m)) {
+            return trim($m[1], " \t\n\r\0\x0B\"'");
+        }
+    }
+    return null;
+}
+
+$platformCodeForAuditOwner = detectPlatformCodeForGovernance(ROOT_PATH);
+// Unresolvable platform ⇒ a placeholder that can never equal any real
+// current_user (safe no-op, not a bypass) — see the template's own comment.
+$auditOwnerRole = $platformCodeForAuditOwner !== null
+    ? $platformCodeForAuditOwner . '_audit_owner'
+    : '__unresolved_platform___audit_owner';
+
 echo "\n→ Creating SQL functions...\n";
 foreach (array_merge($internalFunctions, $publicFunctions) as $fn) {
     $src = $templatesPath . 'functions' . DIRECTORY_SEPARATOR . $fn . '.template';
@@ -226,7 +259,14 @@ foreach (array_merge($internalFunctions, $publicFunctions) as $fn) {
         echo "  Skipped (already exists): " . relativeTo(ROOT_PATH, $dst) . "\n";
         continue;
     }
-    copy($src, $dst);
+    if ($fn === '_tenant_memberships_protect_creator.pgsql') {
+        // Only file needing substitution — closes the tenant-purge GUC spoof
+        // by naming this platform's audit_owner role (see the helper above).
+        $content = str_replace('__AUDIT_OWNER_ROLE__', $auditOwnerRole, (string) file_get_contents($src));
+        file_put_contents($dst, $content);
+    } else {
+        copy($src, $dst);
+    }
     echo "  ✓ Created: " . relativeTo(ROOT_PATH, $dst) . "\n";
 }
 

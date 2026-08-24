@@ -24,24 +24,29 @@ CREATE TABLE IF NOT EXISTS _audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_log_table_subject ON _audit_log(table_name, subject_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_occurred_at    ON _audit_log(occurred_at);
 
--- Append-only enforcement. Runs every time this migration re-runs (REVOKE of
--- an already-revoked privilege is a harmless no-op) — targets the role that
--- is ACTUALLY running this migration (current_user), which in this
--- framework's gateway-only architecture is the same role the app uses at
--- runtime (there is no separate migration-user vs runtime-user split). If a
--- given deployment's role model differs, adjust the target role by hand —
--- this is a real, documented operational assumption, not a silent one (see
--- the generator's --help output).
+-- Append-only enforcement is now the GATEWAY's job, not this migration's.
 --
--- INSERT is deliberately left granted (the trigger's own writes need it, and
--- so would any legitimate direct audit-row insert); only UPDATE, DELETE,
--- TRUNCATE are revoked, which is what makes existing rows immutable.
-DO $$
-DECLARE
-    v_role TEXT := current_user;
-BEGIN
-    EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON _audit_log FROM %I', v_role);
-END $$;
+-- On a fleet with the gated audit-owner role-split ENABLED (gateway
+-- `audit_provisioning_database_url` set + this platform's `audit/protected.json`
+-- manifest present), the gateway takes ownership of `_audit_log` (plus these
+-- audited base tables, their sequences, and the capture/purge functions) under a
+-- privileged NOLOGIN `{platform}_audit_owner` role immediately after this
+-- migration runs, and grants the runtime role DML-only on the base tables with
+-- ZERO privileges on `_audit_log` — see stonescriptdb-gateway's
+-- `src/audit_provision/mod.rs`. That is TAMPER-PROOF: the runtime role is
+-- neither owner nor a member of audit_owner, so it cannot ALTER/DISABLE/DROP the
+-- trigger, re-grant, or forge `_audit_log` rows through any code path.
+--
+-- On a fleet WITHOUT the role-split enabled (flag off — today's exact
+-- behaviour), there is no separate owning role, so this migration does nothing
+-- further here; the table is only tamper-EVIDENT until the split is enabled
+-- (single connecting role owns everything, same as every other table).
+-- A `REVOKE ... FROM current_user` here would previously have revoked the
+-- connecting role's own privileges — self-defeating with a single-role
+-- deployment (the same role that ran this migration is the role your app runs
+-- as) — so it has been removed. Immutability is a role-ownership property now,
+-- established once (by the gateway, when enabled), not re-asserted per-migration
+-- against whichever role happens to be connected at migrate time.
 
 -- Attach capture to each audited table. Per the gateway's real, as-built
 -- deploy order — extensions -> custom types -> TABLES (CREATE IF NOT
