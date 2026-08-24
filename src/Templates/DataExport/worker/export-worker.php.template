@@ -10,12 +10,19 @@ declare(strict_types=1);
  * schedule/loop yourself — the framework ships no scheduler (same posture
  * as `php stone generate soft-delete`'s purge_expired_deletions()):
  *
- *   php bin/export-worker.php --once     # one claim-and-drain pass, exits
+ *   php bin/export-worker.php --once     # one claim-and-drain pass + maintenance, exits
  *   php bin/export-worker.php --loop     # polls forever (systemd/supervisor)
+ *   php bin/export-worker.php --reap     # maintenance ONLY (no job claiming) — for a
+ *                                         # separate cron entry if you'd rather not rely
+ *                                         # on --loop's own periodic maintenance calls
  *
  * --loop is meant to be supervised (systemd unit / supervisord program),
  * not run in a raw shell — it never exits on its own except on a fatal
- * boot error.
+ * boot error. It runs runMaintenance() (stale-'running' reaper +
+ * expired-artifact cleanup — see ExportWorker::runMaintenance()) once every
+ * $maintenanceEveryNIterations claim-and-drain passes, not on every single
+ * one — both are cheap indexed queries but there is no reason to run them
+ * on every poll when the queue is empty.
  */
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -24,14 +31,31 @@ use App\Lib\DataExport\ExportWorker;
 
 $mode = $argv[1] ?? '--once';
 $pollIntervalSeconds = 5;
+$maintenanceEveryNIterations = 12; // ~once/minute at the default 5s poll interval
 
 $worker = new ExportWorker();
 
+if ($mode === '--reap') {
+    $result = $worker->runMaintenance();
+    fwrite(STDOUT, "[export-worker] reap: {$result['reaped_stale']} stale job(s) failed, {$result['expired_artifacts']} expired artifact(s) deleted\n");
+    exit(0);
+}
+
 if ($mode === '--loop') {
     fwrite(STDOUT, "[export-worker] starting loop (poll interval={$pollIntervalSeconds}s)\n");
+    $iteration = 0;
     while (true) {
         try {
             $claimed = $worker->runOnce();
+
+            $iteration++;
+            if ($iteration % $maintenanceEveryNIterations === 0) {
+                $result = $worker->runMaintenance();
+                if ($result['reaped_stale'] > 0 || $result['expired_artifacts'] > 0) {
+                    fwrite(STDOUT, "[export-worker] maintenance: {$result['reaped_stale']} stale job(s) failed, {$result['expired_artifacts']} expired artifact(s) deleted\n");
+                }
+            }
+
             if ($claimed === 0) {
                 sleep($pollIntervalSeconds);
             }
@@ -48,5 +72,6 @@ if ($mode === '--loop') {
 }
 
 $claimed = $worker->runOnce();
-fwrite(STDOUT, "[export-worker] processed {$claimed} job(s)\n");
+$result = $worker->runMaintenance();
+fwrite(STDOUT, "[export-worker] processed {$claimed} job(s); reap: {$result['reaped_stale']} stale job(s) failed, {$result['expired_artifacts']} expired artifact(s) deleted\n");
 exit(0);

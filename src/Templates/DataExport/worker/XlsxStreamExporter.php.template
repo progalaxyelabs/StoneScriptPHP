@@ -22,6 +22,11 @@ use OpenSpout\Writer\XLSX\Writer;
  * CSV's single-stream limitation) — addNewSheetAndMakeItCurrent() per
  * table, named after the table (truncated to Excel's 31-char sheet-name
  * limit).
+ *
+ * Every cell goes through CellSanitizer::sanitize() before being written —
+ * see that class for why (CSV/formula injection; XLSX is equally
+ * susceptible — Excel evaluates a cell's leading =/+/-/@ as a formula
+ * regardless of which file format delivered it).
  */
 final class XlsxStreamExporter
 {
@@ -43,7 +48,9 @@ final class XlsxStreamExporter
         array $tableConfig,
         array $bindings,
         int $batchSize,
-        int $rowCap
+        ExportRowBudget $rowBudget,
+        int $statementTimeoutMs,
+        int $idleInTransactionTimeoutMs
     ): int {
         if ($this->wroteAnyTable) {
             $this->writer->addNewSheetAndMakeItCurrent();
@@ -60,11 +67,18 @@ final class XlsxStreamExporter
             $tableConfig,
             $bindings,
             $batchSize,
-            $rowCap,
+            $rowBudget,
+            $statementTimeoutMs,
+            $idleInTransactionTimeoutMs,
             function (array $batch): void {
                 foreach ($batch as $row) {
                     $this->writer->addRow(Row::fromValues(array_map(
-                        static fn($v) => $v === null ? '' : (is_scalar($v) ? $v : json_encode($v)),
+                        static function ($v) {
+                            if ($v === null) {
+                                return '';
+                            }
+                            return CellSanitizer::sanitize(is_scalar($v) ? $v : json_encode($v));
+                        },
                         array_values($row)
                     )));
                 }

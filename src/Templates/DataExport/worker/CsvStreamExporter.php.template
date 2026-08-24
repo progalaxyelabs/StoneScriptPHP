@@ -14,6 +14,9 @@ namespace App\Lib\DataExport;
  * marker line + its own header row), since CSV has no concept of multiple
  * sheets — this keeps the CSV and XLSX exporters' external contract
  * (one artifact file per job) identical.
+ *
+ * Every cell goes through CellSanitizer::sanitize() before being written —
+ * see that class for why (CSV/formula injection).
  */
 final class CsvStreamExporter
 {
@@ -34,7 +37,9 @@ final class CsvStreamExporter
         array $tableConfig,
         array $bindings,
         int $batchSize,
-        int $rowCap
+        ExportRowBudget $rowBudget,
+        int $statementTimeoutMs,
+        int $idleInTransactionTimeoutMs
     ): int {
         if ($this->wroteAnyTable) {
             $this->file->fwrite("\n");
@@ -49,11 +54,18 @@ final class CsvStreamExporter
             $tableConfig,
             $bindings,
             $batchSize,
-            $rowCap,
+            $rowBudget,
+            $statementTimeoutMs,
+            $idleInTransactionTimeoutMs,
             function (array $batch): void {
                 foreach ($batch as $row) {
                     $this->file->fputcsv(array_map(
-                        static fn($v) => $v === null ? '' : (is_scalar($v) ? $v : json_encode($v)),
+                        static function ($v) {
+                            if ($v === null) {
+                                return '';
+                            }
+                            return CellSanitizer::sanitize(is_scalar($v) ? $v : json_encode($v));
+                        },
                         array_values($row)
                     ), escape: '\\');
                 }

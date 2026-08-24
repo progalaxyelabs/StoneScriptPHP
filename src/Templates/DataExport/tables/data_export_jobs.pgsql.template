@@ -74,6 +74,15 @@ CREATE INDEX IF NOT EXISTS idx_data_export_jobs_queued_by_enqueued ON data_expor
 
 CREATE INDEX IF NOT EXISTS idx_data_export_jobs_requested_by ON data_export_jobs(requested_by);
 
+-- reap_stale_export_jobs()'s scan target — running jobs ordered by pickup
+-- time, small forever (partial index).
+CREATE INDEX IF NOT EXISTS idx_data_export_jobs_running_by_picked_up ON data_export_jobs(picked_up_at)
+    WHERE status = 'running';
+
+-- expire_succeeded_export_jobs()'s scan target.
+CREATE INDEX IF NOT EXISTS idx_data_export_jobs_succeeded_by_expiry ON data_export_jobs(download_expires_at)
+    WHERE status = 'succeeded';
+
 -- Admission control (see header comment above) — one open (queued/running)
 -- export per (requester, scope, tenant). COALESCE keeps NULL tenant_id
 -- (account scope) from silently defeating uniqueness.

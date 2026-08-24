@@ -1,0 +1,32 @@
+-- expire_succeeded_export_jobs: the artifact retention sweep. A succeeded
+-- job whose download_expires_at has passed transitions to 'expired' and
+-- HANDS BACK its artifact_ref so the caller (ExportWorker::runMaintenance())
+-- can delete the plaintext PII file from disk — see that method's own
+-- comment for why deleting the file is PHP/filesystem work, not something
+-- this SQL function does itself.
+--
+-- This does NOT replace the future account-portal download endpoint's own
+-- expiry check (it must still verify download_expires_at itself — defense
+-- in depth, and to correctly 410 during the window between TTL passing and
+-- this sweep actually running) — this function's job is proactive cleanup
+-- so plaintext exports containing PII do not accumulate on disk
+-- indefinitely, not the user-facing 404/410 decision.
+CREATE OR REPLACE FUNCTION expire_succeeded_export_jobs()
+RETURNS TABLE (
+    o_job_uuid     UUID,
+    o_artifact_ref TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    RETURN QUERY
+    UPDATE data_export_jobs
+       SET status = 'expired'
+     WHERE data_export_jobs.status = 'succeeded'
+       AND data_export_jobs.download_expires_at IS NOT NULL
+       AND data_export_jobs.download_expires_at < NOW()
+    RETURNING data_export_jobs.job_uuid, data_export_jobs.artifact_ref;
+END;
+$$;

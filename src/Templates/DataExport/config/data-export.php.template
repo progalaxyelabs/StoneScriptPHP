@@ -18,8 +18,9 @@ declare(strict_types=1);
  *   below) — do NOT list a table your platform can't scope to one identity.
  * 'tenant'  — one tenant's rows. Every table listed here MUST have a
  *   tenant_id-shaped column. Authorization (is the requester an owner/admin
- *   of THIS tenant?) is enforced by the calling route BEFORE enqueue, not
- *   by this manifest or the worker.
+ *   of THIS tenant?) is enforced by the calling route BEFORE enqueue (see
+ *   PostEnqueueDataExportRoute::tenantExportIsAuthorized() — fail-closed by
+ *   default), not by this manifest or the worker.
  *
  * ── Per-table entry shape ──────────────────────────────────────────────
  *   'table'   => string, bare SQL identifier, the real table name.
@@ -32,14 +33,18 @@ declare(strict_types=1);
  *                bound parameter placeholder: ':requested_by' for an
  *                'account'-scope table, ':tenant_id' for a 'tenant'-scope
  *                table. The worker binds it via PDO named parameters — never
- *                string-interpolates the request value into SQL.
+ *                string-interpolates the request value into SQL — AND
+ *                (fixed after independent review) asserts the literal
+ *                placeholder text is present before running the query,
+ *                refusing to export rather than silently dropping the
+ *                filter on a typo'd 'where' clause (see
+ *                CursorStreamer::assertWhereReferencesBindings()).
  *   'order_by'=> string, bare SQL identifier of a NOT NULL, indexed,
  *                monotonic column (typically the primary key) used for the
- *                worker's keyset-paginated cursor (see
- *                worker/ExportWorker.php.template) — required so the
- *                streaming FETCH loop can page through the table in
- *                constant memory without an ORDER BY on an unindexed
- *                column forcing a full sort in RAM.
+ *                worker's server-side cursor (see worker/CursorStreamer) —
+ *                required so the streaming FETCH loop can page through the
+ *                table in constant memory without an ORDER BY on an
+ *                unindexed column forcing a full sort in RAM.
  */
 return [
     'account' => [
@@ -62,6 +67,38 @@ return [
         // ],
     ],
 
+    // ── Tenant database routing (fixed after independent review) ───────────
+    // The fleet has TWO real tenancy shapes and this generator cannot know
+    // which one a given platform uses:
+    //   'single'        — every tenant's rows live in the SAME database as
+    //                      account data (DB_NAME). This is the default.
+    //   'db_per_tenant' — each tenant gets its OWN Postgres database
+    //                      (typically named "{platform}_{tenant_id}" or
+    //                      similar) on the same server.
+    // Getting this wrong is silent-data-corruption-shaped: a tenant-scope
+    // job that queries the WRONG database returns an empty (or some OTHER
+    // tenant's) result set and the job still reports 'succeeded' — nothing
+    // about an empty CSV/XLSX file looks like a bug from the outside. So
+    // ExportWorker REFUSES to guess: 'tenancy_mode' must be set explicitly,
+    // and if it's 'db_per_tenant', 'resolve_tenant_database' MUST return a
+    // real database name or the job FAILS LOUDLY (never falls back to
+    // DB_NAME, never emits an empty "success").
+    'tenancy_mode' => getenv('EXPORT_TENANCY_MODE') ?: 'single', // 'single' | 'db_per_tenant'
+
+    // fn(string $tenantId): ?string — ONLY consulted when tenancy_mode is
+    // 'db_per_tenant'. Return the real Postgres database name that holds
+    // $tenantId's rows (same DB_HOST/DB_PORT/DB_USER/DB_PASSWORD as the
+    // rest of this worker — see WorkerDbConnection's header for the
+    // same-server assumption). Return null if it cannot be resolved (e.g.
+    // the tenant_id doesn't exist) — the worker fails the job loudly rather
+    // than falling back to any default database.
+    'resolve_tenant_database' => function (string $tenantId): ?string {
+        // Example for the "{platform}_{tenant_id}" convention:
+        //   $platform = getenv('DB_GATEWAY_PLATFORM') ?: '';
+        //   return $platform !== '' ? "{$platform}_{$tenantId}" : null;
+        return null;
+    },
+
     // Directory the worker writes finished artifacts into (must exist and
     // be writable by the worker process; NOT web-servable — the future
     // account-portal download endpoint reads from here, it is not a public
@@ -73,12 +110,26 @@ return [
     // default for wide rows; narrow tables can raise it.
     'batch_size' => 1000,
 
-    // Hard per-job row cap — a runaway/unexpectedly large account or tenant
-    // does not turn one export into an unbounded worker run. The worker
-    // fails the job (not silently truncates) once a table's row count for
-    // this job would exceed this cap, with a clear error_detail pointing at
-    // which table tripped it — raise this only with an explicit reason.
+    // TRUE per-job row cap (fixed after independent review — the first cut
+    // reset this budget PER TABLE, so a K-table manifest allowed up to
+    // K × row_cap rows total for one job; a single ExportRowBudget instance
+    // is now shared across every table in a job). The worker fails the job
+    // loudly (never silently truncates) once the JOB's cumulative row count
+    // across every exported table would exceed this cap — raise it only
+    // with an explicit reason.
     'row_cap' => 500000,
+
+    // Postgres-side bounds on the export's open transaction (fixed after
+    // independent review — an unbounded open transaction while streaming a
+    // multi-million-row table can block autovacuum from reclaiming dead
+    // tuples fleet-wide, on any database sharing that Postgres server).
+    // statement_timeout bounds any SINGLE DECLARE/FETCH statement;
+    // idle_in_transaction_session_timeout bounds how long the transaction
+    // may sit idle BETWEEN FETCHes (the window where PHP is writing the
+    // previous batch to disk). Both are `SET LOCAL` — scoped to the export
+    // transaction only.
+    'cursor_statement_timeout_ms' => 120000,             // 2 minutes per FETCH
+    'cursor_idle_in_transaction_timeout_ms' => 60000,    // 1 minute of PHP-side write time per batch
 
     // How many jobs a single `bin/export-worker.php --loop` process will
     // hold in flight at once (owner constraint: the worker must not choke
@@ -88,10 +139,32 @@ return [
     // can bound.
     'concurrency' => 1,
 
-    // How long a finished artifact stays downloadable before the future
-    // account-portal download endpoint should treat it as gone (that
-    // endpoint — not this worker — is responsible for the actual
-    // status='expired' transition and artifact deletion; see this
-    // generator's --help for the exact seam contract).
+    // A 'running' job whose picked_up_at is older than this is treated as
+    // abandoned by a crashed/killed worker process and reaped (marked
+    // 'failed') — see reap_stale_export_jobs() and
+    // ExportWorker::runMaintenance(). Keep this comfortably longer than any
+    // real export could legitimately take (cursor_statement_timeout_ms +
+    // cursor_idle_in_transaction_timeout_ms already bound any single
+    // query/batch, so a much-longer 'running' row is a dead-process signal,
+    // not a slow-but-healthy job).
+    'stale_running_after_minutes' => 30,
+
+    // How long a finished artifact stays downloadable before it is expired
+    // AND its plaintext file deleted from disk (see
+    // expire_succeeded_export_jobs() + ExportWorker::runMaintenance()).
+    // Plaintext PII exports must not accumulate on disk indefinitely — the
+    // future account-portal download endpoint should still independently
+    // check download_expires_at itself (defense in depth, and to correctly
+    // 410 during the window between TTL passing and this sweep running).
     'download_ttl_hours' => 72,
+
+    // Ceiling on TOTAL open (queued/running) export jobs per requester,
+    // across every scope/tenant — enforced by enqueue_data_export_job()
+    // itself (the SQL function, not this file; kept here only so the
+    // number is documented in one place). Passed explicitly from
+    // PostEnqueueDataExportRoute — see that class's Params construction.
+    // Closes a residual fan-out path: a caller legitimately authorized on
+    // many different tenants could otherwise enqueue one export per tenant
+    // with no bound, even after tenant-authorization is fixed.
+    'max_open_exports_per_requester' => 5,
 ];

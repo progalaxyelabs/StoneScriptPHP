@@ -32,6 +32,12 @@ CREATE INDEX IF NOT EXISTS idx_data_export_jobs_queued_by_enqueued ON data_expor
 
 CREATE INDEX IF NOT EXISTS idx_data_export_jobs_requested_by ON data_export_jobs(requested_by);
 
+CREATE INDEX IF NOT EXISTS idx_data_export_jobs_running_by_picked_up ON data_export_jobs(picked_up_at)
+    WHERE status = 'running';
+
+CREATE INDEX IF NOT EXISTS idx_data_export_jobs_succeeded_by_expiry ON data_export_jobs(download_expires_at)
+    WHERE status = 'succeeded';
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_data_export_jobs_one_open_per_scope
     ON data_export_jobs(requested_by, export_scope, COALESCE(tenant_id, ''))
     WHERE status IN ('queued', 'running');

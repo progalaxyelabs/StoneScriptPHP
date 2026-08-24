@@ -19,15 +19,25 @@ use StoneScriptPHP\IRouteHandler;
  * returns immediately with a job_uuid the caller can poll; NO export work
  * happens here.
  *
- * ⚠️  AUTHORIZATION — this route trusts `auth()`'s identity for
- * requested_by (never the request body), but for export_scope='tenant' it
- * is THIS PLATFORM'S job to verify the caller is an owner/admin of
- * tenant_id before calling enqueue — the TODO below is not optional, it is
- * the only thing standing between any authenticated user and exporting any
- * other tenant's data. Wire it to whatever this platform's own
- * tenant-membership/role check already is (e.g.
- * StoneScriptPHP\Auth\TenantGovernance\TenantGovernanceResolver if `php
- * stone generate tenant-governance` is installed).
+ * ── AUTHORIZATION — FAIL CLOSED, not a TODO (fixed after independent
+ * ── PII/authz review of the first cut of this generator) ──────────────
+ * `requested_by` (account scope) is ALWAYS `auth()`'s own identity —
+ * never taken from the request body, so an account export can never leak
+ * another identity's data.
+ *
+ * `tenant_id` (tenant scope) is client-supplied (it has to be — the
+ * caller is choosing WHICH tenant to export), so `tenantExportIsAuthorized()`
+ * below is a POSITIVE, before-enqueue check that the caller is an
+ * ACTIVE owner/admin of that exact tenant, wired to the tenant-governance
+ * `tenant_memberships` table (`php stone generate tenant-governance`) via
+ * `get_identity_tenant_memberships()` — the SAME query
+ * `TenantGovernanceResolver::tenantsResolver()` already uses. If
+ * tenant-governance is NOT installed on this platform, the check DENIES
+ * (403) by default — see the loud fail-closed marker inside that method.
+ * Do not delete or bypass it; either install tenant-governance, or replace
+ * the method body with this platform's own real, positive ownership check.
+ * NEVER make it return true unconditionally "to unblock testing" — that is
+ * exactly the cross-tenant PII export hole this class was fixed to close.
  *
  * You own this file — edit freely, e.g. to wire it into a close-account
  * route's own checkbox handling directly instead of a standalone endpoint.
@@ -59,12 +69,9 @@ class PostEnqueueDataExportRoute implements IRouteHandler
                 return res_error('tenant_id is required for export_scope=tenant', 422);
             }
 
-            // TODO (see class doc above): verify $user->user_id is an
-            // owner/admin of $this->tenant_id BEFORE enqueueing. Example
-            // once tenant-governance is installed:
-            //   if (!TenantGovernance::isOwnerOrAdmin((string) $user->user_id, $this->tenant_id)) {
-            //       return res_error('Not authorized for this tenant', 403);
-            //   }
+            if (!$this->tenantExportIsAuthorized((string) $user->user_id, $this->tenant_id)) {
+                return res_error('Not authorized to export this tenant\'s data', 403);
+            }
         }
 
         // Force-load FnEnqueueDataExportJob.php BEFORE referencing its
@@ -85,11 +92,21 @@ class PostEnqueueDataExportRoute implements IRouteHandler
         // something this generator's own SQL/worker logic can fix.
         class_exists(FnEnqueueDataExportJob::class);
 
+        $config = file_exists(SRC_PATH . 'config' . DIRECTORY_SEPARATOR . 'data-export.php')
+            ? require SRC_PATH . 'config' . DIRECTORY_SEPARATOR . 'data-export.php'
+            : [];
+
         $params = new EnqueueDataExportJobParams();
         $params->p_requested_by = (string) $user->user_id;
         $params->p_export_scope = $this->export_scope;
         $params->p_tenant_id = $this->tenant_id;
         $params->p_format = $this->format;
+        // Passed explicitly from config so this platform's ceiling is
+        // tunable without a SQL change. enqueue_data_export_job() also
+        // COALESCEs a NULL to a safe default of its own — belt-and-braces,
+        // since the typed Params boundary sends an explicit value (even
+        // NULL) for every property rather than truly omitting unset ones.
+        $params->p_max_open_per_requester = (int) ($config['max_open_exports_per_requester'] ?? 5);
 
         $rows = FnEnqueueDataExportJob::run($params);
         $row = $rows->first();
@@ -98,26 +115,83 @@ class PostEnqueueDataExportRoute implements IRouteHandler
             return res_error('Failed to enqueue export', 500);
         }
 
-        // Note: the generated EnqueueDataExportJobModel::$error property is a
-        // non-nullable `string` (SQL RETURNS TABLE carries no NULL-ability
-        // info the generator can see) — the framework's own
-        // Database::array_to_class_object() maps a genuinely NULL o_error
-        // column to '' for a non-nullable string property, so '' (not null)
-        // is the "no error" sentinel here, not a nullability bug.
+        // Note: the generated EnqueueDataExportJobModel::$error /
+        // ::$job_uuid properties are non-nullable `string` (SQL RETURNS
+        // TABLE carries no NULL-ability info the generator can see) — the
+        // framework's own Database::array_to_class_object() maps a
+        // genuinely NULL o_error/o_job_uuid column to '' for a non-nullable
+        // string property, so '' (not null) is the "absent" sentinel here.
         $error = $row->error;
-        if ($error !== '' && !str_starts_with($error, 'export_already_in_progress')) {
-            return res_error($error, 422);
+        $jobUuid = $row->job_uuid;
+
+        // Any error EXCEPT the "already in progress" case is a hard
+        // failure — including enqueue_data_export_job()'s own per-user
+        // ceiling rejection (too_many_open_exports). A response with an
+        // empty job_uuid is NEVER forwarded as success, regardless of which
+        // error string came back — a caller must never be handed a null/
+        // empty job_uuid to poll.
+        $alreadyInProgress = str_starts_with($error, 'export_already_in_progress');
+        if (($error !== '' && !$alreadyInProgress) || $jobUuid === '') {
+            return res_error($error !== '' ? $error : 'Failed to enqueue export', $alreadyInProgress ? 409 : 422);
         }
 
-        // export_already_in_progress is not a failure from the caller's
-        // perspective — it hands back the SAME job_uuid the earlier request
-        // already got, so a caller polling that id keeps working either way.
-        $message = $error !== '' ? 'Export already in progress' : 'Export queued';
+        $message = $alreadyInProgress ? 'Export already in progress' : 'Export queued';
 
         return res_ok([
-            'job_uuid'    => $row->job_uuid,
+            'job_uuid'    => $jobUuid,
             'status'      => $row->status,
             'enqueued_at' => $row->enqueued_at,
         ], $message);
+    }
+
+    /**
+     * Positive, fail-closed authorization check for export_scope='tenant'.
+     * Returns true ONLY if the caller has an ACTIVE tenant_memberships row
+     * for $tenantId with is_tenant_owner OR is_tenant_admin true.
+     *
+     * ⚠️ FAIL-CLOSED MARKER — do not remove without replacing this method's
+     * ENTIRE body with a real check. If `php stone generate
+     * tenant-governance` has not been run on this platform (detected via
+     * class_exists below), this denies EVERY tenant export unconditionally
+     * — that is deliberate, not a bug to "fix" by returning true. A
+     * platform without tenant-governance must implement its own equivalent
+     * positive ownership check here before tenant-scope exports can work at
+     * all.
+     */
+    private function tenantExportIsAuthorized(string $identityId, string $tenantId): bool
+    {
+        if (!class_exists(\App\Database\Functions\FnGetIdentityTenantMemberships::class)) {
+            log_warning(
+                'PostEnqueueDataExportRoute: tenant-governance is not installed on this platform ' .
+                '(App\\Database\\Functions\\FnGetIdentityTenantMemberships not found) — denying ALL ' .
+                'tenant-scope data exports by default (fail-closed). Run `php stone generate ' .
+                'tenant-governance`, or replace tenantExportIsAuthorized()\'s body with this ' .
+                'platform\'s own real ownership check, before tenant exports can be enabled.'
+            );
+            return false;
+        }
+
+        // Same force-load workaround as FnEnqueueDataExportJob above — this
+        // Fn's file also defines a sibling GetIdentityTenantMembershipsParams
+        // class that composer's autoloader cannot resolve until the Fn
+        // class itself has been referenced once.
+        class_exists(\App\Database\Functions\FnGetIdentityTenantMemberships::class);
+
+        $params = new \App\Database\Functions\GetIdentityTenantMembershipsParams();
+        $params->p_identity_id = $identityId;
+
+        $memberships = \App\Database\Functions\FnGetIdentityTenantMemberships::run($params);
+
+        foreach ($memberships as $membership) {
+            if (
+                $membership->tenant_id === $tenantId
+                && $membership->status === 'active'
+                && ($membership->is_tenant_owner || $membership->is_tenant_admin)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

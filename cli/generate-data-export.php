@@ -67,31 +67,43 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "This will create:\n";
     echo "  - migrations/{N}_create_data_export_jobs.pgsql\n";
     echo "  - src/postgresql/{main/postgresql/,}tables/data_export_jobs.pgsql\n";
-    echo "  - src/postgresql/{main/postgresql/,}functions/{enqueue,claim,complete,fail}_*.pgsql\n";
+    echo "  - src/postgresql/{main/postgresql/,}functions/{enqueue,claim,complete,fail,\n";
+    echo "    reap_stale,expire_succeeded}_*.pgsql\n";
     echo "  - src/App/Database/Functions/Fn*.php (via php stone generate model)\n";
-    echo "  - src/config/data-export.php (EDIT THIS — table manifest, empty by default)\n";
+    echo "  - src/config/data-export.php (EDIT THIS — table manifest + tenancy_mode,\n";
+    echo "    empty/unset by default)\n";
     echo "  - src/App/Lib/DataExport/{ExportWorker,CursorStreamer,CsvStreamExporter,\n";
-    echo "    XlsxStreamExporter,WorkerDbConnection,ExportRowCapExceededException}.php\n";
-    echo "  - bin/export-worker.php (the worker's CLI entrypoint)\n";
-    echo "  - src/App/Routes/DataExport/PostEnqueueDataExportRoute.php\n";
+    echo "    XlsxStreamExporter,WorkerDbConnection,ExportRowBudget,CellSanitizer,\n";
+    echo "    ExportRowCapExceededException}.php\n";
+    echo "  - bin/export-worker.php (the worker's CLI entrypoint — --once/--loop/--reap)\n";
+    echo "  - src/App/Routes/DataExport/PostEnqueueDataExportRoute.php (fail-closed\n";
+    echo "    tenant authorization wired to tenant-governance, if installed)\n";
     echo "  - registers POST {prefix}/data-export/enqueue in src/config/routes.php\n";
     echo "    (unless --skip-route, or the file isn't in the expected flat format)\n\n";
     echo "REQUIRED before this actually works:\n";
     echo "  1. composer require openspout/openspout   (XLSX constant-memory writer)\n";
     echo "  2. Edit src/config/data-export.php — list this platform's real\n";
-    echo "     'account'-scoped and 'tenant'-scoped tables. Empty by default; the\n";
-    echo "     worker refuses to export a scope with no tables configured.\n";
+    echo "     'account'-scoped and 'tenant'-scoped tables, AND set 'tenancy_mode' to\n";
+    echo "     'single' or 'db_per_tenant' (+ 'resolve_tenant_database' if the latter).\n";
+    echo "     The worker refuses to export a scope with no tables configured, and\n";
+    echo "     refuses a tenant-scope job if tenancy_mode is unset or unresolvable —\n";
+    echo "     never guesses which database a tenant's rows live in.\n";
     echo "  3. Set DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD env vars for the\n";
     echo "     worker (same vars DB_MODE=direct uses) — the worker connects\n";
     echo "     DIRECTLY to Postgres for genuine server-side cursor streaming; see\n";
     echo "     WorkerDbConnection.php's header comment for why this is a deliberate\n";
     echo "     exception to the gateway-only rule (worker is out-of-band, not a\n";
     echo "     route handler).\n";
-    echo "  4. Wire the TODO authorization check in PostEnqueueDataExportRoute.php\n";
-    echo "     for export_scope=tenant — the generator cannot know this platform's\n";
-    echo "     tenant-membership model.\n";
-    echo "  5. Wire bin/export-worker.php --loop into cron/systemd/supervisor\n";
-    echo "     yourself — the framework ships no scheduler.\n\n";
+    echo "  4. If this platform does NOT use `php stone generate tenant-governance`,\n";
+    echo "     replace PostEnqueueDataExportRoute::tenantExportIsAuthorized()'s body\n";
+    echo "     with this platform's own real, positive tenant-ownership check —\n";
+    echo "     until then it FAIL-CLOSED denies every tenant-scope export (403), which\n";
+    echo "     is correct/safe but means tenant exports won't work yet.\n";
+    echo "  5. Wire bin/export-worker.php --loop into cron/systemd/supervisor yourself\n";
+    echo "     — the framework ships no scheduler. --loop runs its own periodic\n";
+    echo "     maintenance (stale-'running' reaper + expired-artifact cleanup); if you\n";
+    echo "     prefer a separate cron entry instead, use `--reap` there and drop the\n";
+    echo "     built-in periodic call (see export-worker.php's own comment).\n\n";
     echo "OUT OF SCOPE (left as a clean seam): serving the finished artifact to the\n";
     echo "end user (the future account-portal download endpoint). It must: read\n";
     echo "artifact_ref + download_expires_at from data_export_jobs (via a new\n";
@@ -231,7 +243,10 @@ copyIfMissingDE(
 
 // ── 2. SQL functions ────────────────────────────────────────────────────
 echo "\n→ Creating SQL functions...\n";
-$sqlFunctions = ['enqueue_data_export_job', 'claim_export_job', 'complete_export_job', 'fail_export_job'];
+$sqlFunctions = [
+    'enqueue_data_export_job', 'claim_export_job', 'complete_export_job', 'fail_export_job',
+    'reap_stale_export_jobs', 'expire_succeeded_export_jobs',
+];
 foreach ($sqlFunctions as $fn) {
     copyIfMissingDE(
         $templatesPath . 'functions' . DIRECTORY_SEPARATOR . "{$fn}.pgsql.template",
@@ -304,6 +319,8 @@ $libFiles = [
     'WorkerDbConnection.php',
     'CursorStreamer.php',
     'ExportRowCapExceededException.php',
+    'ExportRowBudget.php',
+    'CellSanitizer.php',
     'CsvStreamExporter.php',
     'XlsxStreamExporter.php',
     'ExportWorker.php',
@@ -428,14 +445,19 @@ echo "1. composer require openspout/openspout   (required — XLSX writer)\n";
 echo "2. Run migrations: php stone gateway:migrate-main (or php stone migrate up /\n";
 echo "   gateway:migrate-tenant, whichever database you generated this against).\n";
 echo "3. Edit src/config/data-export.php — list this platform's real 'account'\n";
-echo "   and 'tenants' tables. The worker refuses to export a scope with zero\n";
-echo "   tables configured (loud failure, not a silent empty export).\n";
+echo "   and 'tenants' tables, AND set 'tenancy_mode' ('single' or\n";
+echo "   'db_per_tenant' + 'resolve_tenant_database'). The worker refuses to\n";
+echo "   export a scope with zero tables configured, or a tenant job with an\n";
+echo "   unset/unresolvable tenancy_mode (loud failure, never a silent\n";
+echo "   empty/wrong-database export).\n";
 echo "4. Set DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD for the worker process\n";
 echo "   (same vars DB_MODE=direct uses — see WorkerDbConnection.php).\n";
-echo "5. Wire the TODO authorization check in\n";
-echo "   src/App/Routes/DataExport/PostEnqueueDataExportRoute.php for\n";
-echo "   export_scope=tenant.\n";
+echo "5. If this platform does NOT use `php stone generate tenant-governance`,\n";
+echo "   replace PostEnqueueDataExportRoute::tenantExportIsAuthorized()'s body\n";
+echo "   with a real ownership check — until then tenant exports are\n";
+echo "   FAIL-CLOSED denied (403), by design.\n";
 echo "6. Run the worker: php bin/export-worker.php --once (manual test) or\n";
-echo "   --loop under systemd/supervisor for production.\n";
+echo "   --loop under systemd/supervisor for production (runs its own\n";
+echo "   periodic stale-job-reap + expired-artifact cleanup).\n";
 echo "7. Build the account-portal download endpoint (out of scope here — see\n";
 echo "   --help for its exact contract).\n";

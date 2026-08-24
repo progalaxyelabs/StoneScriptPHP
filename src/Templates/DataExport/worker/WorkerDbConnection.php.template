@@ -22,21 +22,32 @@ use PDO;
  * cannot stream through without buffering the whole response either.
  *
  * Reuses the SAME env vars `DB_MODE=direct` already defines
- * (DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD — see StoneScriptPHP\Env and
- * StoneScriptPHP\Db\DirectTransport) so there is only one place to configure
- * direct Postgres credentials, even though the API server itself may stay on
- * DB_MODE=gateway. Requires ext-pdo_pgsql.
+ * (DB_HOST/DB_PORT/DB_USER/DB_PASSWORD, DB_NAME as the default database —
+ * see StoneScriptPHP\Env and StoneScriptPHP\Db\DirectTransport) so there is
+ * only one place to configure direct Postgres credentials, even though the
+ * API server itself may stay on DB_MODE=gateway. Requires ext-pdo_pgsql.
+ *
+ * ── Multiple databases, one server (db-per-tenant support, fixed after
+ * ── independent review) ────────────────────────────────────────────────
+ * On a fleet that provisions ONE Postgres DATABASE PER TENANT
+ * ({platform}_{tenant} — see ExportWorker's tenancy_mode handling), a
+ * tenant-scope job must query THAT tenant's own database, never the
+ * account/main one DB_NAME points at. get() now accepts an optional
+ * database-name override and caches one PDO connection PER database name
+ * (same host/port/user/password for all of them — this class assumes
+ * every tenant database lives on the SAME Postgres server as DB_HOST/
+ * DB_PORT; a fleet that also shards ACROSS SERVERS per tenant needs a
+ * further per-host override, which is a straightforward extension of this
+ * same cache-by-key pattern but is out of scope for what this generator can
+ * assume about an arbitrary platform's infrastructure).
  */
 final class WorkerDbConnection
 {
-    private static ?PDO $pdo = null;
+    /** @var array<string, PDO> keyed by resolved database name */
+    private static array $connections = [];
 
-    public static function get(): PDO
+    public static function get(?string $databaseNameOverride = null): PDO
     {
-        if (self::$pdo !== null) {
-            return self::$pdo;
-        }
-
         if (!extension_loaded('pdo_pgsql')) {
             throw new \RuntimeException(
                 'The data-export worker requires the pdo_pgsql PHP extension (same requirement as DB_MODE=direct).'
@@ -45,34 +56,40 @@ final class WorkerDbConnection
 
         $host = getenv('DB_HOST') ?: 'localhost';
         $port = getenv('DB_PORT') ?: '5432';
-        $name = getenv('DB_NAME') ?: '';
+        $name = $databaseNameOverride ?? (getenv('DB_NAME') ?: '');
         $user = getenv('DB_USER') ?: 'postgres';
         $pass = getenv('DB_PASSWORD') ?: null;
 
         if ($name === '') {
             throw new \RuntimeException(
                 'DB_NAME is required for the data-export worker (same env var DB_MODE=direct uses). ' .
-                'Set it to the database this worker should export FROM — usually the same database the ' .
-                'gateway provisions for this platform/tenant.'
+                'Set it to the default database this worker should export FROM — usually this ' .
+                'platform\'s own main database (account-scope exports always use it; tenant-scope ' .
+                'exports use it too UNLESS tenancy_mode is db_per_tenant, in which case each job ' .
+                'resolves its own tenant database — see ExportWorker\'s tenancy handling).'
             );
         }
 
+        if (isset(self::$connections[$name])) {
+            return self::$connections[$name];
+        }
+
         $dsn = "pgsql:host={$host};port={$port};dbname={$name}";
-        self::$pdo = new PDO($dsn, $user, $pass, [
+        self::$connections[$name] = new PDO($dsn, $user, $pass, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
 
-        return self::$pdo;
+        return self::$connections[$name];
     }
 
     /**
-     * Reset the cached connection — test-only (a fresh worker process
+     * Reset all cached connections — test-only (a fresh worker process
      * normally lives for the life of one `--loop` run, so production code
      * never needs this).
      */
     public static function reset(): void
     {
-        self::$pdo = null;
+        self::$connections = [];
     }
 }

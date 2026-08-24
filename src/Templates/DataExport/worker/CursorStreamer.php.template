@@ -25,6 +25,20 @@ use PDO;
  * requires this for a non-WITH-HOLD cursor) — this class owns that
  * transaction's begin/commit, callers never wrap a call to stream() in
  * their own transaction.
+ *
+ * ── Bounded, never a fleet-wide autovacuum stall (fixed after independent
+ * ── review) ────────────────────────────────────────────────────────────
+ * A large export previously held one open transaction for as long as the
+ * whole table took to drain, with no timeout — a slow/stuck query (or a
+ * PHP-side stall writing a batch, e.g. disk I/O on the XLSX writer) could
+ * leave that transaction open indefinitely, which on Postgres blocks
+ * autovacuum from reclaiming dead tuples for every OTHER table on the same
+ * database — a single export job could degrade the whole fleet sharing
+ * that database. `$statementTimeoutMs` bounds any SINGLE DECLARE/FETCH
+ * statement; `$idleInTransactionTimeoutMs` bounds how long the transaction
+ * may sit idle BETWEEN FETCHes (the window where PHP is writing the
+ * previous batch to the CSV/XLSX file) — both `SET LOCAL`, scoped to this
+ * transaction only, never touching the session-wide default.
  */
 final class CursorStreamer
 {
@@ -40,7 +54,9 @@ final class CursorStreamer
         array $tableConfig,
         array $bindings,
         int $batchSize,
-        int $rowCap,
+        ExportRowBudget $rowBudget,
+        int $statementTimeoutMs,
+        int $idleInTransactionTimeoutMs,
         callable $onBatch
     ): int {
         self::assertSafeIdentifier($tableConfig['table']);
@@ -48,6 +64,7 @@ final class CursorStreamer
             self::assertSafeIdentifier($col);
         }
         self::assertSafeIdentifier($tableConfig['order_by']);
+        self::assertWhereReferencesBindings($tableConfig, $bindings);
 
         $columnList = implode(', ', array_map(fn(string $c) => "\"{$c}\"", $tableConfig['columns']));
         $sql = sprintf(
@@ -63,6 +80,13 @@ final class CursorStreamer
 
         $pdo->beginTransaction();
         try {
+            // SET LOCAL — scoped to THIS transaction, reset automatically on
+            // commit/rollback. Never mutates the connection's session-wide
+            // defaults (which WorkerDbConnection's cached PDO reuses across
+            // jobs).
+            $pdo->exec('SET LOCAL statement_timeout = ' . (int) $statementTimeoutMs);
+            $pdo->exec('SET LOCAL idle_in_transaction_session_timeout = ' . (int) $idleInTransactionTimeoutMs);
+
             $declareStmt = $pdo->prepare("DECLARE {$cursorName} CURSOR FOR {$sql}");
             foreach ($bindings as $param => $value) {
                 $declareStmt->bindValue($param, $value);
@@ -75,12 +99,8 @@ final class CursorStreamer
                     break;
                 }
 
+                $rowBudget->consume(count($batch), $tableConfig['table']);
                 $total += count($batch);
-                if ($total > $rowCap) {
-                    throw new ExportRowCapExceededException(
-                        "row_cap exceeded on table '{$tableConfig['table']}' (cap={$rowCap})"
-                    );
-                }
 
                 $onBatch($batch);
 
@@ -102,17 +122,47 @@ final class CursorStreamer
     }
 
     /**
-     * Table/column names in the manifest are platform-developer-authored
-     * config, never end-user input — but this guard is cheap insurance
-     * against a typo or a future config source that isn't as trusted,
-     * matching the same bare-identifier discipline every generator's
-     * --tables parsing already applies (see generate-audit.php /
-     * generate-soft-delete.php).
+     * Table/column/order_by names in the manifest are platform-developer-
+     * authored config, never end-user input — but this guard is cheap
+     * insurance against a typo or a future config source that isn't as
+     * trusted, matching the same bare-identifier discipline every
+     * generator's --tables parsing already applies (see generate-audit.php
+     * / generate-soft-delete.php).
      */
     private static function assertSafeIdentifier(string $identifier): void
     {
         if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $identifier)) {
             throw new \InvalidArgumentException("Unsafe SQL identifier in data-export config: '{$identifier}'");
+        }
+    }
+
+    /**
+     * A manifest table entry whose 'where' predicate does NOT literally
+     * contain the bound placeholder (e.g. a typo, or a copy-pasted 'where'
+     * left over from a different table) would still bindValue() the
+     * parameter without error on most PDO drivers — PDO_PGSQL's default
+     * emulated-prepares mode silently accepts a bound name that never
+     * appears in the SQL text, so the scoping predicate is effectively
+     * DROPPED and the query becomes an unscoped `SELECT ... FROM table`,
+     * exporting the WHOLE table to whichever requester/tenant happened to
+     * trigger the job. This assertion turns that misconfiguration into an
+     * immediate, loud failure at export time instead of a silent full-table
+     * data leak.
+     *
+     * @param array{table:string,columns:string[],where:string,order_by:string} $tableConfig
+     * @param array<string,string> $bindings
+     */
+    private static function assertWhereReferencesBindings(array $tableConfig, array $bindings): void
+    {
+        foreach (array_keys($bindings) as $placeholder) {
+            if (!str_contains($tableConfig['where'], $placeholder)) {
+                throw new \InvalidArgumentException(
+                    "data-export config error: table '{$tableConfig['table']}'s 'where' clause " .
+                    "(\"{$tableConfig['where']}\") does not reference the required placeholder " .
+                    "'{$placeholder}' — refusing to export (this misconfiguration would otherwise " .
+                    "silently drop the scoping filter and export the WHOLE table)."
+                );
+            }
         }
     }
 }

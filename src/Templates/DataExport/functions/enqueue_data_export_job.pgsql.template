@@ -7,21 +7,41 @@
 -- AUTHORIZATION is NOT this function's job — by the time this function is
 -- called, the caller (the PHP route) has already verified: (a) p_requested_by
 -- is the actual authenticated identity, and (b) for export_scope='tenant',
--- that identity is an owner/admin of p_tenant_id. This function only
--- enforces the STRUCTURAL contract (scope/tenant_id pairing — belt-and-
--- braces on top of the table's own CHECK constraint) and admission control.
+-- that identity is an ACTIVE owner/admin of p_tenant_id (see
+-- PostEnqueueDataExportRoute::tenantExportIsAuthorized() — fail-closed by
+-- default). This function only enforces the STRUCTURAL contract
+-- (scope/tenant_id pairing — belt-and-braces on top of the table's own CHECK
+-- constraint) and admission control (dedup + per-requester ceiling).
 --
--- Admission control: race-free via the table's partial unique index
--- (idx_data_export_jobs_one_open_per_scope) — an INSERT-and-catch-
--- unique-violation shape (this codebase's standard "one open job per key"
--- enqueue pattern), never an application-level SELECT-then-INSERT (which
--- would TOCTOU-race two near-simultaneous enqueue calls for the same
--- requester+scope+tenant).
+-- ── Race-free by construction, not by catch-and-hope ──────────────────────
+-- The first cut of this function caught the admission unique-index's
+-- unique_violation and re-SELECTed the conflicting row to report it —
+-- empirically found to have a real race: if the conflicting job went
+-- terminal BETWEEN the violation and the re-SELECT, the re-SELECT found
+-- nothing and returned job_uuid=NULL labelled "already in progress", which
+-- a caller could poll forever. Fixed by taking a per-requester
+-- transaction-scoped advisory lock FIRST, serializing every enqueue
+-- attempt for the SAME p_requested_by against each other — the dedup
+-- SELECT below is then race-free by construction (no concurrent insert for
+-- this requester can happen while the lock is held), so it never needs a
+-- catch-and-recover path. The table's partial unique index
+-- (idx_data_export_jobs_one_open_per_scope) remains as a defense-in-depth
+-- backstop, not the primary admission mechanism.
+--
+-- ── Per-requester open-job ceiling (fixes a residual cross-tenant harvest
+-- ── path even for a caller legitimately authorized on many tenants) ──────
+-- The admission unique index is scoped to (requester, scope, tenant) — a
+-- caller who legitimately administers many DIFFERENT tenants could still
+-- fan out one export per tenant with no bound. p_max_open_per_requester
+-- caps TOTAL open (queued/running) jobs for one requester, across every
+-- scope/tenant, closing that fan-out regardless of per-tenant authorization
+-- correctness.
 CREATE OR REPLACE FUNCTION enqueue_data_export_job(
     p_requested_by  TEXT,
     p_export_scope  TEXT,
     p_tenant_id     TEXT DEFAULT NULL,
-    p_format        TEXT DEFAULT 'csv'
+    p_format        TEXT DEFAULT 'csv',
+    p_max_open_per_requester INTEGER DEFAULT 5
 )
 RETURNS TABLE (
     o_job_uuid    UUID,
@@ -35,7 +55,18 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_job_uuid UUID;
-    v_conflict RECORD;
+    v_existing RECORD;
+    v_open_count INTEGER;
+    -- `php stone generate model`'s typed Params boundary sends an EXPLICIT
+    -- value for every property, including an unset optional one — which
+    -- means a PHP caller that never assigns p_max_open_per_requester sends
+    -- SQL NULL, not "omitted" (a plain SQL DEFAULT only applies when a
+    -- parameter is genuinely omitted from the call, never when NULL is
+    -- passed explicitly). Relying on the DEFAULT alone would silently
+    -- disable the per-requester ceiling for every typed PHP call site.
+    -- COALESCE here is the actual enforcement point — the DEFAULT above is
+    -- kept only for direct psql/manual callers.
+    v_max_open INTEGER := COALESCE(p_max_open_per_requester, 5);
 BEGIN
     IF p_export_scope NOT IN ('account', 'tenant') THEN
         RETURN QUERY SELECT NULL::UUID, NULL::TEXT, NULL::TIMESTAMPTZ, 'invalid_export_scope'::TEXT;
@@ -57,24 +88,40 @@ BEGIN
         RETURN;
     END IF;
 
-    BEGIN
-        INSERT INTO data_export_jobs (requested_by, export_scope, tenant_id, format, status)
-        VALUES (p_requested_by, p_export_scope, p_tenant_id, p_format, 'queued')
-        RETURNING data_export_jobs.job_uuid INTO v_job_uuid;
-    EXCEPTION WHEN unique_violation THEN
-        SELECT j.job_uuid, j.status INTO v_conflict
-        FROM data_export_jobs j
-        WHERE j.requested_by = p_requested_by
-          AND j.export_scope = p_export_scope
-          AND COALESCE(j.tenant_id, '') = COALESCE(p_tenant_id, '')
-          AND j.status IN ('queued', 'running')
-        ORDER BY j.enqueued_at DESC
-        LIMIT 1;
+    -- Serialize every enqueue attempt for this requester (see header
+    -- comment). Transaction-scoped (pg_advisory_xact_lock) — automatically
+    -- released on commit/rollback, no explicit unlock needed.
+    PERFORM pg_advisory_xact_lock(hashtextextended('data_export_jobs:' || p_requested_by, 0));
 
-        RETURN QUERY SELECT v_conflict.job_uuid, v_conflict.status, NULL::TIMESTAMPTZ,
-            ('export_already_in_progress: job_uuid=' || COALESCE(v_conflict.job_uuid::text, '?'))::TEXT;
+    SELECT j.job_uuid, j.status INTO v_existing
+    FROM data_export_jobs j
+    WHERE j.requested_by = p_requested_by
+      AND j.export_scope = p_export_scope
+      AND COALESCE(j.tenant_id, '') = COALESCE(p_tenant_id, '')
+      AND j.status IN ('queued', 'running')
+    ORDER BY j.enqueued_at DESC
+    LIMIT 1;
+
+    IF v_existing.job_uuid IS NOT NULL THEN
+        RETURN QUERY SELECT v_existing.job_uuid, v_existing.status, NULL::TIMESTAMPTZ,
+            ('export_already_in_progress: job_uuid=' || v_existing.job_uuid::text)::TEXT;
         RETURN;
-    END;
+    END IF;
+
+    SELECT count(*) INTO v_open_count
+    FROM data_export_jobs j
+    WHERE j.requested_by = p_requested_by
+      AND j.status IN ('queued', 'running');
+
+    IF v_open_count >= v_max_open THEN
+        RETURN QUERY SELECT NULL::UUID, NULL::TEXT, NULL::TIMESTAMPTZ,
+            format('too_many_open_exports: %s open export(s) already, max %s per requester', v_open_count, v_max_open)::TEXT;
+        RETURN;
+    END IF;
+
+    INSERT INTO data_export_jobs (requested_by, export_scope, tenant_id, format, status)
+    VALUES (p_requested_by, p_export_scope, p_tenant_id, p_format, 'queued')
+    RETURNING data_export_jobs.job_uuid INTO v_job_uuid;
 
     RETURN QUERY
     SELECT j.job_uuid, j.status, j.enqueued_at, NULL::TEXT

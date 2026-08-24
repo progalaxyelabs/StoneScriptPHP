@@ -1,0 +1,45 @@
+-- reap_stale_export_jobs: a crashed/killed worker leaves a job stranded in
+-- 'running' forever — violating the job-lifecycle LAW ("every job reaches
+-- terminal, no exceptions") AND permanently occupying that requester's
+-- admission-control slot (idx_data_export_jobs_one_open_per_scope /
+-- enqueue_data_export_job()'s per-requester ceiling both key off
+-- status IN ('queued','running')), silently locking the requester out of
+-- ever exporting that scope/tenant again.
+--
+-- Call periodically (the generated ExportWorker calls this once per
+-- claim-and-drain pass — see ExportWorker::runMaintenance() — cheap: a
+-- single indexed UPDATE). p_stale_after should be comfortably longer than
+-- any real export could legitimately take; the worker's own
+-- cursor_statement_timeout_ms/idle_in_transaction bounds (see
+-- CursorStreamer) keep a genuinely stuck query from running forever, so a
+-- 'running' row older than this is a worker-process-died signal, not a
+-- slow-but-healthy job.
+-- p_stale_after is TEXT, not INTERVAL — `php stone generate model`'s SQL
+-- type map has no INTERVAL entry (falls back to PHP `mixed`, an
+-- unnecessarily loose typed-Params property for something that only ever
+-- needs to carry a Postgres interval literal like '30 minutes'). TEXT maps
+-- cleanly to PHP `string` and is cast to INTERVAL once, inside the
+-- function body, via a safe explicit ::interval cast.
+CREATE OR REPLACE FUNCTION reap_stale_export_jobs(
+    p_stale_after TEXT DEFAULT '30 minutes'
+)
+RETURNS TABLE (
+    o_job_uuid UUID
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_stale_after INTERVAL := COALESCE(p_stale_after, '30 minutes')::interval;
+BEGIN
+    RETURN QUERY
+    UPDATE data_export_jobs
+       SET status = 'failed',
+           error_detail = 'stale_running_reaped: worker did not report a terminal state within ' || v_stale_after::text,
+           terminal_at = NOW()
+     WHERE data_export_jobs.status = 'running'
+       AND data_export_jobs.picked_up_at < NOW() - v_stale_after
+    RETURNING data_export_jobs.job_uuid;
+END;
+$$;
