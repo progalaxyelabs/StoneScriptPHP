@@ -23,7 +23,16 @@ CREATE TABLE IF NOT EXISTS _audit_log (
     audit_id        BIGSERIAL PRIMARY KEY,
     occurred_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     table_name      TEXT NOT NULL,
-    operation       TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+    -- TRUNCATE: AFTER-ROW triggers never fire on TRUNCATE (a PostgreSQL
+    -- limitation, not a gap in this design) — captured by a SEPARATE
+    -- AFTER STATEMENT trigger (_audit_capture_truncate(), attached
+    -- alongside the row trigger) with before_row/after_row/subject_id all
+    -- NULL (there is no per-row data to capture — TRUNCATE wipes the
+    -- table in one operation). TRUNCATE on an audited base table is also
+    -- REVOKEd from the app role (see the migration) so this row should
+    -- only ever appear from a role with elevated privileges — its mere
+    -- presence is itself the alert.
+    operation       TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE')),
 
     -- Best-effort extraction of the mutated row's identifier (tried in order:
     -- id, uuid, identity_id, tenant_id, workspace_id — see

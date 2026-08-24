@@ -1,10 +1,58 @@
-    IF to_regclass('__TABLE__') IS NOT NULL THEN
-        DELETE FROM __TABLE__ WHERE deleted_at IS NOT NULL AND purge_after < NOW();
-        GET DIAGNOSTICS v_count = ROW_COUNT;
+    BEGIN
+        IF to_regclass('__TABLE__') IS NOT NULL THEN
+            WITH deleted_rows AS (
+                DELETE FROM __TABLE__
+                 WHERE deleted_at IS NOT NULL AND purge_after < NOW()
+                RETURNING __PK_COLUMN__::text AS subject_id, deleted_at
+            )
+            SELECT
+                COALESCE(array_agg(subject_id), ARRAY[]::text[]),
+                COALESCE(array_agg(deleted_at), ARRAY[]::timestamptz[])
+              INTO v_deleted_ids, v_deleted_ats
+              FROM deleted_rows;
 
-        UPDATE _deletion_archive
-           SET purged = true, purged_at = NOW()
-         WHERE source_table = '__TABLE__' AND purged = false AND purge_after < NOW();
+            v_count := COALESCE(array_length(v_deleted_ids, 1), 0);
 
-        RETURN QUERY SELECT '__TABLE__'::TEXT, v_count;
-    END IF;
+            -- Keyed on (subject_id, deleted_at) PAIRS this DELETE actually
+            -- returned, not subject_id alone and NOT a blanket
+            -- source_table+purge_after filter. subject_id alone is not
+            -- enough: a row that was soft-deleted, support_restore'd, then
+            -- soft-deleted AGAIN has TWO unpurged archive rows sharing the
+            -- SAME subject_id — a subject_id-only match would (incorrectly)
+            -- also flag the FIRST, already-restored, never-actually-purged
+            -- archive row as purged just because a LATER cycle's purge
+            -- happened to run. deleted_at is set once, atomically, by the
+            -- SAME request_*_deletion() call that inserted the matching
+            -- archive row — pairing on it uniquely identifies exactly the
+            -- deletion event that caused THIS physical delete.
+            IF v_count > 0 THEN
+                UPDATE _deletion_archive a
+                   SET purged = true, purged_at = NOW()
+                  FROM unnest(v_deleted_ids, v_deleted_ats) AS d(subject_id, deleted_at)
+                 WHERE a.source_table = '__TABLE__'
+                   AND a.subject_id = d.subject_id
+                   AND a.deleted_at = d.deleted_at
+                   AND a.purged = false;
+            END IF;
+
+            RETURN QUERY SELECT '__TABLE__'::TEXT, v_count, NULL::TEXT;
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        -- WHEN OTHERS (not just foreign_key_violation) on purpose: a
+        -- platform-added FK referencing __TABLE__ (default RESTRICT/NO
+        -- ACTION) raises foreign_key_violation, but a platform-added
+        -- trigger can just as easily raise a custom exception with a
+        -- DIFFERENT SQLSTATE (tenant-governance's own
+        -- trg_protect_tenant_creator is exactly this case — see the
+        -- tenants-specific purge block's comment) — narrower handling would
+        -- let that abort this ENTIRE function call, rolling back every
+        -- OTHER table's already-completed purge in the same run. Report it
+        -- loudly via o_error for __TABLE__ ONLY instead (this
+        -- BEGIN/EXCEPTION is its own sub-transaction — catching here rolls
+        -- back only __TABLE__'s attempted DELETE, not prior tables'
+        -- already-committed work). Retried automatically on the next
+        -- scheduled run; resolve by adding an explicit cleanup of the
+        -- blocking child rows/trigger, or relaxing whatever constraint is
+        -- blocking it.
+        RETURN QUERY SELECT '__TABLE__'::TEXT, 0, SQLERRM;
+    END;

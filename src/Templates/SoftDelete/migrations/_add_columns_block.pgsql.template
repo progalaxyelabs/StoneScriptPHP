@@ -6,5 +6,15 @@ BEGIN
             ADD COLUMN IF NOT EXISTS purge_after TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS delete_requested_by TEXT;
         CREATE INDEX IF NOT EXISTS idx___TABLE___deleted_at ON __TABLE__(deleted_at) WHERE deleted_at IS NOT NULL;
+    ELSE
+        -- Per the gateway's real deploy order (tables deployed before
+        -- migrations, every run), this table normally already exists here
+        -- if declared declaratively. NON-silent on purpose (see the audit
+        -- generator's identical rationale): a quiet skip would let
+        -- request_*_deletion() 500 at runtime (referencing columns that
+        -- were never added) with nothing in the migration log to explain
+        -- why. A configured table may legitimately not exist on every
+        -- platform, so this warns rather than failing the whole migration.
+        RAISE WARNING 'soft-delete: table "%" does not exist — deleted_at/purge_after/delete_requested_by NOT added. If this table SHOULD exist, create it and re-run this migration (or a follow-on one with the same ADD COLUMN block) so this warning goes away.', '__TABLE__';
     END IF;
 END $$;

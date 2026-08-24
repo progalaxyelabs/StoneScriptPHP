@@ -5,5 +5,33 @@ BEGIN
         CREATE TRIGGER trg_audit___TABLE__
             AFTER INSERT OR UPDATE OR DELETE ON __TABLE__
             FOR EACH ROW EXECUTE FUNCTION _audit_capture_row();
+
+        DROP TRIGGER IF EXISTS trg_audit_truncate___TABLE__ ON __TABLE__;
+        CREATE TRIGGER trg_audit_truncate___TABLE__
+            AFTER TRUNCATE ON __TABLE__
+            FOR EACH STATEMENT EXECUTE FUNCTION _audit_capture_truncate();
+
+        -- TRUNCATE bypasses row triggers entirely (see
+        -- _audit_capture_truncate()'s comment) — the statement trigger above
+        -- logs it IF it happens, but the stronger, primary defense is not
+        -- letting the app role issue TRUNCATE on an audited table at all.
+        EXECUTE format('REVOKE TRUNCATE ON __TABLE__ FROM %I', current_user);
+    ELSE
+        -- Per the gateway's real deploy order (extensions -> types ->
+        -- TABLES -> FUNCTIONS -> MIGRATIONS -> verify_schema, every
+        -- /v2/migrate run — not just the first), this table normally
+        -- already exists here if it's declared declaratively (the standard
+        -- way this framework defines a table), so this branch should be
+        -- rare. NON-silent on purpose: a plain to_regclass()-guarded skip
+        -- with no warning would let this table's audit coverage silently
+        -- never happen, forever (the gateway's migration runner is
+        -- filename-deduped/forward-only — it never retries this exact
+        -- migration file even after the table shows up later). RAISE
+        -- WARNING surfaces that instead of hiding it behind a green log,
+        -- without hard-failing the whole migration (this table may
+        -- legitimately not exist on every platform/database that uses this
+        -- generator's default --tables list, e.g. tenant_memberships
+        -- without `php stone generate tenant-governance`).
+        RAISE WARNING 'audit: table "%" does not exist — capture trigger NOT attached. If this table SHOULD exist, create it and re-run this migration (or a follow-on one with the same attach block) so this warning goes away.', '__TABLE__';
     END IF;
 END $$;

@@ -25,6 +25,14 @@ DECLARE
     v_now TIMESTAMPTZ := NOW();
     v_purge_after TIMESTAMPTZ := v_now + INTERVAL '7 days';
 BEGIN
+    -- "Who" — the deletion request itself must be attributable, not just
+    -- _deletion_archive.requested_by (a column, not an audit trail).
+    -- Without this, the AFTER-row audit trigger (if `php stone generate
+    -- audit` is installed on this table) would record this UPDATE as
+    -- actor_source='system', silently contradicting the archive's own
+    -- requested_by value.
+    PERFORM set_config('app.actor_id', COALESCE(p_requested_by, ''), true);
+
     UPDATE __TABLE__
        SET deleted_at = v_now, purge_after = v_purge_after, delete_requested_by = p_requested_by
      WHERE __PK_COLUMN__ = p___PK_COLUMN__ AND deleted_at IS NULL;

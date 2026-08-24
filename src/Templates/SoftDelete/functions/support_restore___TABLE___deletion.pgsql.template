@@ -12,12 +12,22 @@
 -- of the 7-day window being real. The _deletion_archive row for this
 -- deletion is left untouched (archive rows are never deleted/modified) —
 -- the restore itself is what the audit log's UPDATE row proves happened.
+--
+-- SECURITY INVOKER (the default — no SECURITY DEFINER here): this function
+-- only writes __TABLE__'s own soft-delete columns, which the app role was
+-- never revoked from (only _audit_log/_deletion_archive are locked down),
+-- so there is no privilege gap to bypass. SET search_path IS still pinned,
+-- for the same reason every other function here pins it: an unqualified
+-- reference to __TABLE__ must always resolve to the real table, never to a
+-- same-named object earlier in a spoofed search_path.
 CREATE OR REPLACE FUNCTION support_restore___TABLE___deletion(
     p___PK_COLUMN__ __PK_TYPE__,
     p_actor_id TEXT DEFAULT NULL
 )
 RETURNS TABLE (o_error TEXT)
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
 BEGIN
     PERFORM set_config('app.actor_id', COALESCE(p_actor_id, ''), true);
 

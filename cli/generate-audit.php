@@ -3,10 +3,12 @@
 /**
  * Audit Generator
  *
- * Scaffolds an immutable, append-only `_audit_log` table + a single
- * AFTER-row capture trigger function into the CONSUMING platform's OWN
+ * Scaffolds an immutable, append-only `_audit_log` table + two capture
+ * trigger functions (row-level for INSERT/UPDATE/DELETE, statement-level
+ * for TRUNCATE — see functions/_audit_capture_truncate.pgsql.template for
+ * why TRUNCATE needs its own trigger) into the CONSUMING platform's OWN
  * database (main or tenant — run it against whichever database you want
- * 100% mutation capture on), plus the migration that attaches that trigger
+ * 100% mutation capture on), plus the migration that attaches both triggers
  * to a configurable list of tables (default: identities, tenants,
  * tenant_memberships — this platform's own identity/tenant model, per the
  * "gateway = pure infra, identities+tenants owned by each platform" split).
@@ -54,22 +56,31 @@ $DEFAULT_AUDITED_TABLES = ['identities', 'tenants', 'tenant_memberships'];
 if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "Audit Generator\n";
     echo "================\n\n";
-    echo "Scaffolds an immutable, append-only _audit_log table + a single\n";
-    echo "capture trigger function into THIS database, and attaches an\n";
-    echo "AFTER-row trigger to every table you name (default: " . implode(', ', $DEFAULT_AUDITED_TABLES) . ").\n\n";
+    echo "Scaffolds an immutable, append-only _audit_log table + row- and\n";
+    echo "statement-level capture triggers into THIS database, attached to\n";
+    echo "every table you name (default: " . implode(', ', $DEFAULT_AUDITED_TABLES) . ").\n\n";
     echo "Usage:\n";
     echo "  php stone generate audit\n";
     echo "  php stone generate audit --tables=identities,tenants,tenant_memberships\n\n";
     echo "This will create:\n";
     echo "  - migrations/{N}_create_audit_log.pgsql\n";
     echo "  - src/postgresql/{main/postgresql/,}tables/_audit_log.pgsql\n";
-    echo "  - src/postgresql/{main/postgresql/,}functions/_audit_capture_row.pgsql\n\n";
-    echo "No model wrapper is generated — _audit_capture_row is an internal\n";
-    echo "trigger function, never called directly from PHP.\n\n";
+    echo "  - src/postgresql/{main/postgresql/,}functions/_audit_capture_row.pgsql\n";
+    echo "  - src/postgresql/{main/postgresql/,}functions/_audit_capture_truncate.pgsql\n\n";
+    echo "No model wrapper is generated — both trigger functions are internal,\n";
+    echo "never called directly from PHP.\n\n";
     echo "\"Who\" (actor_id) is captured via set_config('app.actor_id', <id>,\n";
     echo "true) — add that line yourself at the top of any mutating SQL\n";
     echo "function that has an acting identity available. Left unset (cron,\n";
-    echo "raw psql, gateway migrate, admin tooling) -> actor_source='system'.\n";
+    echo "raw psql, gateway migrate, admin tooling) -> actor_source='system'.\n\n";
+    echo "TRUNCATE is captured by a separate AFTER STATEMENT trigger AND\n";
+    echo "revoked from the app role on every audited base table — an\n";
+    echo "AFTER-ROW trigger alone never fires on TRUNCATE.\n\n";
+    echo "If a configured table doesn't exist yet when the migration runs, the\n";
+    echo "attach step RAISEs a WARNING (visible in the migration output, not a\n";
+    echo "silent skip) rather than failing the whole migration — create the\n";
+    echo "table and re-run this generator (or write a follow-on migration with\n";
+    echo "another attach block) to close the gap.\n";
     exit(0);
 }
 
@@ -189,14 +200,22 @@ if (file_exists($tableDst)) {
     echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $tableDst) . "\n";
 }
 
-// ── 2. Trigger function ────────────────────────────────────────────────
-echo "\n→ Creating trigger capture function...\n";
-$fnDst = $functionsDir . DIRECTORY_SEPARATOR . '_audit_capture_row.pgsql';
-if (file_exists($fnDst)) {
-    echo "  Skipped (already exists): " . relativeToRoot(ROOT_PATH, $fnDst) . "\n";
+// ── 2. Trigger functions (row-level + TRUNCATE statement-level) ──────────
+echo "\n→ Creating SQL functions...\n";
+$captureRowDst = $functionsDir . DIRECTORY_SEPARATOR . '_audit_capture_row.pgsql';
+if (file_exists($captureRowDst)) {
+    echo "  Skipped (already exists): " . relativeToRoot(ROOT_PATH, $captureRowDst) . "\n";
 } else {
-    copy($templatesPath . 'functions' . DIRECTORY_SEPARATOR . '_audit_capture_row.pgsql.template', $fnDst);
-    echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $fnDst) . "\n";
+    copy($templatesPath . 'functions' . DIRECTORY_SEPARATOR . '_audit_capture_row.pgsql.template', $captureRowDst);
+    echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $captureRowDst) . "\n";
+}
+
+$captureTruncateDst = $functionsDir . DIRECTORY_SEPARATOR . '_audit_capture_truncate.pgsql';
+if (file_exists($captureTruncateDst)) {
+    echo "  Skipped (already exists): " . relativeToRoot(ROOT_PATH, $captureTruncateDst) . "\n";
+} else {
+    copy($templatesPath . 'functions' . DIRECTORY_SEPARATOR . '_audit_capture_truncate.pgsql.template', $captureTruncateDst);
+    echo "  ✓ Created: " . relativeToRoot(ROOT_PATH, $captureTruncateDst) . "\n";
 }
 
 // ── 3. Migration (table + REVOKE + per-table trigger-attach blocks) ───────
@@ -237,6 +256,9 @@ echo "\n✅ Audit scaffolding complete!\n\n";
 echo "Next steps:\n";
 echo "1. Run migrations: php stone gateway:migrate-main (or php stone migrate up /\n";
 echo "   gateway:migrate-tenant, whichever database you generated this against).\n";
+echo "   Watch the migration output for 'audit: table \"...\" does not exist'\n";
+echo "   WARNINGs — that means a configured table wasn't there yet and its\n";
+echo "   capture trigger did NOT attach; create the table and re-run.\n";
 echo "2. Any mutating SQL function that has an acting identity available should\n";
 echo "   set it at the top of the function body:\n";
 echo "     PERFORM set_config('app.actor_id', p_actor_identity_id::text, true);\n";
@@ -247,6 +269,7 @@ echo "   on first run (the trigger-attach blocks are self-skipping and idempoten
 echo "4. Query examples:\n";
 echo "     SELECT * FROM _audit_log WHERE table_name='identities' AND subject_id=\$1 ORDER BY occurred_at;\n";
 echo "     SELECT * FROM _audit_log WHERE operation='DELETE' AND table_name='identities';\n";
+echo "     SELECT * FROM _audit_log WHERE operation='TRUNCATE';\n";
 
 /**
  * Render an absolute path relative to ROOT_PATH for tidy output.

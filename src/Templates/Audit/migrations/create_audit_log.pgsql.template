@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS _audit_log (
     audit_id        BIGSERIAL PRIMARY KEY,
     occurred_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     table_name      TEXT NOT NULL,
-    operation       TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+    operation       TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE')),
     subject_id      TEXT,
     actor_id        TEXT,
     actor_source    TEXT NOT NULL DEFAULT 'system' CHECK (actor_source IN ('user', 'system')),
@@ -43,15 +43,17 @@ BEGIN
     EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON _audit_log FROM %I', v_role);
 END $$;
 
--- Attach capture to each audited table. The underlying function
--- (_audit_capture_row) is deployed by the gateway's FUNCTIONS step, which
--- always runs before migrations — see this framework's documented gateway
--- migration order — so it already exists by the time this statement runs.
--- CREATE TRIGGER itself, unlike CREATE FUNCTION, requires the target table
--- to physically exist; each block below is guarded with to_regclass() so a
--- table that hasn't been created yet on THIS database is silently skipped
--- rather than failing the whole migration — re-run `php stone migrate up`
--- (or the gateway migrate equivalent) after that table lands and this
--- migration will attach the trigger to it then (CREATE TABLE/TRIGGER
--- statements above and below are all idempotent).
+-- Attach capture to each audited table. Per the gateway's real, as-built
+-- deploy order — extensions -> custom types -> TABLES (CREATE IF NOT
+-- EXISTS) -> FUNCTIONS -> MIGRATIONS -> verify_schema (read-only, last),
+-- EVERY /v2/migrate call, not just the first — the target table normally
+-- already exists here as long as it's declared in this database's own
+-- src/postgresql/tables/ (the standard, declarative way this framework
+-- defines a table), since tables are deployed before migrations in the SAME
+-- run. The residual edge case is a table that exists ONLY via some other
+-- migration file ordered after this one — the to_regclass() guard below
+-- handles that NON-silently (RAISE WARNING, not a quiet skip) rather than
+-- hard-failing the whole migration, because a configured table may
+-- legitimately not exist on every platform (e.g. tenant_memberships
+-- without `php stone generate tenant-governance`).
 __AUDITED_TABLE_TRIGGERS__

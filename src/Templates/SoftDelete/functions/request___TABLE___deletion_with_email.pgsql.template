@@ -20,6 +20,10 @@ DECLARE
     v_purge_after TIMESTAMPTZ := v_now + INTERVAL '7 days';
     v_email TEXT;
 BEGIN
+    -- "Who" — see request_<table>_deletion.pgsql.template's comment on why
+    -- this must be set explicitly, not left to the caller's own context.
+    PERFORM set_config('app.actor_id', COALESCE(p_requested_by, ''), true);
+
     UPDATE __TABLE__
        SET deleted_at = v_now, purge_after = v_purge_after, delete_requested_by = p_requested_by
      WHERE __PK_COLUMN__ = p___PK_COLUMN__ AND deleted_at IS NULL

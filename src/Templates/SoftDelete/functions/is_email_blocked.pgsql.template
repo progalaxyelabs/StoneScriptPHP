@@ -5,27 +5,48 @@
 -- Call from the signin AND signup routes: a soft-deleted or purged email
 -- must show "invalid email, contact support", not the generic
 -- "wrong password" / "email already registered" messaging (design doc §2).
--- Covers both cases:
---   - soft-deleted, not yet purged: live row still exists, deleted_at IS
---     NOT NULL.
---   - purged: no live row left at all — only _deletion_archive.email (from
---     request___EMAIL_TABLE___deletion) proves it ever existed.
+--
+-- The LIVE row is always authoritative when one exists — this is the fix
+-- for a real "restore is dead" bug: after support_restore___EMAIL_TABLE___deletion()
+-- reactivates a row (deleted_at set back to NULL), _deletion_archive STILL
+-- holds the original deletion request (archive rows are never deleted —
+-- that is the whole point of the archive). If this function consulted the
+-- archive unconditionally, a successfully restored user would be locked
+-- out of signin AND signup forever, even though their live row is active
+-- again. So:
+--   - live row exists, deleted_at IS NOT NULL -> blocked (soft-deleted).
+--   - live row exists, deleted_at IS NULL     -> NOT blocked (active,
+--     including a restored row), regardless of archive history.
+--   - no live row at all -> either the email never existed, or it was
+--     actually PURGED. Only a CONFIRMED purge (_deletion_archive.purged =
+--     true) blocks in this branch; a row can never be purged without
+--     having existed live first, so an archive row with purged=false and
+--     no live row is not a state this system produces (defensive default:
+--     doesn't block).
 CREATE OR REPLACE FUNCTION is_email_blocked(p_email TEXT)
 RETURNS BOOLEAN
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_live_deleted_at TIMESTAMPTZ;
+    v_live_found BOOLEAN := false;
 BEGIN
     IF to_regclass('__EMAIL_TABLE__') IS NOT NULL THEN
-        PERFORM 1 FROM __EMAIL_TABLE__ WHERE __EMAIL_COLUMN__ = p_email AND deleted_at IS NOT NULL;
+        SELECT deleted_at INTO v_live_deleted_at
+          FROM __EMAIL_TABLE__
+         WHERE __EMAIL_COLUMN__ = p_email;
         IF FOUND THEN
-            RETURN true;
+            v_live_found := true;
         END IF;
     END IF;
 
-    PERFORM 1 FROM _deletion_archive WHERE email = p_email;
-    IF FOUND THEN
-        RETURN true;
+    IF v_live_found THEN
+        RETURN v_live_deleted_at IS NOT NULL;
     END IF;
 
-    RETURN false;
+    PERFORM 1 FROM _deletion_archive WHERE email = p_email AND purged = true;
+    RETURN FOUND;
 END;
 $$;

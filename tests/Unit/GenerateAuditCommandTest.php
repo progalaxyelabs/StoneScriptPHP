@@ -84,6 +84,11 @@ class GenerateAuditCommandTest extends TestCase
 
         $this->assertFileExists($mainBase . 'tables/_audit_log.pgsql');
         $this->assertFileExists($mainBase . 'functions/_audit_capture_row.pgsql');
+        $this->assertFileExists($mainBase . 'functions/_audit_capture_truncate.pgsql');
+
+        // TRUNCATE is captured too (AFTER-ROW triggers never fire on TRUNCATE).
+        $tableSql = file_get_contents($mainBase . 'tables/_audit_log.pgsql');
+        $this->assertStringContainsString("'TRUNCATE'", $tableSql);
 
         $migration = $mainBase . 'migrations/038_create_audit_log.pgsql';
         $this->assertFileExists($migration);
@@ -92,11 +97,15 @@ class GenerateAuditCommandTest extends TestCase
         $this->assertStringContainsString('CREATE TABLE IF NOT EXISTS _audit_log', $sql);
         $this->assertStringContainsString("REVOKE UPDATE, DELETE, TRUNCATE ON _audit_log", $sql);
         // Default table set, each guarded by to_regclass so partial rollout
-        // (a table that doesn't exist yet on this DB) doesn't fail the migration.
+        // (a table that doesn't exist yet on this DB) doesn't fail the migration
+        // -- non-silently: RAISE WARNING, not a quiet skip.
         foreach (['identities', 'tenants', 'tenant_memberships'] as $table) {
             $this->assertStringContainsString("to_regclass('$table')", $sql);
             $this->assertStringContainsString("trg_audit_$table", $sql);
+            $this->assertStringContainsString("trg_audit_truncate_$table", $sql);
+            $this->assertStringContainsString("REVOKE TRUNCATE ON $table FROM", $sql);
         }
+        $this->assertStringContainsString('RAISE WARNING', $sql);
 
         // Mandatory destructive-DDL self-check (system prompt §7).
         $this->assertDoesNotMatchRegularExpression(
@@ -104,8 +113,9 @@ class GenerateAuditCommandTest extends TestCase
             $sql
         );
 
-        // No model wrapper for the internal trigger function.
+        // No model wrapper for either internal trigger function.
         $this->assertFileDoesNotExist($fixture . 'src/App/Database/Functions/FnAuditCaptureRow.php');
+        $this->assertFileDoesNotExist($fixture . 'src/App/Database/Functions/FnAuditCaptureTruncate.php');
     }
 
     public function test_custom_tables_flag_is_honored(): void

@@ -56,10 +56,21 @@ BEGIN
     EXECUTE format('GRANT UPDATE (purged, purged_at) ON _deletion_archive TO %I', v_role);
 END $$;
 
--- Add the three soft-delete columns to each configured table. Guarded with
--- to_regclass() so a table that doesn't exist yet on THIS database is
--- silently skipped rather than failing the whole migration — re-run
--- `php stone migrate up` (or the gateway migrate equivalent) after that
--- table lands and this migration will add its columns then (every
--- statement here is idempotent).
+-- Add the three soft-delete columns to each configured table. Per the
+-- gateway's real deploy order (extensions -> types -> TABLES -> FUNCTIONS
+-- -> MIGRATIONS -> verify_schema, every /v2/migrate run), this table
+-- normally already exists here if declared declaratively. Each block is
+-- still guarded with to_regclass() — but NON-silently: a missing table
+-- RAISEs a WARNING rather than a quiet skip (see that block's own comment),
+-- so a genuinely missing table surfaces in the migration log instead of
+-- request_*_deletion() 500ing at runtime with no explanation.
+--
+-- The generator ALSO patches each configured table's OWN declarative file
+-- (src/postgresql/.../tables/<table>.pgsql) with these same three columns,
+-- when it can find one — the gateway's table-deploy step is declarative and
+-- NEVER alters an existing table on its own (only migrations do), and its
+-- read-only verify_schema step (which runs LAST, after migrations) compares
+-- live columns against that declarative file; leaving it un-patched would
+-- make every future deploy flag a spurious, permanent drift warning between
+-- "what verify_schema expects" and "what this migration actually added".
 __ADD_COLUMN_BLOCKS__

@@ -3,8 +3,26 @@
 -- Run daily (wire into this platform's own cron/scheduler — the framework
 -- does not ship a scheduler; see the generator's --help output). For every
 -- configured table, physically DELETEs rows past their 7-day purge_after,
--- then marks the corresponding _deletion_archive rows purged=true (the
--- archive row itself is NEVER deleted — see that table's comment).
+-- then marks the corresponding _deletion_archive rows purged=true, KEYED ON
+-- THE SUBJECT_IDS THE DELETE ACTUALLY RETURNED (not a blanket
+-- source_table+purge_after filter — see _purge_table_block.pgsql.template's
+-- comment for why that distinction matters). The archive row itself is
+-- NEVER deleted — see that table's comment.
+--
+-- Each table's purge runs in its OWN BEGIN/EXCEPTION WHEN OTHERS sub-block:
+-- ANY failure on one table (a platform-added FK with default RESTRICT, or a
+-- platform-added trigger raising its own custom exception) is reported via
+-- o_error for THAT table only and does not wedge or roll back any other
+-- table's already-completed purge in the same run.
+--
+-- KNOWN LIMITATION, documented rather than hidden: a tenant currently
+-- cannot be purged while `php stone generate tenant-governance`'s
+-- tenant_memberships.tenant_id -> tenants(uuid) ON DELETE CASCADE tries to
+-- cascade-delete its founder's membership row — that row's own
+-- trg_protect_tenant_creator trigger unconditionally refuses any hard
+-- DELETE of an is_tenant_creator row. See the tenants-specific purge
+-- block's EXCEPTION comment for the full explanation; resolving it requires
+-- a coordinated change to tenant-governance itself (out of scope here).
 --
 -- The DELETE is what makes this real: if `php stone generate audit` is
 -- installed on a given table, that DELETE fires the AFTER-row trigger and
@@ -14,13 +32,15 @@
 -- immutable trail — install `php stone generate audit` first if that
 -- matters for a given table (it does, for identities/tenants).
 CREATE OR REPLACE FUNCTION purge_expired_deletions()
-RETURNS TABLE (o_table_name TEXT, o_purged_count INTEGER)
+RETURNS TABLE (o_table_name TEXT, o_purged_count INTEGER, o_error TEXT)
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_count INTEGER;
+    v_deleted_ids TEXT[];
+    v_deleted_ats TIMESTAMPTZ[];
 BEGIN
 __PURGE_TABLE_BLOCKS__
     RETURN;

@@ -36,6 +36,12 @@ DECLARE
     v_email TEXT;
     v_tenant_id UUID;
 BEGIN
+    -- "Who" — see request_<table>_deletion.pgsql.template's comment on why
+    -- this must be set explicitly, not left to the caller's own context.
+    -- Applies to every write in this transaction, including the cascaded
+    -- tenant soft-deletes and membership updates below.
+    PERFORM set_config('app.actor_id', COALESCE(p_requested_by, ''), true);
+
     UPDATE identities
        SET deleted_at = v_now, purge_after = v_purge_after, delete_requested_by = p_requested_by
      WHERE id = p_id AND deleted_at IS NULL
@@ -63,9 +69,24 @@ BEGIN
                 VALUES ('tenants', v_tenant_id::text, p_requested_by, v_now, v_purge_after);
             END IF;
 
-            UPDATE tenant_memberships
-               SET status = 'removed', updated_at = v_now
-             WHERE tenant_id = v_tenant_id AND status <> 'removed';
+            -- Best-effort — do NOT assume this platform's tenant_memberships
+            -- has exactly the columns `tenant-governance` declares. A
+            -- platform that generated soft-delete's default --tables
+            -- (identities+tenants) WITHOUT ever running `php stone generate
+            -- tenant-governance`, or with a customized tenant_memberships
+            -- schema, would otherwise get an undefined_column error here
+            -- that aborts the ENTIRE identity-deletion request for reasons
+            -- completely unrelated to what the user asked for. The tenant
+            -- itself is already correctly soft-deleted above regardless —
+            -- membership bookkeeping is simply skipped if this platform's
+            -- schema doesn't match, never a hard failure of the request.
+            BEGIN
+                UPDATE tenant_memberships
+                   SET status = 'removed', updated_at = v_now
+                 WHERE tenant_id = v_tenant_id AND status <> 'removed';
+            EXCEPTION WHEN undefined_column THEN
+                NULL;
+            END;
         END LOOP;
     END IF;
 

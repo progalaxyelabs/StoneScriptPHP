@@ -70,9 +70,22 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "  - src/postgresql/{main/postgresql/,}functions/purge_expired_deletions.pgsql\n";
     echo "  - src/postgresql/{main/postgresql/,}functions/is_email_blocked.pgsql (if an email table is configured)\n";
     echo "  - src/App/Database/Functions/Fn*.php (via php stone generate model, for the request/restore/is_email_blocked fns)\n\n";
+    echo "Also PATCHES each configured table's own declarative file (tables/<table>.pgsql)\n";
+    echo "with the same 3 columns, when it can find one — keeps the gateway's\n";
+    echo "verify_schema step (compares live columns to the declarative source,\n";
+    echo "read-only, runs LAST) from permanently flagging drift.\n\n";
     echo "Restore is SUPPORT-ONLY by design — no self-service cancel-deletion\n";
     echo "route is generated anywhere. purge_expired_deletions() is not wired to\n";
     echo "any scheduler — cron/wire it into this platform's own daily job yourself.\n";
+    echo "It returns (table, purged_count, error) per table — ANY failure on one\n";
+    echo "table (FK violation, or a custom trigger exception) is reported there\n";
+    echo "and does NOT block any other table's purge in the same run.\n\n";
+    echo "KNOWN LIMITATION: a tenant currently cannot be purged while\n";
+    echo "tenant-governance's creator-protection trigger still has its founder's\n";
+    echo "membership row (which is always, by design) — see\n";
+    echo "purge_expired_deletions()'s own comment. Reported via o_error, not\n";
+    echo "silently swallowed; resolving it needs a coordinated change to\n";
+    echo "tenant-governance itself.\n";
     exit(0);
 }
 
@@ -227,6 +240,72 @@ function relativeToRoot2(string $root, string $path): string
     return $path;
 }
 
+/**
+ * Keep a table's DECLARATIVE definition (src/postgresql/.../tables/<table>.pgsql)
+ * in sync with the ADD COLUMN migration. The gateway's table-deploy step is
+ * declarative and NEVER alters an already-existing table on its own — only
+ * migrations do — and its read-only verify_schema step (which runs LAST,
+ * after migrations) compares live columns against that declarative file.
+ * Leaving it un-patched means every future deploy sees permanent drift
+ * between "what verify_schema expects" and "what this migration actually
+ * added" — the same class of bug as any generator that ALTERs a table via
+ * migration without updating its own declarative source.
+ *
+ * Deliberately conservative: this is a plain-text patch of a file this
+ * generator does NOT own (it belongs to whichever generator/hand-written
+ * migration originally declared the table), so it only acts when it can
+ * locate an unambiguous insertion point — a `CREATE TABLE [IF NOT EXISTS]
+ * <table> (` header followed, somewhere after it, by a `);` on its own
+ * line (the closing paren of that CREATE TABLE — the formatting convention
+ * every table template in this framework already follows). If it can't
+ * confidently find that shape, it does NOT guess: it reports 'ambiguous'
+ * and leaves the file untouched, printing an explicit manual-fix
+ * instruction rather than risking corrupting someone else's schema file.
+ *
+ * @return 'patched'|'already_patched'|'not_found'|'ambiguous'
+ */
+function patchDeclarativeTableForSoftDelete(string $filePath, string $table): string
+{
+    if (!file_exists($filePath)) {
+        return 'not_found';
+    }
+
+    $content = file_get_contents($filePath);
+
+    if (preg_match('/\bdeleted_at\b/i', $content)) {
+        return 'already_patched';
+    }
+
+    if (!preg_match('/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?' . preg_quote($table, '/') . '\s*\(/i', $content, $headerMatch, PREG_OFFSET_CAPTURE)) {
+        return 'not_found';
+    }
+    $searchFrom = $headerMatch[0][1] + strlen($headerMatch[0][0]);
+
+    if (!preg_match('/\n\)\s*;/', $content, $closeMatch, PREG_OFFSET_CAPTURE, $searchFrom)) {
+        return 'ambiguous';
+    }
+    $closePos = $closeMatch[0][1];
+
+    $head = rtrim(substr($content, 0, $closePos));
+    $tail = substr($content, $closePos);
+
+    if ($head === '' || substr($head, -1) !== ',') {
+        $head .= ',';
+    }
+
+    $newColumns = "\n\n    -- Added by `php stone generate soft-delete` — kept in sync with the\n"
+        . "    -- ADD COLUMN migration (migrations/*_create_soft_delete.pgsql) so this\n"
+        . "    -- declarative file never drifts from live reality (see that migration's\n"
+        . "    -- header comment for why that matters to the gateway's verify_schema step).\n"
+        . "    deleted_at TIMESTAMPTZ,\n"
+        . "    purge_after TIMESTAMPTZ,\n"
+        . "    delete_requested_by TEXT";
+
+    file_put_contents($filePath, $head . $newColumns . $tail);
+
+    return 'patched';
+}
+
 // ── 1. Declarative archive table ──────────────────────────────────────
 echo "\n→ Creating declarative table file...\n";
 $tableDst = $tablesDir . DIRECTORY_SEPARATOR . '_deletion_archive.pgsql';
@@ -271,10 +350,20 @@ foreach ($tables as $table => $pk) {
 }
 
 // purge_expired_deletions() — one shared function, per-table blocks inside.
+// 'tenants' gets a DIFFERENT block with a WHEN OTHERS handler documenting a
+// known, unresolved conflict with tenant-governance's creator-protection
+// trigger (see that block template's own comment — it blocks purging any
+// tenant with an active founder membership row); every other table gets
+// the generic block.
 $purgeBlockTpl = file_get_contents($templatesPath . 'functions' . DIRECTORY_SEPARATOR . '_purge_table_block.pgsql.template');
+$purgeBlockTenantsTpl = file_get_contents($templatesPath . 'functions' . DIRECTORY_SEPARATOR . '_purge_table_block_tenants.pgsql.template');
 $purgeBlocks = [];
-foreach (array_keys($tables) as $table) {
-    $purgeBlocks[] = str_replace('__TABLE__', $table, $purgeBlockTpl);
+foreach ($tables as $table => $pk) {
+    if ($table === 'tenants') {
+        $purgeBlocks[] = $purgeBlockTenantsTpl;
+    } else {
+        $purgeBlocks[] = str_replace(['__TABLE__', '__PK_COLUMN__'], [$table, $pk], $purgeBlockTpl);
+    }
 }
 $purgeContent = str_replace(
     '__PURGE_TABLE_BLOCKS__',
@@ -327,6 +416,36 @@ if ($existingMigration !== null) {
     echo "    ($migrationNote)\n";
 }
 
+// ── 3b. Patch each table's OWN declarative file (keep declarative == reality) ─
+echo "\n→ Patching declarative table files (deleted_at/purge_after/delete_requested_by)...\n";
+foreach (array_keys($tables) as $table) {
+    $declarativeFile = $tablesDir . DIRECTORY_SEPARATOR . "{$table}.pgsql";
+    $result = patchDeclarativeTableForSoftDelete($declarativeFile, $table);
+    switch ($result) {
+        case 'patched':
+            echo "  ✓ Patched: " . relativeToRoot2(ROOT_PATH, $declarativeFile) . "\n";
+            break;
+        case 'already_patched':
+            echo "  Skipped (already has deleted_at): " . relativeToRoot2(ROOT_PATH, $declarativeFile) . "\n";
+            break;
+        case 'not_found':
+            echo "  ⓘ No declarative file at " . relativeToRoot2(ROOT_PATH, $declarativeFile) . " for table '$table'\n";
+            echo "    — nothing to patch (this table is likely declared purely via a\n";
+            echo "    migration, e.g. `php stone generate auth:email-password`'s users\n";
+            echo "    table; if it DOES have a declarative file under a different name,\n";
+            echo "    add deleted_at/purge_after/delete_requested_by to it by hand).\n";
+            break;
+        case 'ambiguous':
+            echo "  ⚠️  Could not confidently locate the CREATE TABLE closing paren in\n";
+            echo "     " . relativeToRoot2(ROOT_PATH, $declarativeFile) . " — left UNTOUCHED to avoid\n";
+            echo "     corrupting it. Add these columns to it BY HAND:\n";
+            echo "       deleted_at TIMESTAMPTZ,\n";
+            echo "       purge_after TIMESTAMPTZ,\n";
+            echo "       delete_requested_by TEXT\n";
+            break;
+    }
+}
+
 // ── 4. Model wrappers (php stone generate model) ──────────────────────────
 echo "\n→ Generating model wrappers (php stone generate model)...\n";
 $stoneBinary = $vendorPath . 'stone';
@@ -361,16 +480,23 @@ echo "\n✅ Soft-delete scaffolding complete!\n\n";
 echo "Next steps:\n";
 echo "1. Run migrations: php stone gateway:migrate-main (or php stone migrate up /\n";
 echo "   gateway:migrate-tenant, whichever database you generated this against).\n";
-echo "2. Wire purge_expired_deletions() into a daily cron/scheduler yourself —\n";
+echo "   Watch the migration output for 'soft-delete: table \"...\" does not\n";
+echo "   exist' WARNINGs — that means a configured table wasn't there yet and\n";
+echo "   its columns did NOT get added; create the table and re-run.\n";
+echo "2. If any declarative table file above was reported 'ambiguous' or\n";
+echo "   'no declarative file', add deleted_at/purge_after/delete_requested_by\n";
+echo "   to it by hand — otherwise skip, it's already handled.\n";
+echo "3. Wire purge_expired_deletions() into a daily cron/scheduler yourself —\n";
 echo "   the framework ships no scheduler. Run `php stone generate audit` FIRST\n";
 echo "   (on the same tables) if you want the purge's DELETE to leave an\n";
 echo "   immutable trail.\n";
-echo "3. Call is_email_blocked(email) from your signin AND signup routes —\n";
+echo "4. Call is_email_blocked(email) from your signin AND signup routes —\n";
 echo "   on true, return \"invalid email, contact support\", not the generic\n";
-echo "   wrong-password / already-registered messaging.\n";
-echo "4. Filter every read query on the configured tables with `deleted_at IS\n";
+echo "   wrong-password / already-registered messaging. A restored (support_\n";
+echo "   restore'd) row is correctly NOT blocked.\n";
+echo "5. Filter every read query on the configured tables with `deleted_at IS\n";
 echo "   NULL` — this generator does not touch existing read routes/functions,\n";
 echo "   you must add the filter to each one yourself.\n";
-echo "5. Restore is support-only: call support_restore_<table>_deletion(id,\n";
+echo "6. Restore is support-only: call support_restore_<table>_deletion(id,\n";
 echo "   actor_id) directly (e.g. from an internal admin tool) — no\n";
 echo "   self-service cancel route is generated.\n";

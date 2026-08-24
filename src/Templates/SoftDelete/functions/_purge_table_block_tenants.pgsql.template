@@ -1,0 +1,58 @@
+    BEGIN
+        IF to_regclass('tenants') IS NOT NULL THEN
+            WITH deleted_rows AS (
+                DELETE FROM tenants
+                 WHERE deleted_at IS NOT NULL AND purge_after < NOW()
+                RETURNING uuid::text AS subject_id, deleted_at
+            )
+            SELECT
+                COALESCE(array_agg(subject_id), ARRAY[]::text[]),
+                COALESCE(array_agg(deleted_at), ARRAY[]::timestamptz[])
+              INTO v_deleted_ids, v_deleted_ats
+              FROM deleted_rows;
+
+            v_count := COALESCE(array_length(v_deleted_ids, 1), 0);
+
+            -- Paired on (subject_id, deleted_at) — see
+            -- _purge_table_block.pgsql.template's comment for why subject_id
+            -- alone is not precise enough (restore-then-redelete cycles).
+            IF v_count > 0 THEN
+                UPDATE _deletion_archive a
+                   SET purged = true, purged_at = NOW()
+                  FROM unnest(v_deleted_ids, v_deleted_ats) AS d(subject_id, deleted_at)
+                 WHERE a.source_table = 'tenants'
+                   AND a.subject_id = d.subject_id
+                   AND a.deleted_at = d.deleted_at
+                   AND a.purged = false;
+            END IF;
+
+            RETURN QUERY SELECT 'tenants'::TEXT, v_count, NULL::TEXT;
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        -- KNOWN, DOCUMENTED LIMITATION (not silently papered over): the
+        -- DELETE above relies on tenant_memberships.tenant_id REFERENCES
+        -- tenants(uuid) ON DELETE CASCADE (from `php stone generate
+        -- tenant-governance`) to clean up memberships automatically. That
+        -- CASCADE performs a real per-row DELETE on tenant_memberships,
+        -- which fires THAT table's own trg_protect_tenant_creator trigger —
+        -- and that trigger unconditionally REFUSES to hard-delete any row
+        -- with is_tenant_creator=true (by design: "Suspend... instead of
+        -- deleting", see its own source comment). Since every tenant has
+        -- exactly one such row (its founder), this means a tenant can
+        -- currently NEVER be purged while tenant-governance's
+        -- creator-protection trigger is active, until tenant-governance
+        -- itself ships a sanctioned way to release that protection for a
+        -- legitimate whole-tenant purge (e.g. an explicit signal the
+        -- trigger checks, or a dedicated release-creator function) — a
+        -- coordinated fix in THAT generator, out of scope here.
+        --
+        -- WHEN OTHERS (not just foreign_key_violation) is deliberate: it
+        -- also catches that trigger's custom RAISE EXCEPTION (a different
+        -- SQLSTATE), and any OTHER platform-added trigger/constraint that
+        -- might similarly block this table's purge — reporting it via
+        -- o_error for 'tenants' ONLY, without wedging or rolling back any
+        -- other table's already-completed purge in the same run (this
+        -- BEGIN/EXCEPTION is its own sub-transaction/savepoint). Retried
+        -- automatically on the next scheduled run.
+        RETURN QUERY SELECT 'tenants'::TEXT, 0, SQLERRM;
+    END;

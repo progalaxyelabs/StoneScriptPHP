@@ -88,14 +88,47 @@ class GenerateSoftDeleteCommandTest extends TestCase
         $this->assertStringContainsString('tenant_memberships.is_tenant_creator', $identitiesFn);
         $this->assertStringContainsString("to_regclass('tenant_memberships')", $identitiesFn);
         $this->assertStringContainsString('SECURITY DEFINER', $identitiesFn);
+        // "Who" on deletion (set_config), and defensive against a
+        // tenant_memberships schema that doesn't have status/updated_at.
+        $this->assertStringContainsString("set_config('app.actor_id'", $identitiesFn);
+        $this->assertStringContainsString('EXCEPTION WHEN undefined_column', $identitiesFn);
 
         $tenantsFn = file_get_contents($mainBase . 'functions/request_tenants_deletion.pgsql');
         $this->assertStringContainsString('CREATE OR REPLACE FUNCTION request_tenants_deletion', $tenantsFn);
+        $this->assertStringContainsString("set_config('app.actor_id'", $tenantsFn);
 
         $this->assertFileExists($mainBase . 'functions/support_restore_identities_deletion.pgsql');
         $this->assertFileExists($mainBase . 'functions/support_restore_tenants_deletion.pgsql');
         $this->assertFileExists($mainBase . 'functions/purge_expired_deletions.pgsql');
         $this->assertFileExists($mainBase . 'functions/is_email_blocked.pgsql');
+
+        // is_email_blocked: live row authoritative (restore-is-dead fix),
+        // hardened with SECURITY DEFINER + search_path.
+        $emailBlockedFn = file_get_contents($mainBase . 'functions/is_email_blocked.pgsql');
+        $this->assertStringContainsString('v_live_found', $emailBlockedFn);
+        $this->assertStringContainsString('purged = true', $emailBlockedFn);
+        $this->assertStringContainsString('SECURITY DEFINER', $emailBlockedFn);
+        $this->assertStringContainsString('SET search_path', $emailBlockedFn);
+
+        // support_restore: search_path pinned too, for consistency.
+        $restoreFn = file_get_contents($mainBase . 'functions/support_restore_identities_deletion.pgsql');
+        $this->assertStringContainsString('SET search_path', $restoreFn);
+
+        // purge_expired_deletions: per-table exception handling + o_error +
+        // archive purge keyed on actual deleted subject_ids, not a blanket filter.
+        $purgeFn = file_get_contents($mainBase . 'functions/purge_expired_deletions.pgsql');
+        $this->assertStringContainsString('o_error TEXT', $purgeFn);
+        $this->assertStringContainsString('EXCEPTION WHEN OTHERS', $purgeFn);
+        // Keyed on (subject_id, deleted_at) pairs, not subject_id alone —
+        // see _purge_table_block.pgsql.template's comment for why.
+        $this->assertStringContainsString('unnest(v_deleted_ids, v_deleted_ats)', $purgeFn);
+        $this->assertStringContainsString('a.deleted_at = d.deleted_at', $purgeFn);
+        // Known, documented limitation: tenant-governance's creator-protection
+        // trigger currently blocks purging a tenant with an active founder
+        // membership row — WHEN OTHERS (not just foreign_key_violation)
+        // catches that custom exception too, isolated to the tenants block.
+        $this->assertStringContainsString('WHEN OTHERS', $purgeFn);
+        $this->assertStringContainsString('trg_protect_tenant_creator', $purgeFn);
 
         $migration = $mainBase . 'migrations/038_create_soft_delete.pgsql';
         $this->assertFileExists($migration);
@@ -103,10 +136,16 @@ class GenerateSoftDeleteCommandTest extends TestCase
         $this->assertStringContainsString('CREATE TABLE IF NOT EXISTS _deletion_archive', $sql);
         $this->assertStringContainsString('REVOKE UPDATE, DELETE, TRUNCATE ON _deletion_archive', $sql);
         $this->assertStringContainsString('GRANT UPDATE (purged, purged_at) ON _deletion_archive', $sql);
+        $this->assertStringContainsString('RAISE WARNING', $sql);
         foreach (['identities', 'tenants'] as $table) {
             $this->assertStringContainsString("ALTER TABLE $table", $sql);
             $this->assertStringContainsString('ADD COLUMN IF NOT EXISTS deleted_at', $sql);
         }
+
+        // Declarative table files patched (fix for schema-sync drift) —
+        // this fixture has no pre-existing identities.pgsql/tenants.pgsql,
+        // so the generator must report 'not_found' cleanly, not crash.
+        $this->assertStringContainsString('No declarative file', $outputText);
 
         // Mandatory destructive-DDL self-check (system prompt §7) — additive
         // ALTER TABLE ADD COLUMN is fine; assert no drops/truncate-statements/
@@ -130,6 +169,43 @@ class GenerateSoftDeleteCommandTest extends TestCase
             $this->assertFileExists($wrapper, "missing model wrapper $class");
             $this->assertPhpSyntaxValid($wrapper);
         }
+    }
+
+    public function test_patches_existing_declarative_table_file(): void
+    {
+        $fixture = $this->buildFixture(nested: true);
+        $mainBase = $fixture . 'src/postgresql/main/postgresql/';
+
+        $identitiesTable = $mainBase . 'tables/identities.pgsql';
+        file_put_contents($identitiesTable, <<<SQL
+        CREATE TABLE IF NOT EXISTS identities (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_identities_email ON identities(email);
+        SQL);
+
+        [$exitCode, $output] = $this->runGenerator($fixture, '--tables=identities:id');
+        $outputText = implode("\n", $output);
+        $this->assertSame(0, $exitCode, $outputText);
+        $this->assertStringContainsString('Patched', $outputText);
+
+        $patched = file_get_contents($identitiesTable);
+        $this->assertStringContainsString('deleted_at TIMESTAMPTZ', $patched);
+        $this->assertStringContainsString('purge_after TIMESTAMPTZ', $patched);
+        $this->assertStringContainsString('delete_requested_by TEXT', $patched);
+        // The trailing CREATE INDEX (unrelated to the CREATE TABLE block)
+        // must survive untouched, proving the patch found the CORRECT
+        // closing paren rather than some later one.
+        $this->assertStringContainsString('CREATE INDEX IF NOT EXISTS idx_identities_email', $patched);
+
+        // Idempotent — a second run must not double-patch.
+        [$exitCode2, $output2] = $this->runGenerator($fixture, '--tables=identities:id');
+        $this->assertSame(0, $exitCode2);
+        $this->assertStringContainsString('already has deleted_at', implode("\n", $output2));
+        $this->assertSame(1, substr_count(file_get_contents($identitiesTable), 'deleted_at TIMESTAMPTZ'));
     }
 
     public function test_no_cascade_when_tenants_not_configured(): void
