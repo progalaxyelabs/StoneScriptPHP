@@ -1,9 +1,9 @@
-# Scoped PHPStan config for the typed-request-binder feature
-# (SPEC-typed-request-binder.md) — run at `level: max`, the bar the task
-# brief asked for on the NEW code specifically. The framework's own baseline
-# config (phpstan.neon) stays at level 5 (the fleet standard) for the
-# pre-existing ~30k-line codebase; ratcheting the whole framework to max is a
-# separate, much larger effort outside this feature's scope.
+# Scoped PHPStan config for the typed-request-binder feature — run at
+# `level: max`, a stricter bar than the framework's baseline, applied to the
+# NEW code specifically. The framework's own baseline config (phpstan.neon)
+# stays at level 5 for the pre-existing ~30k-line codebase; ratcheting the
+# whole framework to max is a separate, much larger effort outside this
+# feature's scope.
 #
 # Run: php vendor/bin/phpstan analyse -c phpstan-binding.neon
 parameters:

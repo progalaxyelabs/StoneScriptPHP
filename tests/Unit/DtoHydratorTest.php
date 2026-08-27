@@ -117,9 +117,7 @@ final class HydratorTestTypedArrayMissingAttribute
 }
 
 /**
- * The authoritative test matrix for StoneScriptPHP\Binding\DtoHydrator —
- * see SPEC-typed-request-binder.md §9 for the checklist this file
- * implements.
+ * The authoritative test matrix for StoneScriptPHP\Binding\DtoHydrator.
  */
 final class DtoHydratorTest extends TestCase
 {

@@ -13,11 +13,6 @@ namespace StoneScriptPHP\Binding;
  * arrays-of-DTO (via the {@see ArrayOf} attribute, or a `@param X[] $name`
  * constructor docblock fallback), and backed enums (`Enum::from()`).
  *
- * Design + the full test matrix are documented in
- * SPEC-typed-request-binder.md (framework repo root's companion doc,
- * committed alongside this class) — read that first if you're modifying
- * this file's binding rules.
- *
  * Every error encountered anywhere in the object graph is collected before
  * throwing (never fail-fast) so a single {@see BindingException} reports
  * every broken field/row in one 400 response — required for the

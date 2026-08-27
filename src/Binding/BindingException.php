@@ -7,10 +7,10 @@ namespace StoneScriptPHP\Binding;
 /**
  * Thrown by {@see DtoHydrator} when the request payload cannot be bound to
  * the declared DTO shape — a shape/type/presence problem, never a business
- * rule. Carries every collected error (hydration does not fail fast — see
- * SPEC-typed-request-binder.md §4) in the same `{line, field, message}`
- * shape every hand-rolled per-line validator in the fleet already emits, so
- * `Router` can hand it straight to `ApiResponse`'s `$errors` slot.
+ * rule. Carries every collected error (hydration does not fail fast, so
+ * every problem is reported at once rather than one-at-a-time) in the same
+ * `{line, field, message}` shape a hand-rolled per-line validator would
+ * emit, so `Router` can hand it straight to `ApiResponse`'s `$errors` slot.
  */
 class BindingException extends \RuntimeException
 {

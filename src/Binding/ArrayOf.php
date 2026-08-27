@@ -13,9 +13,8 @@ use Attribute;
  * `array $rows` parameter is a list of `RowInput`" for {@see DtoHydrator}.
  *
  * Preferred over the `@param RowInput[] $rows` docblock convention (which
- * DtoHydrator still supports as a zero-edit fallback for existing DTOs —
- * see SPEC-typed-request-binder.md §4) because it is statically checkable
- * and immune to docblock drift/typos.
+ * DtoHydrator still supports as a zero-edit fallback for existing DTOs)
+ * because it is statically checkable and immune to docblock drift/typos.
  *
  * Usage (legacy — `array $rows`, bare array, back-compat, unchanged):
  *   public function __construct(

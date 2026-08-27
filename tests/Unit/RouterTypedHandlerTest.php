@@ -49,7 +49,7 @@ final class RouterTypedHandlerMismatchedRoute implements ITypedRouteHandler
 
 /**
  * End-to-end regression guard for the ITypedRouteHandler dispatch path in
- * Router::executeHandler() — see SPEC-typed-request-binder.md §5.
+ * Router::executeHandler().
  */
 final class RouterTypedHandlerTest extends TestCase
 {

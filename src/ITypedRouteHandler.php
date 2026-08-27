@@ -5,9 +5,8 @@ declare(strict_types=1);
 namespace StoneScriptPHP;
 
 /**
- * Marker interface for the typed-request-binder route pattern
- * (SPEC-typed-request-binder.md). Implementing classes must additionally
- * declare exactly one public method:
+ * Marker interface for the typed-request-binder route pattern.
+ * Implementing classes must additionally declare exactly one public method:
  *
  *   public function execute(FooRequest $request): FooResponse
  *

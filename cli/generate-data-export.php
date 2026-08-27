@@ -4,8 +4,7 @@
  * Data-Export Generator
  *
  * Scaffolds the async, streaming, resource-capped user-data-download
- * feature (owner priority — see work-management's
- * DESIGN-2026-08-24-audit-softdelete-export.md §3/§4) into the CONSUMING
+ * feature (owner priority) into the CONSUMING
  * platform's OWN database + codebase:
  *   - data_export_jobs table (queued/running/succeeded/failed/expired, with
  *     race-free admission control — one open export per requester+scope+tenant)
