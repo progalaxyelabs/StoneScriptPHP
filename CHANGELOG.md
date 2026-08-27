@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.10.0] - 2026-08-27
+
+### Added — `generate android-server` can now ship a reduced route + handler surface
+
+Previously `php stone generate android-server` copied `src/App/Routes/`
+wholesale into the offline bundle regardless of which routes the offline
+app actually served — every admin/subscription/invitations/auth handler
+file shipped byte-for-byte even though the runtime route table already
+excluded most of them. A clone of the offline app got the entire server
+codebase, not just the offline-reachable slice of it. Two new, fully
+opt-in and backward-compatible capabilities close this:
+
+- **Trimmed route table.** If the source project ships
+  `src/config/routes-android-server.php` (same array shape as
+  `routes.php` — a hand-maintained subset of only the routes the offline
+  app needs), the generator uses it as the effective route table instead
+  of the full `routes.php`. Absent that file, behavior is unchanged: the
+  full `routes.php` plus the existing admin/auth exclusion policy, which
+  now also runs as a defense-in-depth safety net on top of a trimmed
+  table too. The effective source is still preserved byte-identically as
+  `routes.original.php` (audit trail) — and when trimming is active, the
+  full untrimmed `routes.php` is no longer shipped alongside it, so
+  excluded routes' paths/handler names don't leak into the artifact
+  either.
+- **Handler pruning.** After the effective route table is resolved, any
+  `App\Routes\*` handler `.php` file that is not the target of a kept
+  route is deleted from the generated tree. Pruning is conservative by
+  design: it never touches anything outside `src/App/Routes/` (DTOs,
+  Lib, Database wrappers, framework code always ship in full), it keeps
+  a file if any KEPT handler's own source still textually references
+  its class name (cross-reference safety net against the "handlers are
+  leaves" assumption being wrong for some platform), and it skips
+  pruning entirely — falling back to shipping everything — if any kept
+  route's handler can't be resolved to a concrete file (e.g. a legacy
+  bare-classname handler string). `GENERATED-README.md` and the CLI
+  summary now report kept/pruned handler counts and the effective route
+  source for auditability.
+
+Verified with a new fixture (`tests/Unit/AndroidServerGeneratorTest.php`)
+exercising both a full and a trimmed route table against a generic
+`App\Routes\*` tree: the trimmed run ships strictly fewer routes (2 vs 4)
+and fewer handler files (3 vs 4) than the full run, the pruned set
+exactly matches each route table's reachable handlers, and every kept
+handler is proven bootable — a PSR-4 autoloader is registered directly
+against the GENERATED output tree and each kept handler class is
+instantiated and its `process()` invoked, asserting a real `ApiResponse`
+comes back. The original three pre-existing generator tests (no
+`routes-android-server.php`, no `src/App/Routes/` directory at all) still
+pass unmodified, confirming byte-for-byte backward compatibility for any
+project that doesn't opt in.
+
 ### Fixed — soft-deleted tenants could never be purged (`generate soft-delete` × `generate tenant-governance`)
 
 `purge_expired_deletions()`'s tenants block relies on `tenants(uuid) ON

@@ -23,14 +23,47 @@
  *     generator only produces the manifest it consumes)
  *   - a `.env` offline profile with DB_MODE=pgandroid
  *
+ * SHIPPED SURFACE REDUCTION (added 2026-08-27, both opt-in and fully
+ * backward-compatible — a project with neither addition generates exactly
+ * as before):
+ *
+ *   1. Trimmed route table: if the source project ships
+ *      `src/config/routes-android-server.php` (same array shape as
+ *      routes.php — a hand-maintained subset of only the routes the
+ *      offline app actually needs), the generator uses THAT as the route
+ *      table instead of the full `routes.php`. Absent that file, behavior
+ *      is unchanged: the full routes.php + the admin/auth exclusion policy
+ *      below. Either way the effective table still goes through
+ *      `routes.original.php` as the audit trail, and the admin/auth
+ *      exclusion policy still runs on top as a second, defense-in-depth
+ *      safety net.
+ *   2. Handler pruning: previously `copyDirRecursive()` shipped the ENTIRE
+ *      `src/App/Routes/` tree regardless of the effective route table —
+ *      every admin/subscription/invitations/auth handler file, reachable
+ *      or not, went into the artifact byte-for-byte. Now, after the
+ *      effective route table is known, `pruneUnusedRouteHandlers()` deletes
+ *      any `App\Routes\*` handler `.php` file that is NOT the target of a
+ *      kept route, with a conservative textual cross-reference check
+ *      against every KEPT handler's source before deleting anything (route
+ *      handlers are leaves by convention — nothing else `use`s them —
+ *      but this is a cheap belt-and-suspenders check against that
+ *      assumption being wrong for some platform). Only `App\Routes\*` is
+ *      touched; DTOs/Lib/Database wrappers/framework code are never
+ *      pruned. If any kept handler can't be resolved to a file (e.g. it
+ *      isn't a fully-qualified `App\Routes\...` class string), pruning is
+ *      skipped entirely for that run and a warning is emitted — a
+ *      smaller-but-correct artifact beats a broken one, so the fallback is
+ *      "keep everything," never "guess."
+ *
  * Full reasoning + evidence this was built from:
  *   divisions/opensource/libphpandroid/docs/ANDROID-SERVER-DESIGN.md
  *
  * This file intentionally contains NO platform-specific names/schema — the
  * policy defaults are generic across any StoneScriptPHP project using the
  * conventional src/config/routes.php + src/postgresql/ layout. Platforms
- * override policy via src/config/android-server-policy.php and
- * src/config/android-server-schema-policy.php (both optional).
+ * override policy via src/config/android-server-policy.php,
+ * src/config/android-server-schema-policy.php, and (new) an optional
+ * src/config/routes-android-server.php trimmed route table (all optional).
  */
 
 require_once __DIR__ . '/generate-common.php';
@@ -80,12 +113,13 @@ final class AndroidServerGenerator
         }
 
         $routeStats = $this->transformRoutes();
+        $pruneStats = $this->pruneUnusedRouteHandlers($routeStats);
         $schemaStats = $this->generateSchemaManifest();
         $this->runSafetyNetCheck($routeStats, $schemaStats);
         $this->generateEnv();
-        $this->writeReadme($routeStats, $schemaStats);
+        $this->writeReadme($routeStats, $schemaStats, $pruneStats);
 
-        $this->printSummary($routeStats, $schemaStats);
+        $this->printSummary($routeStats, $schemaStats, $pruneStats);
     }
 
     // ── setup ────────────────────────────────────────────────────────────
@@ -122,18 +156,48 @@ final class AndroidServerGenerator
     // ── routes.php transform (design doc §3) ────────────────────────────
 
     /**
-     * @return array{included:int, excluded:int, excluded_paths:string[], included_handlers:string[]}
+     * @return array{included:int, excluded:int, excluded_paths:string[], included_handlers:string[], route_source:string}
      */
     private function transformRoutes(): array
     {
-        echo Color::blue("→ transforming routes.php (exclude admin/auth-provisioning routes only)...\n");
+        // Opt-in trimmed route table: a source project may ship
+        // src/config/routes-android-server.php — a hand-maintained subset
+        // of only the routes the offline app needs, same array shape as
+        // routes.php. If present, it becomes the effective route table
+        // instead of the full routes.php. Absent, behavior is byte-for-byte
+        // what it was before this capability existed.
+        $trimmedSourceFile = $this->configPath . 'routes-android-server.php';
+        $usingTrimmedFile = file_exists($trimmedSourceFile);
+        $routeSourceLabel = $usingTrimmedFile
+            ? 'trimmed (src/config/routes-android-server.php)'
+            : 'full (src/config/routes.php + admin/auth exclusion policy)';
+
+        echo Color::blue($usingTrimmedFile
+            ? "→ using trimmed route table (src/config/routes-android-server.php)...\n"
+            : "→ transforming routes.php (exclude admin/auth-provisioning routes only)...\n");
 
         $configOut = $this->outputPath . 'src' . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR;
 
-        // Preserve the byte-identical original next to the generated wrapper —
-        // an audit trail: anyone can diff routes.original.php against the
-        // source project's routes.php and see nothing was hand-edited.
-        rename($configOut . 'routes.php', $configOut . 'routes.original.php');
+        // Preserve the byte-identical EFFECTIVE source next to the generated
+        // wrapper — an audit trail: anyone can diff routes.original.php
+        // against the source project's routes.php (or, when trimmed, its
+        // routes-android-server.php) and see nothing was hand-edited.
+        if ($usingTrimmedFile) {
+            // The trimmed file was already copied byte-for-byte into the
+            // output tree by the plain src/ copy (it lives under
+            // src/config/ like any other app config file). Promote it to be
+            // the audit-trail "original" and DO NOT ship the full,
+            // untrimmed routes.php alongside it — shipping the full route
+            // table (even just as inert data) would still leak every
+            // excluded route's path + handler class name, defeating the
+            // point of trimming.
+            if (file_exists($configOut . 'routes.php')) {
+                unlink($configOut . 'routes.php');
+            }
+            rename($configOut . 'routes-android-server.php', $configOut . 'routes.original.php');
+        } else {
+            rename($configOut . 'routes.php', $configOut . 'routes.original.php');
+        }
 
         // Ship the default policy into the OUTPUT tree itself (not a vendor
         // lookup at runtime) so the generated app has zero dependency on the
@@ -148,14 +212,21 @@ final class AndroidServerGenerator
         file_put_contents($configOut . 'routes.php', $this->routesWrapperSource());
 
         // Compute stats + the included-handler list for the safety-net check
-        // by ACTUALLY APPLYING the policy here (PHP array transform, no
-        // device/DB needed) — same logic the generated wrapper runs at boot,
-        // executed once now so the generator can report + cross-check it.
+        // (and now, handler pruning) by ACTUALLY APPLYING the policy here
+        // (PHP array transform, no device/DB needed) — same logic the
+        // generated wrapper runs at boot, executed once now so the
+        // generator can report + cross-check it. Applying the exclusion
+        // policy on top of the trimmed table too (not just the full one) is
+        // deliberate defense-in-depth: if a hand-maintained trimmed file
+        // ever accidentally includes an admin/auth route, it still gets
+        // dropped here rather than silently shipping.
         $policy = file_exists($this->configPath . 'android-server-policy.php')
             ? require $this->configPath . 'android-server-policy.php'
             : $this->defaultPolicy();
 
-        $routes = require $this->configPath . 'routes.php'; // original, still present in the SOURCE tree
+        // Require from the SOURCE project (untouched throughout), not the
+        // output tree — same file the wrapper resolved to above.
+        $routes = require ($usingTrimmedFile ? $trimmedSourceFile : $this->configPath . 'routes.php');
         $included = 0;
         $excludedPaths = [];
         $includedHandlers = [];
@@ -182,7 +253,206 @@ final class AndroidServerGenerator
             'excluded' => count($excludedPaths),
             'excluded_paths' => $excludedPaths,
             'included_handlers' => array_values(array_unique($includedHandlers)),
+            'route_source' => $routeSourceLabel,
         ];
+    }
+
+    // ── handler pruning (shipped-surface reduction) ─────────────────────
+
+    /**
+     * Delete App\Routes\* handler .php files from the OUTPUT tree that are
+     * not the target of any route in the effective (already-policy-applied)
+     * route table computed by transformRoutes(). Only src/App/Routes/ is
+     * ever touched — DTOs, Lib, Database wrappers, and all framework code
+     * are left exactly as copyDirRecursive() placed them.
+     *
+     * Conservative by design: pruning is skipped ENTIRELY (falling back to
+     * "ship everything," i.e. today's behavior) if any kept handler can't
+     * be resolved to a concrete file under src/App/Routes/ — a
+     * smaller-but-correct artifact beats a broken one, so when in doubt we
+     * do nothing rather than guess. Files that survive the "not targeted by
+     * a kept route" check are still kept if a KEPT handler's own source
+     * textually references their class basename — a cheap belt-and-suspenders
+     * safety net against the (normally true) assumption that route handlers
+     * are leaves nothing else `use`s.
+     *
+     * @return array{pruned:int, kept:int, skipped:bool, skipped_reason:?string, skipped_as_referenced:string[]}
+     */
+    private function pruneUnusedRouteHandlers(array $routeStats): array
+    {
+        $routesDir = $this->outputPath . 'src' . DIRECTORY_SEPARATOR . 'App' . DIRECTORY_SEPARATOR . 'Routes';
+        if (!is_dir($routesDir)) {
+            // Nothing to prune (project has no App\Routes\ tree at all, or
+            // uses a non-standard layout) — leave it alone.
+            return ['pruned' => 0, 'kept' => 0, 'skipped' => true, 'skipped_reason' => 'no src/App/Routes directory', 'skipped_as_referenced' => []];
+        }
+
+        echo Color::blue("→ pruning unused App\\Routes\\* handler files...\n");
+
+        // Only classes fully-qualified under App\Routes\ are candidates for
+        // pruning at all — this matches the router's own contract (handler
+        // strings are always fully-qualified class names, see
+        // Routing/Router.php). Any handler string that does NOT start with
+        // "App\Routes\" is either a legacy bare-classname shorthand (can't
+        // be reliably resolved to a file — ambiguous) or intentionally
+        // lives outside App\Routes\ — either way we can't safely prune
+        // relative to it, so its presence forces a whole-run skip.
+        $unresolvable = [];
+        $keepClasses = [];
+        foreach ($routeStats['included_handlers'] as $handler) {
+            $normalized = ltrim($handler, '\\');
+            if (str_starts_with($normalized, 'App\\Routes\\')) {
+                $keepClasses[] = $normalized;
+            } elseif (str_starts_with($normalized, 'App\\')) {
+                // A resolvable App\-namespaced class, just not under
+                // App\Routes\ — not a pruning candidate, no ambiguity.
+                continue;
+            } else {
+                $unresolvable[] = $handler;
+            }
+        }
+
+        if (!empty($unresolvable)) {
+            $this->warnings[] = 'Handler pruning skipped entirely: ' . count($unresolvable) .
+                ' route handler(s) in the effective route table are not fully-qualified App\\Routes\\* ' .
+                'class strings (e.g. legacy bare classname shorthand), so this generator cannot ' .
+                'reliably tell which src/App/Routes/ files are actually referenced. Shipping the full, ' .
+                'unpruned src/App/Routes/ tree instead. Affected handler(s): ' . implode(', ', $unresolvable);
+            return ['pruned' => 0, 'kept' => $this->countPhpFilesRecursive($routesDir), 'skipped' => true, 'skipped_reason' => 'unresolvable handler class string(s)', 'skipped_as_referenced' => []];
+        }
+
+        if (empty($keepClasses)) {
+            $this->warnings[] = 'Handler pruning skipped: the effective route table resolved zero ' .
+                'App\\Routes\\* handlers — refusing to prune src/App/Routes/ to avoid shipping a broken ' .
+                'app. Verify routes-android-server.php / routes.php handler entries if this is unexpected.';
+            return ['pruned' => 0, 'kept' => $this->countPhpFilesRecursive($routesDir), 'skipped' => true, 'skipped_reason' => 'no kept App\\Routes\\* handlers resolved', 'skipped_as_referenced' => []];
+        }
+
+        $keepFiles = []; // realpath => true
+        foreach (array_unique($keepClasses) as $class) {
+            $file = $this->handlerClassToFile($class);
+            if ($file !== null && file_exists($file)) {
+                $real = realpath($file);
+                if ($real !== false) {
+                    $keepFiles[$real] = true;
+                    continue;
+                }
+            }
+            // A kept route points at a handler class whose file doesn't
+            // exist in the output tree at all — that's a pre-existing
+            // problem with the route table (would 404/fatal at runtime
+            // regardless of pruning), not something pruning should paper
+            // over. Warn and skip pruning entirely to avoid compounding it.
+            $this->warnings[] = "Handler pruning skipped entirely: kept route handler '{$class}' does not " .
+                "resolve to an existing file under src/App/Routes/ — this route would fail at runtime " .
+                "regardless of pruning. Fix the route table's handler entry, then regenerate.";
+            return ['pruned' => 0, 'kept' => $this->countPhpFilesRecursive($routesDir), 'skipped' => true, 'skipped_reason' => 'kept handler class missing its file', 'skipped_as_referenced' => []];
+        }
+
+        $allFiles = $this->listPhpFilesRecursive($routesDir);
+
+        // Concatenate every KEPT handler's source once, for the cheap
+        // cross-reference safety check below.
+        $keptSource = '';
+        foreach (array_keys($keepFiles) as $f) {
+            $c = file_get_contents($f);
+            if ($c !== false) {
+                $keptSource .= $c . "\n";
+            }
+        }
+
+        $pruned = 0;
+        $kept = 0;
+        $skippedAsReferenced = [];
+        foreach ($allFiles as $file) {
+            $real = realpath($file);
+            if ($real !== false && isset($keepFiles[$real])) {
+                $kept++;
+                continue;
+            }
+            $basename = basename($file, '.php');
+            if ($basename !== '' && preg_match('/\b' . preg_quote($basename, '/') . '\b/', $keptSource) === 1) {
+                // A kept handler's source still mentions this class's
+                // basename (e.g. a shared trait/helper co-located under
+                // Routes/, or one handler composing another) — keep it
+                // rather than risk breaking a kept route.
+                $skippedAsReferenced[] = $this->relativePath($routesDir, $file);
+                $kept++;
+                continue;
+            }
+            unlink($file);
+            $pruned++;
+        }
+
+        $this->removeEmptyDirsRecursive($routesDir);
+
+        return [
+            'pruned' => $pruned,
+            'kept' => $kept,
+            'skipped' => false,
+            'skipped_reason' => null,
+            'skipped_as_referenced' => $skippedAsReferenced,
+        ];
+    }
+
+    /** @return string[] absolute paths of every .php file under $dir, recursively */
+    private function listPhpFilesRecursive(string $dir): array
+    {
+        $result = [];
+        $items = scandir($dir);
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            if (is_dir($path)) {
+                $result = array_merge($result, $this->listPhpFilesRecursive($path));
+            } elseif (str_ends_with($item, '.php')) {
+                $result[] = $path;
+            }
+        }
+        return $result;
+    }
+
+    private function countPhpFilesRecursive(string $dir): int
+    {
+        return count($this->listPhpFilesRecursive($dir));
+    }
+
+    /** Remove now-empty directories left behind by pruning, deepest first. */
+    private function removeEmptyDirsRecursive(string $dir): bool
+    {
+        $items = scandir($dir);
+        $isEmpty = true;
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            if (is_dir($path)) {
+                if ($this->removeEmptyDirsRecursive($path)) {
+                    // subdir removed
+                } else {
+                    $isEmpty = false;
+                }
+            } else {
+                $isEmpty = false;
+            }
+        }
+        if ($isEmpty) {
+            rmdir($dir);
+            return true;
+        }
+        return false;
+    }
+
+    private function relativePath(string $base, string $path): string
+    {
+        $base = rtrim($base, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        if (str_starts_with($path, $base)) {
+            return substr($path, strlen($base));
+        }
+        return $path;
     }
 
     private function routesWrapperSource(): string
@@ -525,7 +795,7 @@ PHP;
 
     // ── output ────────────────────────────────────────────────────────
 
-    private function writeReadme(array $routeStats, array $schemaStats): void
+    private function writeReadme(array $routeStats, array $schemaStats, array $pruneStats): void
     {
         $excludedList = empty($routeStats['excluded_paths'])
             ? "  (none)\n"
@@ -534,6 +804,17 @@ PHP;
         $warningsList = empty($this->warnings)
             ? "  (none)\n"
             : implode("\n", array_map(fn($w) => "  - $w", $this->warnings)) . "\n";
+
+        $pruneSection = $pruneStats['skipped']
+            ? "- pruning SKIPPED — the full src/App/Routes/ tree was shipped unpruned.\n" .
+              "  Reason: {$pruneStats['skipped_reason']}.\n"
+            : "- Handler files kept:   {$pruneStats['kept']}\n" .
+              "- Handler files pruned: {$pruneStats['pruned']}\n" .
+              (empty($pruneStats['skipped_as_referenced'])
+                  ? ''
+                  : "- Kept despite being otherwise unused, because a kept handler's source still " .
+                    "references their class name:\n" .
+                    implode("\n", array_map(fn($p) => "    - $p", $pruneStats['skipped_as_referenced'])) . "\n");
 
         $readme = <<<MD
 # android-server — GENERATED, do not hand-edit
@@ -544,14 +825,19 @@ design reasoning this generator implements.
 
 ## What was generated
 - `src/`, `public/`, `composer.json`/`composer.lock`, `keys/` — copied
-  verbatim from the source project.
-- `src/config/routes.original.php` — byte-identical copy of the source
-  project's real `routes.php` (audit trail).
+  verbatim from the source project, EXCEPT `src/App/Routes/` which is
+  pruned to only the handlers the effective route table actually uses
+  (see "Handler pruning" below).
+- `src/config/routes.original.php` — byte-identical copy of the EFFECTIVE
+  route source ({$routeStats['route_source']}) — audit trail.
 - `src/config/routes.php` — GENERATED wrapper: applies the offline route
   policy (below) on top of the original, unmodified array.
 - `schema-manifest.json` — file list for the on-device schema-bringup
   driver (a separate track; this generator only produces the manifest).
 - `.env` — offline profile (`DB_MODE=pgandroid` + dummy gateway/auth values).
+
+## Route source
+- {$routeStats['route_source']}
 
 ## Route policy applied
 - Included routes: {$routeStats['included']}
@@ -559,6 +845,8 @@ design reasoning this generator implements.
 
 Excluded:
 {$excludedList}
+## Handler pruning
+{$pruneSection}
 ## Schema manifest
 - Layout detected: {$schemaStats['layout']}
 - main:   types={$this->count($schemaStats['main']['types'] ?? [])} tables={$this->count($schemaStats['main']['tables'] ?? [])} views={$this->count($schemaStats['main']['views'] ?? [])} functions={$this->count($schemaStats['main']['functions'] ?? [])} seeders={$this->count($schemaStats['main']['seeders'] ?? [])}
@@ -577,11 +865,17 @@ MD;
         return count($a);
     }
 
-    private function printSummary(array $routeStats, array $schemaStats): void
+    private function printSummary(array $routeStats, array $schemaStats, array $pruneStats): void
     {
         echo "\n";
         echo Color::green("✔ android-server/ generated.\n");
+        echo "  route source: {$routeStats['route_source']}\n";
         echo "  routes:  {$routeStats['included']} included, {$routeStats['excluded']} excluded\n";
+        if ($pruneStats['skipped']) {
+            echo "  handlers: pruning SKIPPED ({$pruneStats['skipped_reason']}) — full src/App/Routes/ shipped\n";
+        } else {
+            echo "  handlers: {$pruneStats['kept']} kept, {$pruneStats['pruned']} pruned\n";
+        }
         echo "  schema:  layout=" . $schemaStats['layout'] . "\n";
         if (!empty($this->warnings)) {
             echo "\n" . Color::yellow("⚠ " . count($this->warnings) . " warning(s):\n");
