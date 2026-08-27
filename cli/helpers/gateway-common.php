@@ -1159,3 +1159,66 @@ function computeSchemaHash(string $dirPath): string
 
     return hash_final($hash);
 }
+
+/**
+ * POST /admin/audit/provision — one-time-per-platform provisioning of the
+ * SIMPLE separate audit-DB pattern (gateway v4.5.0+). Creates {platform}_audit
+ * (owned by the gateway's pre-created gateway_audit_user role, NOT the app's
+ * own runtime role) and lays down its fixed schema (audit_log table +
+ * audit_append/audit_read functions). Idempotent — safe to re-run for an
+ * already-provisioned platform (e.g. after a gateway schema upgrade).
+ *
+ * Admin-auth protected, same as stepProvisionPlatformToken() — this is an
+ * infra-operator action, never something a platform's own deploy triggers
+ * automatically (see stonescriptdb-gateway's src/api/audit.rs docblock).
+ *
+ * @return string The provisioned database name (e.g. "myapp_audit").
+ */
+function stepProvisionAudit(string $gatewayUrl, string $platformId, ?string $adminToken, bool $quiet = false): string
+{
+    if (!$quiet) {
+        echo "Provisioning audit database for '{$platformId}'...\n";
+    }
+
+    if (!$adminToken) {
+        fwrite(STDERR, "ERROR: DB_GATEWAY_ADMIN_TOKEN is required to provision the audit database.\n");
+        fwrite(STDERR, "  Set DB_GATEWAY_ADMIN_TOKEN in your .env or environment.\n");
+        exit(1);
+    }
+
+    $payload = json_encode(['platform' => $platformId]);
+    $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/admin/audit/provision", [
+        'Content-Type: application/json',
+        'Content-Length: ' . strlen($payload),
+        "Authorization: Bearer {$adminToken}",
+    ], $payload, 30);
+
+    if ($resp['code'] === 200 || $resp['code'] === 201) {
+        $response = json_decode($resp['body'], true);
+        $dbName = $response['database_name'] ?? null;
+        if (!$dbName) {
+            fwrite(STDERR, "ERROR: Gateway returned success but no 'database_name' field in response.\n");
+            fwrite(STDERR, "  Response: {$resp['body']}\n");
+            exit(1);
+        }
+        if (!$quiet) {
+            echo "  Audit database provisioned: {$dbName}\n";
+            echo "  Now set AUDIT_TRAIL_ENABLED=true in this platform's .env to start writing records.\n\n";
+        }
+        return $dbName;
+    }
+
+    if ($resp['code'] === 400) {
+        $response = json_decode($resp['body'], true);
+        $message = $response['message'] ?? $resp['body'];
+        fwrite(STDERR, "ERROR: {$message}\n");
+        fwrite(STDERR, "  Is AUDIT_DATABASE_URL configured on the gateway itself? See the gateway operator's own\n");
+        fwrite(STDERR, "  one-time setup (gateway_audit_user role creation, AUDIT_DATABASE_URL env var) --\n");
+        fwrite(STDERR, "  this is separate from anything this platform's own .env controls.\n");
+        exit(1);
+    }
+
+    fwrite(STDERR, "ERROR: Failed to provision audit database (HTTP {$resp['code']})\n");
+    fwrite(STDERR, "  Response: {$resp['body']}\n");
+    exit(1);
+}

@@ -608,14 +608,16 @@ class Router
             // Merge input and params
             $allInput = array_merge($request['input'] ?? [], $request['params'] ?? []);
 
-            // Typed-request-binder path (SPEC-typed-request-binder.md). A handler
+            // Typed-request-binder path. A handler
             // opting into this pattern implements ONLY ITypedRouteHandler + a
             // single `execute(FooRequest $request): FooResponse` method — no
             // process(), no validation_rules(), no public ?array properties.
             // Checked BEFORE the legacy IRouteHandler check below since a typed
             // handler is not required to implement IRouteHandler at all.
             if ($handler instanceof \StoneScriptPHP\ITypedRouteHandler) {
-                return $this->executeTypedHandler($handler, $handlerClass, $allInput, $request);
+                $response = $this->executeTypedHandler($handler, $handlerClass, $allInput, $request);
+                \StoneScriptPHP\Audit\AuditRecorder::record($request, $handler, $response);
+                return $response;
             }
 
             // Check if handler implements IRouteHandler interface
@@ -702,6 +704,8 @@ class Router
                 return new ApiResponse('error', 'Invalid handler response');
             }
 
+            \StoneScriptPHP\Audit\AuditRecorder::record($request, $handler, $response);
+
             return $response;
 
         } catch (TenantDatabaseUnavailableException $e) {
@@ -717,8 +721,7 @@ class Router
     /**
      * Dispatch a {@see \StoneScriptPHP\ITypedRouteHandler} route — hydrate its
      * `execute()` method's single request-DTO parameter, call it, wrap the
-     * returned response DTO into the standard ApiResponse envelope. See
-     * SPEC-typed-request-binder.md for the full design.
+     * returned response DTO into the standard ApiResponse envelope.
      *
      * @param array<array-key, mixed> $allInput
      * @param array<string, mixed> $request

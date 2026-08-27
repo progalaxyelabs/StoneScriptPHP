@@ -74,6 +74,17 @@ class Env
 
     public bool $EMAIL_VERIFICATION_ENABLED = true;
 
+    // Audit trail (separate-audit-DB design, see StoneScriptPHP\Audit) -- opt-in
+    // per platform. false (default): StoneScriptPHP\Audit\AuditRecorder::record()
+    // is a complete no-op for every request -- zero gateway calls, zero
+    // overhead. Turn this on only AFTER the gateway operator has provisioned
+    // this platform's {platform}_audit database (POST /admin/audit/provision)
+    // and set AUDIT_DATABASE_URL on the gateway -- enabling it before that
+    // just means every mutating request logs a caught-and-swallowed gateway
+    // error (see AuditRecorder's no-fake-success failure rule), not a crash,
+    // but there is no point turning it on early.
+    public bool $AUDIT_TRAIL_ENABLED = false;
+
     public ?string $CSRF_SECRET_KEY = null;
     public ?string $HCAPTCHA_SITE_KEY = null;
     public ?string $HCAPTCHA_SECRET_KEY = null;

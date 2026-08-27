@@ -1,7 +1,34 @@
 <?php
 
 /**
- * Audit Generator
+ * Audit Generator — ⚠️ SUPERSEDED, DO NOT USE FOR NEW PLATFORMS ⚠️
+ *
+ * This generator scaffolds the GATED TAMPER-PROOF ROLE-SPLIT design: it
+ * transfers OWNERSHIP of the audited base tables themselves
+ * (identities/tenants/tenant_memberships, or whatever --tables= names) to a
+ * locked `{platform}_audit_owner` role, via stonescriptdb-gateway's
+ * `audit_provision` module.
+ *
+ * This design is SHELVED in favor of a completely separate `{platform}_audit`
+ * database, with tamper-resistance from the gateway's /call API surface, NOT
+ * from role/ownership juggling — see `StoneScriptPHP\Audit\AuditRecorder` +
+ * `php stone gateway:provision-audit`.
+ * The role-split was found live-caught on a downstream platform to silently
+ * break EVERY future structural migration (ADD/DROP COLUMN, new foreign
+ * keys) against any table it claims — `gateway_user` permanently loses the
+ * ability to ALTER a table the moment this generator's migration runs
+ * against it, with no self-service way to add a needed column later. Do not
+ * run this generator on a new platform. If you already ran it, a manual,
+ * verified ownership-revert + data-migration into the SIMPLE design is the
+ * field-tested unwind procedure.
+ *
+ * `stonescriptdb-gateway`'s `audit_provision` module itself stays in the
+ * codebase, dormant/unused, per that module's own docblock — this generator
+ * is kept for the same reason (an existing platform that already adopted it
+ * may still need to regenerate an already-role-split table's trigger-attach
+ * block), NOT as an invitation to adopt it fresh.
+ *
+ * ---- Original docblock, for reference ----
  *
  * Scaffolds an immutable, append-only `_audit_log` table + two capture
  * trigger functions (row-level for INSERT/UPDATE/DELETE, statement-level
@@ -21,8 +48,9 @@
  * is intentionally minimal.
  *
  * Usage:
- *   php stone generate audit
+ *   php stone generate audit                 (SUPERSEDED — see warning above)
  *   php stone generate audit --tables=identities,tenants,tenant_memberships
+ *   php stone generate audit --force-shelved-design   (required now — see below)
  */
 
 if (!defined('ROOT_PATH')) {

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.11.0] - 2026-08-27
+
+### Added — audit trail, SIMPLE separate-DB design (`StoneScriptPHP\Audit`)
+
+A simpler alternative to the gated tamper-proof role-split shipped in 9.10.0's
+`generate audit`/gateway `audit_provision` work (that module stays in the
+codebase, dormant/unused by convention — do not extend it: transferring
+ownership of application tables to a locked role silently breaks every future
+structural migration — ADD/DROP COLUMN, new foreign keys — against any table
+it claims, with no self-service way to undo it). This is the recommended
+design going forward: a completely separate `{platform}_audit` database per
+platform (provisioned gateway-side via `POST /admin/audit/provision` /
+`php stone gateway:provision-audit`, owned by a dedicated non-superuser
+`gateway_audit_user` role), with tamper-resistance coming from the gateway's
+`/call` API surface (only `audit_append` and `audit_read` are ever exposed on
+that schema — no update/delete function exists) rather than in-DB
+role/ownership juggling. Application tables in the main database keep their
+normal ownership unchanged — nothing about this feature touches any existing
+table's grants.
+
+- `Env::$AUDIT_TRAIL_ENABLED` (bool, default `false`) — opt-in per platform.
+- `StoneScriptPHP\Audit\HasAuditBag` — an optional trait a route handler can
+  `use` to enrich its audit record (`entity_type`, `entity_id`, `old_values`,
+  `new_values`, `summary`, `action`) via `$this->auditRecord(...)`. Duck-typed
+  by the router (`method_exists($handler, 'auditBag')`), NOT a new interface
+  method — adding one to `IRouteHandler` would break every existing route
+  handler in every consuming project immediately (PHP interfaces have no
+  default method bodies).
+- `StoneScriptPHP\Audit\AuditRecorder` — called by
+  `Router::executeHandler()` after a mutating (POST/PUT/PATCH/DELETE)
+  request's `process()`/`execute()` completes successfully. Always writes an
+  operation-level base record (actor, tenant, platform, route, http method,
+  result status) as the coverage floor; enriches it when the handler used
+  `HasAuditBag`. Failure rule (verbatim from the design doc): "the audit DB
+  is separate (not one txn with the change) → if the audit write fails, log
+  loudly, never silently drop" — every failure mode (a down/misconfigured
+  gateway, or even `Env` itself failing to reconstruct) is caught and only
+  logged; audit recording can never fail the real request it describes.
+
 ## [9.10.0] - 2026-08-27
 
 ### Added — `generate android-server` can now ship a reduced route + handler surface
@@ -96,8 +135,7 @@ every platform running both generators.
 
 New, additive, backward-compatible binder that hydrates typed DTOs from a
 request body/query, replacing the fleet-wide `public ?array` +
-hand-written `fromArray()` convention. Design doc:
-`work-management/.claude/SPEC-typed-request-binder.md`.
+hand-written `fromArray()` convention. Design doc: internal.
 
 - `StoneScriptPHP\Binding\DtoHydrator` — generic, recursive, reflection-based
   hydrator. Strict scalar coercion (never a silent wrong-cast — a non-numeric
@@ -125,7 +163,7 @@ hand-written `fromArray()` convention. Design doc:
   recursively (structured 400 on a shape problem) instead of raw-assigning
   and throwing an uncaught `TypeError` under `strict_types` (previously a
   bare 500 on every request — confirmed live regression, see below).
-- Fixes a LIVE PROD REVENUE OUTAGE on medstoreapp
+- Fixes a LIVE PROD REVENUE OUTAGE on a downstream platform
   (`PostDistributorInvoiceSubmitRoute`, every real invoice submit 500ing):
   the route's hand-written request DTO typed `distributor_id` as `?string`
   while every real caller sends a JSON number — an uncaught constructor

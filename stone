@@ -119,6 +119,10 @@ $commands = [
         'description' => 'Provision a per-platform bearer token required by gateway v4.1.0+',
         'file' => 'cli/gateway-provision-token.php',
     ],
+    'gateway:provision-audit' => [
+        'description' => 'One-time: provision {platform}_audit (SIMPLE audit-DB design, gateway v4.5.0+)',
+        'file' => 'cli/gateway-provision-audit.php',
+    ],
     'gateway:list-schemas' => [
         'description' => 'List schema archives registered on the gateway for this platform',
         'file' => 'cli/gateway-list-schemas.php',
@@ -230,6 +234,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone gateway:migrate-tenant --database-id=<uuid>  # Migrate ONE tenant database\n";
     echo "  php stone gateway:migrate-all-tenants                  # Migrate ALL tenant databases\n";
     echo "  php stone gateway:provision-token                      # Provision DB_GATEWAY_PLATFORM_TOKEN\n";
+    echo "  php stone gateway:provision-audit                     # One-time: provision {platform}_audit\n";
     echo "  php stone gateway:list-schemas                         # List registered schema archives\n";
     echo "  php stone gateway:list-databases                       # List registered databases\n";
     echo "\n";
