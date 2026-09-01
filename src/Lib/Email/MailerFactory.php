@@ -57,11 +57,37 @@ final class MailerFactory
 
     private static function testEmailDomain(): ?string
     {
-        $v = getenv('TEST_EMAIL_DOMAIN');
-        if ($v === false || trim($v) === '') {
+        $v = self::env('TEST_EMAIL_DOMAIN');
+        if ($v === null || trim($v) === '') {
             return null;
         }
         return strtolower(trim($v));
+    }
+
+    /**
+     * Read an env var the same way StoneScriptPHP\Env::resolveRaw() does
+     * (getenv() falling back to $_ENV) — NOT bare getenv() alone.
+     *
+     * Why this matters: vlucas/phpdotenv's Dotenv::createImmutable()->load()
+     * (used by Env::__construct()) does NOT call putenv() by default in v5+ —
+     * it only writes $_ENV/$_SERVER. So on any box where these vars arrive
+     * exclusively via .env (no OS-level export, no php-fpm pool `env[]`
+     * directive), bare getenv() returns false even though the value IS
+     * loaded and readable via $_ENV. Before this fix, testEmailDomain() used
+     * bare getenv() only, so it silently returned null for EVERY request in
+     * that (common) deployment shape — meaning MailerFactory ALWAYS fell
+     * through to the production email provider for every recipient, including
+     * @<TEST_EMAIL_DOMAIN> test/e2e fixtures with no real mail server. Sending
+     * real production traffic to addresses that can never be delivered risks
+     * hard bounces against your sending reputation with whatever ESP you use.
+     */
+    private static function env(string $name): ?string
+    {
+        $v = getenv($name);
+        if ($v === false || $v === '') {
+            $v = $_ENV[$name] ?? ($_SERVER[$name] ?? false);
+        }
+        return ($v === false || $v === '') ? null : (string) $v;
     }
 
     private static function domainOf(string $email): string

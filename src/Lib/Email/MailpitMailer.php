@@ -114,14 +114,12 @@ class MailpitMailer implements EmailInterface
 
     private function host(): ?string
     {
-        $v = getenv('MAILPIT_SMTP_HOST');
-        return ($v === false || $v === '') ? null : $v;
+        return self::env('MAILPIT_SMTP_HOST');
     }
 
     private function port(): ?string
     {
-        $v = getenv('MAILPIT_SMTP_PORT');
-        return ($v === false || $v === '') ? null : $v;
+        return self::env('MAILPIT_SMTP_PORT');
     }
 
     /**
@@ -131,10 +129,21 @@ class MailpitMailer implements EmailInterface
      */
     private function fromAddress(): string
     {
-        $v = getenv('ZEPTOMAIL_SENDER_EMAIL');
+        return self::env('ZEPTOMAIL_SENDER_EMAIL') ?? self::env('MAIL_FROM_ADDRESS') ?? 'no-reply@localhost';
+    }
+
+    /**
+     * Read an env var the same way StoneScriptPHP\Env::resolveRaw() does
+     * (getenv() falling back to $_ENV/$_SERVER) — see MailerFactory::env()
+     * for the full explanation of why bare getenv() alone is unreliable here
+     * (phpdotenv v5+ does not call putenv() by default).
+     */
+    private static function env(string $name): ?string
+    {
+        $v = getenv($name);
         if ($v === false || $v === '') {
-            $v = getenv('MAIL_FROM_ADDRESS');
+            $v = $_ENV[$name] ?? ($_SERVER[$name] ?? false);
         }
-        return ($v === false || $v === '') ? 'no-reply@localhost' : $v;
+        return ($v === false || $v === '') ? null : (string) $v;
     }
 }
