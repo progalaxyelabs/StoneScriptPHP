@@ -261,4 +261,50 @@ class HybridApiTokenJwtHandlerTest extends TestCase
         $result = $hybrid->verifyToken('not.a.valid.jwt.at.all');
         $this->assertFalse($result);
     }
+
+    // ── Task #10005: expired platform token must not attempt the JWKS fallback ──
+
+    /**
+     * An EXPIRED platform API token (iss = this platform's own JWT_ISSUER) must
+     * be rejected WITHOUT falling through to the JWKS handler. Regression test
+     * for the "JWT validation failed: Unknown issuer '<platform>'" log-noise
+     * bug (task #10005): every access-token expiry — the single most common
+     * auth event in production — used to fall through from a definitively-
+     * expired RSA check into a JWKS validator that could never accept a
+     * self-issued token, logging a misleading "Unknown issuer" line that
+     * masked the real (and already correctly diagnosed) expiry reason.
+     *
+     * Proven here via the auth-service URL: it points at a bogus host that
+     * would hang/DNS-fail if ever actually contacted. If verifyToken() still
+     * returns false promptly (rather than timing out trying to reach it),
+     * the short-circuit is doing its job.
+     */
+    public function test_expired_platform_token_short_circuits_without_jwks_fallback(): void
+    {
+        $rsaHandler = new RsaJwtHandler();
+        $expiredToken = $rsaHandler->generateToken(
+            ['identity_id' => 'id-abc', 'tenant_id' => 'tenant-xyz'],
+            -10 // already expired 10 seconds ago
+        );
+
+        $hybrid = new HybridApiTokenJwtHandler(
+            // A non-routable address (TEST-NET-1, RFC 5737) — if the JWKS
+            // fallback were ever attempted, this would hang until a connection
+            // timeout instead of returning promptly.
+            authServiceUrl: 'http://192.0.2.1:9999',
+            authIssuer:     'https://auth.unreachable.example.com'
+        );
+
+        $start = microtime(true);
+        $result = $hybrid->verifyToken($expiredToken);
+        $elapsed = microtime(true) - $start;
+
+        $this->assertFalse($result, 'Expired platform token must be rejected');
+        $this->assertLessThan(
+            2.0,
+            $elapsed,
+            'verifyToken() took too long — looks like it attempted the JWKS network fallback ' .
+            'for a token that self-identifies as this platform\'s own issuer'
+        );
+    }
 }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Auth;
 
+use StoneScriptPHP\Env;
+
 /**
  * HybridApiTokenJwtHandler — validates BOTH platform-minted API tokens and auth-service auth tokens.
  *
@@ -99,8 +101,45 @@ class HybridApiTokenJwtHandler implements JwtHandlerInterface
             return $claims;
         }
 
+        // Task #10005: an EXPIRED (or otherwise RSA-rejected) platform API token
+        // — the overwhelmingly common case, happening every access-token TTL for
+        // every active user — has `iss` = this platform's own JWT_ISSUER. Falling
+        // through to the JWKS handler for it can never succeed (the JWKS handler
+        // only knows the auth service's issuer) and only produces a misleading
+        // "Unknown issuer '<platform>'" log line that masks the real, already-
+        // known reason (RsaJwtHandler already logged expired/signature-invalid).
+        // Skip the useless network-capable fallback for tokens self-identifying
+        // as this platform's own issuer; only genuinely foreign-issuer tokens
+        // (auth-service auth tokens) reach the JWKS path below.
+        $platformIssuer = Env::get_instance()->JWT_ISSUER ?? null;
+        if (!empty($platformIssuer) && $this->peekIssuer($jwt) === $platformIssuer) {
+            return false;
+        }
+
         // Fall back to JWKS (auth tokens from the auth service).
         return $this->authServiceHandler->verifyToken($jwt);
+    }
+
+    /**
+     * Read the `iss` claim WITHOUT verifying — used only to short-circuit the
+     * JWKS fallback for tokens that already self-identify as this platform's
+     * own issuer (see verifyToken() above). The claim is verified for real by
+     * whichever handler actually processes the token; peeking it here never
+     * grants trust on its own.
+     */
+    private function peekIssuer(string $jwt): ?string
+    {
+        $parts = explode('.', $jwt);
+        if (count($parts) !== 3) {
+            return null;
+        }
+        try {
+            $payload = \Firebase\JWT\JWT::jsonDecode(\Firebase\JWT\JWT::urlsafeB64Decode($parts[1]));
+        } catch (\Throwable $e) {
+            return null;
+        }
+        $iss = $payload->iss ?? null;
+        return (is_string($iss) && $iss !== '') ? $iss : null;
     }
 
     /**
