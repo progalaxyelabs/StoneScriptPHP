@@ -378,6 +378,105 @@ class ClientGeneratorV4Test extends TestCase
         }
     }
 
+    // =========================================================================
+    // CLIENT-HTTP-ERROR-SPEC —
+    // MinimalHttp emitted verbatim: non-recursive request(), status-routed
+    // RefreshHandler (no outcome enum), ErrorHandlers, Notifier, terminal
+    // reauth handler.
+    // =========================================================================
+
+    public function test_http_ts_request_is_non_recursive(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $httpTs = file_get_contents($outputDir . '/portal/src/http.ts');
+
+            // The hard rule: request() must never call itself. This is the
+            // exact pattern that was removed — assert it can never regress.
+            $this->assertStringNotContainsString(
+                'return this.request<T>(method, path, body, params, options, true)',
+                $httpTs,
+                'MinimalHttp.request() must NEVER self-call — §2 hard rule (CLIENT-HTTP-ERROR-SPEC)'
+            );
+            $this->assertStringNotContainsString(
+                'isRetry = false',
+                $httpTs,
+                'the old boolean isRetry recursion flag must be gone entirely'
+            );
+            // The linear, hard-capped replacement.
+            $this->assertStringContainsString('for (let attempt = 0; attempt <= 1; attempt++)', $httpTs);
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    public function test_http_ts_never_clears_tokens_on_401_path(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $httpTs = file_get_contents($outputDir . '/portal/src/http.ts');
+
+            // §7 non-negotiable: never clear tokens / force-logout except the
+            // user-initiated §6 button (which lives in ngx, not here). Checks
+            // for the executable CALL (semicolon-terminated) — the class also
+            // carries a doc comment mentioning the same method name in prose.
+            $this->assertStringNotContainsString('this.tokens.clear();', $httpTs,
+                'MinimalHttp must never clear tokens itself — only the user-tapped Re-login button may');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    public function test_http_ts_emits_status_routed_refresh_handler_and_reauth_handler(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $httpTs = file_get_contents($outputDir . '/portal/src/http.ts');
+
+            // No outcome enum — owner directive 2026-09-05: the self-heal
+            // resolves (void) on success or rejects with a classified
+            // ApiError on failure; the SAME central status mapping decides
+            // terminal (401) vs error-ladder (5xx/network) from err.httpStatus.
+            $this->assertStringNotContainsString('RefreshOutcome', $httpTs);
+            $this->assertStringNotContainsString("| 'reauth_required'", $httpTs,
+                'reauth_required must not survive as a TYPE-level union literal (still fine as an ApiError .code tag string)');
+            $this->assertStringContainsString('export type RefreshHandler = () => Promise<void>;', $httpTs);
+            $this->assertStringContainsString('setReauthRequiredHandler', $httpTs);
+            $this->assertStringContainsString('setNotifier', $httpTs);
+            $this->assertStringContainsString('export interface ErrorHandlers<T>', $httpTs);
+            // §4 step 4 — the ONLY terminal case, and it never clears tokens.
+            $this->assertStringContainsString("throw new ApiError('Refresh token rejected', 401, null, 'reauth_required');", $httpTs);
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    public function test_http_ts_emits_single_flight_and_error_ladder(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $httpTs = file_get_contents($outputDir . '/portal/src/http.ts');
+
+            // §4 single-flight
+            $this->assertStringContainsString('refreshInFlight', $httpTs);
+            // §5 error ladder — a counter, never a re-call
+            $this->assertStringContainsString('consecutiveFailures', $httpTs);
+            $this->assertStringContainsString('Something went wrong. Please try again.', $httpTs);
+            $this->assertStringContainsString('Still not working. Try signing out and back in.', $httpTs);
+            $this->assertStringContainsString('Our server may be busy', $httpTs);
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
     public function test_generator_portal_client_has_set_tenant_for_t3(): void
     {
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();

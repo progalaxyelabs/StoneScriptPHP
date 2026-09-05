@@ -772,17 +772,80 @@ export interface HttpRequestOptions {
 }
 
 /**
- * Injected refresh strategy (CLIENT-SDK-SPEC §12/§14). Resolves true if a fresh
- * access token is now present in the TokenStore (the handler is responsible for
- * performing the refresh AND writing the new token into the same TokenStore this
- * client reads). Lets external-auth / T3 platforms route refresh through their
- * auth-client (e.g. a central accounts server) instead of the built-in
- * same-origin POST, without baking auth topology into the generated client.
+ * Per-call opt-in error handler (CLIENT-HTTP-ERROR-SPEC §3).
+ * If attached for the response's status, `handleError` runs it and RESOLVES the
+ * call to its return value (or `undefined` if it returns void) instead of
+ * rejecting — the caller opted in to handle this status itself, no throw, no
+ * default toast. Never fakes data: callers must check
+ * `if (result === undefined) return;` themselves.
  */
-export type RefreshHandler = () => Promise<boolean>;
+export type ErrorHandler<T> = (err: ApiError) => T | void | Promise<T | void>;
+
+/**
+ * Named per-status handlers threaded through get/post/put/patch/delete →
+ * request() (§3). `401` is deliberately absent — it is never dispatched here,
+ * it is entirely the silent self-heal path (§4). `onError` is the catch-all
+ * for any status not named explicitly.
+ */
+export interface ErrorHandlers<T> {
+  e400?: ErrorHandler<T>; e402?: ErrorHandler<T>; e403?: ErrorHandler<T>; e404?: ErrorHandler<T>;
+  e405?: ErrorHandler<T>; e406?: ErrorHandler<T>; e408?: ErrorHandler<T>; e409?: ErrorHandler<T>;
+  e410?: ErrorHandler<T>; e411?: ErrorHandler<T>; e412?: ErrorHandler<T>; e413?: ErrorHandler<T>;
+  e414?: ErrorHandler<T>; e415?: ErrorHandler<T>; e416?: ErrorHandler<T>; e417?: ErrorHandler<T>;
+  e421?: ErrorHandler<T>; e422?: ErrorHandler<T>; e423?: ErrorHandler<T>; e424?: ErrorHandler<T>;
+  e425?: ErrorHandler<T>; e426?: ErrorHandler<T>; e428?: ErrorHandler<T>; e429?: ErrorHandler<T>;
+  e431?: ErrorHandler<T>; e451?: ErrorHandler<T>; e500?: ErrorHandler<T>; e501?: ErrorHandler<T>;
+  e502?: ErrorHandler<T>; e503?: ErrorHandler<T>; e504?: ErrorHandler<T>; e505?: ErrorHandler<T>;
+  e506?: ErrorHandler<T>; e507?: ErrorHandler<T>; e508?: ErrorHandler<T>; e510?: ErrorHandler<T>;
+  e511?: ErrorHandler<T>;
+  onError?: ErrorHandler<T>;
+}
+
+/**
+ * Auth self-heal contract (§4 — owner directive 2026-09-05: NO status enum
+ * per edge case). The handler performs the recovery AND writes any new
+ * token into the same TokenStore this client reads:
+ *   - Resolves (void) — some rung of the 4-token recovery ladder recovered;
+ *     MinimalHttp replays the original call ONCE (inline, non-recursive).
+ *   - Rejects with a classified `ApiError` — the SAME central status mapping
+ *     (§5) that handles every other error decides what happens next, purely
+ *     from `err.httpStatus`:
+ *       - `401` (the auth REFRESH token itself is dead, ladder step 4) →
+ *         the ONE terminal §6 modal. Tokens are left intact — MinimalHttp
+ *         never clears storage or redirects on this itself.
+ *       - anything else (5xx/network/timeout) → the central §5 error ladder,
+ *         session KEPT — never logout, never clear tokens.
+ * There is no third outcome type; the decision falls out of the error's
+ * status, exactly like any other call. Lets external-auth / T3 platforms
+ * route refresh through their own auth-client (e.g. a central accounts
+ * server) instead of the built-in same-origin POST, without baking auth
+ * topology into the generated client.
+ */
+export type RefreshHandler = () => Promise<void>;
+
+/** Injected notifier port (§5) — same pattern as RefreshHandler. The library
+ * owns the default, non-technical message per status; the platform only
+ * renders it (e.g. a toast/snackbar) and may add its own support link. */
+export type Notifier = (message: string, kind: 'error' | 'warn' | 'info') => void;
+
+/** Fired only when the self-heal's refresh/exchange itself rejects with a
+ * 401 (§6) — the auth REFRESH token is dead. The platform's ONE job here is
+ * to show a single, non-destructive modal instance (Cancel / Re-login).
+ * MinimalHttp itself never clears tokens or redirects. */
+export type ReauthRequiredHandler = () => void;
 
 export class MinimalHttp {
   private refreshHandler: RefreshHandler | null = null;
+  private notifier: Notifier | null = null;
+  private reauthRequiredHandler: ReauthRequiredHandler | null = null;
+
+  // §4 single-flight: concurrent 401s across different in-flight calls await
+  // the SAME heal promise instead of each starting their own recovery.
+  private refreshInFlight: Promise<void> | null = null;
+
+  // §5 error ladder: a consecutive-failure COUNTER, never a re-call. Reset to
+  // 0 on any successful response; incremented on every 5xx/network/heal-error.
+  private consecutiveFailures = 0;
 
   constructor(
     private readonly baseUrl: string,
@@ -791,6 +854,9 @@ export class MinimalHttp {
     // Used ONLY when no refresh handler is injected (self-contained / T2 same-origin).
     // Do not change without updating AUTH-SPEC §token-contract.
     private readonly refreshEndpoint: string = '/api/auth/refresh',
+    // Support link surfaced on the final error-ladder rung (§5 step 3), e.g.
+    // a wa.me/… WhatsApp link. Platform config, never hardcoded here.
+    private readonly supportUrl?: string,
   ) {}
 
   /**
@@ -803,25 +869,35 @@ export class MinimalHttp {
     this.refreshHandler = handler;
   }
 
-  async get<T = unknown>(path: string, params?: HttpParams, options?: HttpRequestOptions): Promise<T> {
-    return this.request<T>('GET', path, undefined, params, options);
+  /** Inject the Notifier port (§5). Pass null to fall back to console.error. */
+  setNotifier(notifier: Notifier | null): void {
+    this.notifier = notifier;
   }
 
-  async post<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
-    return this.request<T>('POST', path, body, undefined, options);
+  /** Inject the terminal reauth handler (§6 modal trigger). Pass null to clear. */
+  setReauthRequiredHandler(handler: ReauthRequiredHandler | null): void {
+    this.reauthRequiredHandler = handler;
   }
 
-  async put<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
-    return this.request<T>('PUT', path, body, undefined, options);
+  async get<T = unknown>(path: string, params?: HttpParams, options?: HttpRequestOptions, handlers?: ErrorHandlers<T>): Promise<T> {
+    return this.request<T>('GET', path, undefined, params, options, handlers);
   }
 
-  async patch<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
-    return this.request<T>('PATCH', path, body, undefined, options);
+  async post<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions, handlers?: ErrorHandlers<T>): Promise<T> {
+    return this.request<T>('POST', path, body, undefined, options, handlers);
+  }
+
+  async put<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions, handlers?: ErrorHandlers<T>): Promise<T> {
+    return this.request<T>('PUT', path, body, undefined, options, handlers);
+  }
+
+  async patch<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions, handlers?: ErrorHandlers<T>): Promise<T> {
+    return this.request<T>('PATCH', path, body, undefined, options, handlers);
   }
 
   // DELETE may carry an optional body (e.g. bulk-delete payloads). Mirrors post().
-  async delete<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
-    return this.request<T>('DELETE', path, body, undefined, options);
+  async delete<T = unknown>(path: string, body?: unknown, options?: HttpRequestOptions, handlers?: ErrorHandlers<T>): Promise<T> {
+    return this.request<T>('DELETE', path, body, undefined, options, handlers);
   }
 
   /**
@@ -844,13 +920,23 @@ export class MinimalHttp {
     return `${trimmedBase}/${trimmedPath}`;
   }
 
+  /**
+   * NON-RECURSIVE, one frame per call (CLIENT-HTTP-ERROR-SPEC
+   * §2 — HARD RULE). Exactly one `request()` frame; the `for (attempt = 0..1)`
+   * loop below is the linear, hard-capped stand-in for "at most two fetches" —
+   * there is ZERO `this.request(...)` self-call anywhere in this method. A
+   * 401 on the FIRST attempt (authorization mode only) runs the single-flight
+   * self-heal (§4) and, on 'ok', falls through to attempt=1 for ONE inline
+   * replay fetch. A 401 on attempt=1 (i.e. after an already-attempted heal)
+   * is not retried again — it is parsed and surfaced like any other response.
+   */
   private async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
     path: string,
     body?: unknown,
     params?: HttpParams,
     options?: HttpRequestOptions,
-    isRetry = false,
+    handlers?: ErrorHandlers<T>,
   ): Promise<T> {
     const url = new URL(MinimalHttp.joinUrl(this.baseUrl, path));
     if (params) {
@@ -879,83 +965,229 @@ export class MinimalHttp {
     // not set == today's unbounded behavior, unchanged.
     const signal = options?.timeoutMs !== undefined ? AbortSignal.timeout(options.timeoutMs) : undefined;
 
-    let res: Response;
-    try {
-      res = await fetch(url.toString(), {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal,
-      });
-    } catch (networkErr) {
-      if (networkErr instanceof DOMException && networkErr.name === 'TimeoutError') {
-        // AbortSignal.timeout() fired before the server responded. The server
-        // may still complete the request (it has no idea the client gave up)
-        // — this is distinct from a genuine network failure, so callers get a
-        // distinguishable message instead of the generic "check your connection".
-        throw new ApiError(
-          `Request timed out after ${options?.timeoutMs}ms. It may still complete on the server — please wait a moment before retrying.`,
-          0,
-          networkErr,
-          'request_timeout',
+    let res: Response | undefined;
+
+    // §2: linear, hard-capped loop — attempt 0 is the real call, attempt 1
+    // (reached ONLY after a successful heal on attempt 0's 401) is the single
+    // inline replay. No recursion, ever.
+    for (let attempt = 0; attempt <= 1; attempt++) {
+      try {
+        res = await fetch(url.toString(), {
+          method,
+          headers,
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+          signal,
+        });
+      } catch (networkErr) {
+        if (networkErr instanceof DOMException && networkErr.name === 'TimeoutError') {
+          // AbortSignal.timeout() fired before the server responded. The server
+          // may still complete the request (it has no idea the client gave up)
+          // — this is distinct from a genuine network failure, so callers get a
+          // distinguishable message instead of the generic "check your connection".
+          return await this.handleError(
+            new ApiError(
+              `Request timed out after ${options?.timeoutMs}ms. It may still complete on the server — please wait a moment before retrying.`,
+              0,
+              networkErr,
+              'request_timeout',
+            ),
+            handlers,
+          );
+        }
+        return await this.handleError(
+          new ApiError('Network error — check your connection', 0, networkErr, null),
+          handlers,
         );
       }
-      throw new ApiError('Network error — check your connection', 0, networkErr, null);
+
+      // The built-in self-heal is scoped to the API token (tokenMode
+      // 'authorization') — it's the only mode with a refresh token in this
+      // TokenStore at all (see tokens.ts). A 401 on an 'authentication' or
+      // 'public' call surfaces directly instead of attempting a heal that has
+      // nothing to do with the credential (or lack of one) that was sent.
+      if (res.status === 401 && attempt === 0 && tokenMode === 'authorization') {
+        try {
+          await this.runSelfHeal();
+        } catch (healErr) {
+          // The self-heal's own refresh/exchange failed — routed by the SAME
+          // central status mapping (§5) as any other error. No third outcome
+          // type: the decision comes purely from the rejected error's status.
+          // Duck-typed (not `instanceof ApiError`): the injected RefreshHandler
+          // (e.g. ngx-stonescriptphp-client's AuthService) lives in a different
+          // package/bundle than this generated file, so a real `ApiError` thrown
+          // there is a structurally-identical but not `instanceof`-identical
+          // object across the module boundary.
+          const err = (healErr && typeof healErr === 'object' && 'httpStatus' in healErr)
+            ? healErr as ApiError
+            : new ApiError('Session refresh failed', 0, healErr, null);
+
+          if (err.httpStatus === 401) {
+            // §6 — terminal: the auth REFRESH token itself is dead. NEVER
+            // clear tokens, NEVER redirect here. Trigger the single,
+            // non-destructive modal and reject; tokens are left intact for
+            // the user-tapped Re-login button to use.
+            this.reauthRequiredHandler?.();
+            return await this.handleError(
+              new ApiError('You’ll need to sign in again to continue.', 401, null, 'reauth_required'),
+              handlers,
+            );
+          }
+
+          // 5xx/network/timeout DURING the heal (e.g. a transient gateway
+          // pool-eviction, #7423). KEEP the session — never logout, never
+          // clear tokens. Feed the central §5 error ladder like any other
+          // server error. No auto-retry-on-5xx.
+          this.consecutiveFailures++;
+          return await this.handleError(
+            new ApiError(this.errorLadderMessage(), err.httpStatus || 0, null, 'heal_error'),
+            handlers,
+          );
+        }
+
+        // Success — the heal wrote a fresh token into the SAME TokenStore
+        // this reads. Update the Authorization header for the replay.
+        const freshToken = this.tokens.get();
+        if (freshToken) headers['Authorization'] = `Bearer ${freshToken}`;
+        continue; // -> attempt = 1, ONE inline replay fetch. No self-call.
+      }
+
+      break; // not a retriable 401, or already retried once — proceed to parse.
     }
 
-    // The built-in refresh-and-retry cycle is scoped to the API token
-    // (tokenMode 'authorization') — it's the only mode with a refresh token
-    // in this TokenStore at all (see tokens.ts). A 401 on an 'authentication'
-    // or 'public' call surfaces directly as an ApiError instead of attempting
-    // an API-token refresh that has nothing to do with the credential (or
-    // lack of one) that was actually sent.
-    if (res.status === 401 && !isRetry && tokenMode === 'authorization') {
-      const refreshed = await this.attemptRefresh();
-      if (refreshed) {
-        return this.request<T>(method, path, body, params, options, true);
-      }
-      this.tokens.clear();
-      throw new ApiError('Session expired. Please log in again.', 401, null, null);
-    }
+    // res is always assigned here (the loop always either returns or breaks
+    // after a successful fetch assignment).
+    const response = res as Response;
 
     let data: unknown;
     try {
-      data = await res.json();
+      data = await response.json();
     } catch {
-      throw new ApiError(
-        `Server returned non-JSON response (HTTP ${res.status})`,
-        res.status,
-        null,
-        null,
+      return await this.handleError(
+        new ApiError(
+          `Server returned non-JSON response (HTTP ${response.status})`,
+          response.status,
+          null,
+          null,
+        ),
+        handlers,
       );
     }
 
     const envelope = data as Record<string, unknown>;
-    if (!envelope || envelope['status'] !== 'ok') {
-      const message = (envelope?.['message'] as string) ?? 'Request failed';
-      const code    = (envelope?.['data'] as Record<string, unknown>)?.['error'] as string ?? null;
-      throw new ApiError(message, res.status, envelope, code);
+
+    // §1 — the envelope is the SOLE success/failure discriminator.
+    // status === 'ok' AND a 2xx resolves `data`, INCLUDING null/[] — an empty
+    // result is a valid answer, never an error. NO `?? []` / `?? 0` coercion.
+    if (envelope && envelope['status'] === 'ok' && response.status >= 200 && response.status < 300) {
+      this.consecutiveFailures = 0; // any success resets the error ladder.
+      return envelope['data'] as T;
     }
 
-    return envelope['data'] as T;
+    // status !== 'ok' OR non-2xx → reject with a classified ApiError. Never
+    // return `data` on this path.
+    const message = (envelope?.['message'] as string) ?? 'Request failed';
+    const code    = (envelope?.['data'] as Record<string, unknown>)?.['error'] as string ?? null;
+    return await this.handleError(new ApiError(message, response.status, envelope, code), handlers);
   }
 
-  private async attemptRefresh(): Promise<boolean> {
-    // Injected strategy wins (external-auth / T3): the handler refreshes and
-    // writes the new token into this client's TokenStore; we just retry on true.
-    if (this.refreshHandler) {
-      try {
-        return await this.refreshHandler();
-      } catch {
-        return false;
-      }
+  /**
+   * §3 — run the caller's opted-in handler (RESOLVES, never throws) or the
+   * central default (surfaces via Notifier, then REJECTS). `401` never reaches
+   * here through the self-heal short-circuit above; any other status can.
+   */
+  private async handleError<T>(err: ApiError, handlers?: ErrorHandlers<T>): Promise<T> {
+    const key = `e${err.httpStatus}` as keyof ErrorHandlers<T>;
+    const named = (handlers?.[key] as ErrorHandler<T> | undefined) ?? handlers?.onError;
+    if (named) {
+      const result = await named(err);
+      return result as T; // may be undefined — caller checks `if (result === undefined) return;`
     }
-    return this.defaultRefresh();
+    this.surfaceDefault(err);
+    throw err;
   }
 
-  private async defaultRefresh(): Promise<boolean> {
+  /** Central status → default message (§5). Non-technical copy, never "HTTP 500". */
+  private surfaceDefault(err: ApiError): void {
+    const s = err.httpStatus;
+    let message: string;
+    let kind: 'error' | 'warn' | 'info' = 'error';
+
+    if (s === 402) {
+      message = 'Please check your account status on the website';
+    } else if (s === 403) {
+      message = 'You don’t have access to this';
+    } else if (s === 404) {
+      message = 'Not found';
+    } else if (s === 429 || s === 408) {
+      message = 'Please try again in a moment';
+      kind = 'warn';
+    } else if (s === 0 || s >= 500 || err.code === 'heal_error' || err.code === 'request_timeout') {
+      this.consecutiveFailures++;
+      message = this.errorLadderMessage();
+    } else {
+      // 400/422/etc with no attached handler — surface the server's own
+      // message rather than inventing a generic one.
+      message = err.message || 'Request failed';
+    }
+
+    if (this.notifier) {
+      this.notifier(message, kind);
+    } else {
+      // eslint-disable-next-line no-console
+      console.error(`[MinimalHttp] ${message}`);
+    }
+  }
+
+  /**
+   * §5 error ladder — driven ENTIRELY by `this.consecutiveFailures`, never by
+   * re-calling anything. Reset to 0 on any successful response (see request()).
+   */
+  private errorLadderMessage(): string {
+    if (this.consecutiveFailures <= 1) {
+      return 'Something went wrong. Please try again.';
+    }
+    if (this.consecutiveFailures <= 3) {
+      return 'Still not working. Try signing out and back in.';
+    }
+    return this.supportUrl
+      ? `Our server may be busy. Please try again in a few minutes, or message us on WhatsApp → ${this.supportUrl}`
+      : 'Our server may be busy. Please try again in a few minutes.';
+  }
+
+  /**
+   * §4 single-flight self-heal. Concurrent 401s across different in-flight
+   * `request()` calls await the SAME promise instead of each starting their
+   * own recovery — no N refreshes, no stall from a duplicated heal. The heal
+   * itself is a straight sequence inside the injected handler (or the
+   * built-in default below) — no recursion here either.
+   */
+  private async runSelfHeal(): Promise<void> {
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+    this.refreshInFlight = (this.refreshHandler ? this.refreshHandler() : this.defaultRefresh());
+    try {
+      await this.refreshInFlight;
+    } finally {
+      this.refreshInFlight = null;
+    }
+  }
+
+  /**
+   * Built-in same-origin refresh (self-contained / T2). Used ONLY when no
+   * refreshHandler is injected. NEVER calls `this.tokens.clear()` — per §7,
+   * clearing tokens happens ONLY via the user-tapped §6 Re-login button.
+   * Resolves on success (having written the new token). Rejects with a
+   * classified `ApiError` on failure — httpStatus 401 means the refresh
+   * TOKEN itself was rejected (terminal, §4 step 4); anything else is
+   * transient (5xx/network/malformed body) and routes through the normal
+   * §5 error ladder instead.
+   */
+  private async defaultRefresh(): Promise<void> {
     const refresh = this.tokens.getRefresh();
-    if (!refresh) return false;
+    // No refresh token at all — nothing left to try; this is the terminal
+    // case (§4 step 4), not a transient error.
+    if (!refresh) throw new ApiError('No refresh token available', 401, null, 'reauth_required');
 
     let res: Response;
     try {
@@ -964,14 +1196,28 @@ export class MinimalHttp {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refresh }),
       });
-    } catch {
-      return false;
+    } catch (networkErr) {
+      // Network failure during heal — keep session, error ladder.
+      throw new ApiError('Network error during session refresh', 0, networkErr, null);
     }
 
-    if (!res.ok) return false;
+    // The refresh TOKEN itself was rejected by the server — this is the one
+    // genuinely terminal case: the credential the whole ladder depends on is
+    // dead. Everything else (5xx, malformed body) is transient/uncertain and
+    // must NOT be treated as terminal.
+    if (res.status === 401) {
+      throw new ApiError('Refresh token rejected', 401, null, 'reauth_required');
+    }
+    if (!res.ok) {
+      throw new ApiError('Session refresh failed', res.status, null, null);
+    }
 
     let data: unknown;
-    try { data = await res.json(); } catch { return false; }
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      throw new ApiError('Malformed refresh response', res.status, parseErr, null);
+    }
 
     const envelope = data as Record<string, unknown>;
     // The StoneScriptPHP response envelope is a FIXED, non-deviating contract
@@ -986,14 +1232,13 @@ export class MinimalHttp {
     const responseData = envelope?.['data'] as Record<string, unknown> | undefined;
     const newAccess = responseData?.['access_token'] as string | undefined;
 
-    if (newAccess) {
-      this.tokens.set(newAccess);
-      const newRefresh = responseData?.['refresh_token'];
-      if (typeof newRefresh === 'string') this.tokens.setRefresh(newRefresh);
-      return true;
+    if (!newAccess) {
+      throw new ApiError('Refresh response missing access_token', res.status, null, null);
     }
 
-    return false;
+    this.tokens.set(newAccess);
+    const newRefresh = responseData?.['refresh_token'];
+    if (typeof newRefresh === 'string') this.tokens.setRefresh(newRefresh);
   }
 }
 TS;
@@ -1318,7 +1563,7 @@ TS;
  * CLIENT-SDK-SPEC §0 A1–A6 (approved 2026-06-14)
  */
 
-import { MinimalHttp, HttpParams, RefreshHandler } from './http';
+import { MinimalHttp, HttpParams, RefreshHandler, ErrorHandlers, Notifier, ReauthRequiredHandler } from './http';
 import { TokenStore }              from './tokens';
 import * as T                      from './types';
 
@@ -1371,6 +1616,18 @@ export class ApiClient {{$tenantIdField}
    */
   setRefreshHandler(handler: RefreshHandler | null): this {
     this.http.setRefreshHandler(handler);
+    return this;
+  }
+
+  /** Inject the Notifier port (CLIENT-HTTP-ERROR-SPEC §5). */
+  setNotifier(notifier: Notifier | null): this {
+    this.http.setNotifier(notifier);
+    return this;
+  }
+
+  /** Inject the terminal reauth-required handler (§6 modal trigger). */
+  setReauthRequiredHandler(handler: ReauthRequiredHandler | null): this {
+    this.http.setReauthRequiredHandler(handler);
     return this;
   }
 {$tenantCode}{$streamingNotice}{$groupBlocks}}

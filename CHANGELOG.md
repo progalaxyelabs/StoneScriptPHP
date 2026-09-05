@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.12.0] - 2026-09-05
+
+### Changed — generated client HTTP error handling + auth recovery redesign
+
+`generate-client.php`'s emitted `MinimalHttp` (client-side `http.ts`) is redesigned
+per the client HTTP error-handling + auth-recovery spec:
+
+- `request<T>()` is now strictly non-recursive — one frame per call, a linear
+  hard-capped `for (attempt = 0..1)` loop replaces the prior self-call on the
+  401 retry path.
+- The envelope remains the sole success/failure discriminator: `status==='ok'`
+  (and 2xx) resolves `data` including `null`/`[]`; anything else rejects a
+  classified `ApiError` — no silent `?? []`/`?? 0` coercion.
+- New `ErrorHandlers<T>` — per-call, per-status opt-in handlers threaded through
+  `get/post/put/patch/delete`, plus a central `onError` catch-all. `401` is
+  never dispatched here — it stays the dedicated self-heal path.
+- `RefreshHandler` resolves on a successful heal or rejects with a classified
+  `ApiError` on failure — no separate outcome enum. The SAME central status
+  mapping that handles every other error decides what happens next purely
+  from the rejected error's `httpStatus`: a heal-side 5xx/network failure
+  keeps the session (never clears tokens) and feeds the error ladder; only a
+  `401` (the auth refresh token itself is dead) triggers the injectable
+  `ReauthRequiredHandler` (a non-destructive terminal signal, never an
+  automatic logout+redirect).
+- New injectable `Notifier` port + a central, counter-driven error ladder for
+  5xx/network failures — never a re-call-driven retry.
+- Self-heal across concurrent 401s is single-flight (one shared in-flight
+  promise) rather than each call independently retrying.
+
 ## [9.11.0] - 2026-08-27
 
 ### Added — audit trail, SIMPLE separate-DB design (`StoneScriptPHP\Audit`)
