@@ -10,7 +10,7 @@ use StoneScriptPHP\Env;
  * Implements EmailInterface for ZeptoMail API v1.1
  *
  * Configuration required in .env:
- * - ZEPTOMAIL_BOUNCE_ADDRESS
+ * - ZEPTOMAIL_BOUNCE_ADDRESS (optional — see addBounceAddressIfConfigured())
  * - ZEPTOMAIL_SENDER_EMAIL
  * - ZEPTOMAIL_SENDER_NAME
  * - ZEPTOMAIL_SEND_MAIL_TOKEN
@@ -38,10 +38,9 @@ class MyZeptoMail implements EmailInterface
         }
 
         $postFields = [
-            'bounce_address' => Env::$ZEPTOMAIL_BOUNCE_ADDRESS,
             'from' => [
-                'address' => Env::$ZEPTOMAIL_SENDER_EMAIL,
-                'name' => Env::$ZEPTOMAIL_SENDER_NAME
+                'address' => Env::get_instance()->ZEPTOMAIL_SENDER_EMAIL,
+                'name' => Env::get_instance()->ZEPTOMAIL_SENDER_NAME
             ],
             'to' => [
                 [
@@ -54,6 +53,7 @@ class MyZeptoMail implements EmailInterface
             'subject' => $subject,
             'htmlbody' => $body
         ];
+        $this->addBounceAddressIfConfigured($postFields);
 
         return $this->sendRequest($postFields);
     }
@@ -79,17 +79,35 @@ class MyZeptoMail implements EmailInterface
         }
 
         $postFields = [
-            'bounce_address' => Env::$ZEPTOMAIL_BOUNCE_ADDRESS,
             'from' => [
-                'address' => Env::$ZEPTOMAIL_SENDER_EMAIL,
-                'name' => Env::$ZEPTOMAIL_SENDER_NAME
+                'address' => Env::get_instance()->ZEPTOMAIL_SENDER_EMAIL,
+                'name' => Env::get_instance()->ZEPTOMAIL_SENDER_NAME
             ],
             'to' => $toList,
             'subject' => $subject,
             'htmlbody' => $body
         ];
+        $this->addBounceAddressIfConfigured($postFields);
 
         return $this->sendRequest($postFields);
+    }
+
+    /**
+     * ZeptoMail's `bounce_address` is OPTIONAL and must be an address that has
+     * been explicitly registered as a bounce address in the ZeptoMail mail
+     * agent settings — sending an arbitrary (even verified-domain) address in
+     * this field is rejected with HTTP 401 / TM_4001 "Invalid email address"
+     * (SM_113). Only send the field when ZEPTOMAIL_BOUNCE_ADDRESS is
+     * explicitly set; otherwise omit it and let ZeptoMail use its default.
+     *
+     * @param array<string,mixed> $postFields
+     */
+    private function addBounceAddressIfConfigured(array &$postFields): void
+    {
+        $bounceAddress = Env::get_instance()->ZEPTOMAIL_BOUNCE_ADDRESS;
+        if (!empty($bounceAddress)) {
+            $postFields['bounce_address'] = $bounceAddress;
+        }
     }
 
     /**
@@ -118,10 +136,13 @@ class MyZeptoMail implements EmailInterface
      */
     public function isConfigured(): bool
     {
-        return !empty(Env::$ZEPTOMAIL_BOUNCE_ADDRESS)
-            && !empty(Env::$ZEPTOMAIL_SENDER_EMAIL)
-            && !empty(Env::$ZEPTOMAIL_SENDER_NAME)
-            && !empty(Env::$ZEPTOMAIL_SEND_MAIL_TOKEN);
+        // ZEPTOMAIL_BOUNCE_ADDRESS is intentionally NOT required here — it's an
+        // optional field (see addBounceAddressIfConfigured()); requiring it
+        // blocked every sender that hadn't separately registered a bounce
+        // address in the ZeptoMail dashboard.
+        return !empty(Env::get_instance()->ZEPTOMAIL_SENDER_EMAIL)
+            && !empty(Env::get_instance()->ZEPTOMAIL_SENDER_NAME)
+            && !empty(Env::get_instance()->ZEPTOMAIL_SEND_MAIL_TOKEN);
     }
 
     /**
@@ -151,7 +172,7 @@ class MyZeptoMail implements EmailInterface
             CURLOPT_POSTFIELDS => json_encode($postFields),
             CURLOPT_HTTPHEADER => [
                 'accept: application/json',
-                'authorization: ' . Env::$ZEPTOMAIL_SEND_MAIL_TOKEN,
+                'authorization: ' . Env::get_instance()->ZEPTOMAIL_SEND_MAIL_TOKEN,
                 'cache-control: no-cache',
                 'content-type: application/json',
             ],
