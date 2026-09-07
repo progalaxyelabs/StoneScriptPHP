@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.13.0] - 2026-09-07
+
+### Added — env-configurable platform API token (apiaccesstoken) TTL
+
+- New `API_ACCESS_TOKEN_EXPIRY` env var (`Env.php`) controls the TTL (seconds)
+  of the platform API token ("apiaccesstoken", historically the "card" token)
+  minted by `POST {prefix}/exchange` and `/provision-tenant` in ExternalAuth
+  mode (`ExternalAuthConfig::$exchangeTtl`). Previously this TTL was hardcoded
+  to a literal `3600` with no env override.
+- **Backward compatible:** unset env ⇒ default remains exactly `3600`,
+  identical to prior behavior. Precedence: explicit `exchange_ttl` option
+  passed to `ExternalAuthRoutes::register()` > `API_ACCESS_TOKEN_EXPIRY` env >
+  `3600` default.
+- Documented in `.env.example`. No other TTL (auth access/refresh, invitation
+  `ttl` config) is touched by this change — scoped only to the ExternalAuth
+  exchange-route apiaccesstoken TTL gap.
+
 ## [9.12.0] - 2026-09-05
 
 ### Changed — generated client HTTP error handling + auth recovery redesign

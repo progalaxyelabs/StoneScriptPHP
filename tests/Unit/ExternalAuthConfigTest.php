@@ -251,6 +251,36 @@ class ExternalAuthConfigTest extends TestCase
         $this->assertSame(900, $config->exchangeTtl);
     }
 
+    public function test_exchange_ttl_reads_api_access_token_expiry_env(): void
+    {
+        // Backward-compat gap this test guards: API_ACCESS_TOKEN_EXPIRY must be
+        // readable via env when no 'exchange_ttl' option is passed, and must NOT
+        // affect the default when unset (see test_exchange_ttl_defaults_to_3600).
+        $this->setEnvIfEmpty('API_ACCESS_TOKEN_EXPIRY', '15');
+        // Reset Env singleton so the new putenv() value is actually picked up.
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $config = new ExternalAuthConfig([]);
+        $this->assertSame(15, $config->exchangeTtl,
+            'API_ACCESS_TOKEN_EXPIRY env var must set exchangeTtl when no exchange_ttl option is passed');
+    }
+
+    public function test_exchange_ttl_option_wins_over_api_access_token_expiry_env(): void
+    {
+        $this->setEnvIfEmpty('API_ACCESS_TOKEN_EXPIRY', '15');
+        $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
+        $prop = $ref->getProperty('_instance');
+        $prop->setAccessible(true);
+        $prop->setValue(null, null);
+
+        $config = new ExternalAuthConfig(['exchange_ttl' => 900]);
+        $this->assertSame(900, $config->exchangeTtl,
+            'explicit exchange_ttl option must take precedence over API_ACCESS_TOKEN_EXPIRY env');
+    }
+
     public function test_signing_issuer_override_is_respected(): void
     {
         $config = new ExternalAuthConfig(['signing_issuer' => 'https://api.myplatform.com']);

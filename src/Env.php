@@ -102,6 +102,16 @@ class Env
     public int $JWT_ACCESS_TOKEN_EXPIRY = 900;
     public int $JWT_REFRESH_TOKEN_EXPIRY = 15552000;
 
+    // TTL (seconds) of the platform API token ("apiaccesstoken" — the token a
+    // platform mints for its OWN routes via POST {prefix}/exchange or
+    // /provision-tenant; historically called the "card" token). Previously
+    // hardcoded to 3600 in ExternalAuthConfig with no env override; now
+    // configurable so a platform (or a compressed test run) can shorten/lengthen
+    // it without a code change. Default of 3600 is IDENTICAL to the old hardcoded
+    // value, so leaving this unset changes nothing. An explicit `exchange_ttl`
+    // option passed to ExternalAuthRoutes::register() still wins over this env var.
+    public int $API_ACCESS_TOKEN_EXPIRY = 3600;
+
     // Authentication Mode (v2.2.0+) - Supports microservices architecture
     // Modes: 'builtin' (local RSA), 'external' (JWKS), 'hybrid' (validate external + issue own)
     public string $AUTH_MODE = 'builtin';

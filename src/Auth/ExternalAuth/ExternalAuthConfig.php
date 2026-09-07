@@ -59,7 +59,11 @@ class ExternalAuthConfig
      */
     public readonly string $jwksUrl;
 
-    /** @var int TTL (seconds) for platform tokens issued by the exchange route. */
+    /**
+     * @var int TTL (seconds) for platform tokens (apiaccesstoken) issued by the
+     * exchange route. Defaults to the `API_ACCESS_TOKEN_EXPIRY` env var, or 3600
+     * if that is also unset. Override per-call with the `exchange_ttl` option.
+     */
     public readonly int $exchangeTtl;
 
     /**
@@ -225,7 +229,13 @@ class ExternalAuthConfig
         // keypair to keep in sync with JwtAuthMiddleware.
         $this->jwksUrl = $options['jwks_url']
             ?? (rtrim($this->authServiceUrl, '/') . '/api/auth/jwks');
-        $this->exchangeTtl = (int) ($options['exchange_ttl'] ?? 3600);
+        // Precedence: explicit 'exchange_ttl' option > API_ACCESS_TOKEN_EXPIRY env var >
+        // hardcoded 3600. The env var was added so a platform (or a compressed
+        // acceptance-test run) can shorten/lengthen the apiaccesstoken TTL without a
+        // code change; leaving it unset preserves the exact previous behavior (3600s).
+        $this->exchangeTtl = (int) (
+            $options['exchange_ttl'] ?? ($env->API_ACCESS_TOKEN_EXPIRY ?: 3600)
+        );
         $this->signingPrivateKeyPath = $options['signing_private_key_path']
             ?? $env->JWT_PRIVATE_KEY_PATH;
         $this->signingPrivateKeyPassphrase = $options['signing_private_key_passphrase']
