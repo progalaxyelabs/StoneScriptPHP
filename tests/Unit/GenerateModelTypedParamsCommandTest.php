@@ -149,6 +149,114 @@ final class GenerateModelTypedParamsCommandTest extends TestCase
         $this->assertStringContainsString('Database::fn($function_name, []);', $php);
     }
 
+    /**
+     * Nullability-drift guard, layer 1: a `--` comment INSIDE the parameter
+     * parens must not be silently parsed into a corrupted (and possibly
+     * wrongly-non-nullable) parameter -- the generator must refuse instead.
+     *
+     * This reproduces a real gotcha discovered in a fleet platform's own SQL:
+     * a maintainer had to move an explanatory comment OUTSIDE the parameter
+     * list specifically because an inline comment there broke the model
+     * generator. That footgun should no longer be possible to trip silently.
+     */
+    public function test_inline_comment_inside_param_list_fails_loud(): void
+    {
+        $fixture = $this->buildFixture();
+
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/create_order.pgsql',
+            "CREATE OR REPLACE FUNCTION create_order(\n"
+            . "    p_customer_id integer, -- required\n"
+            . "    p_notes text default null\n"
+            . ")\n"
+            . "RETURNS TABLE (\n"
+            . "    o_order_id integer\n"
+            . ")\n"
+            . "AS \$\$\n"
+            . "BEGIN\nEND;\n"
+            . "\$\$ LANGUAGE plpgsql;\n"
+        );
+
+        [$exitCode, $output] = $this->runGenerator($fixture, 'create_order.pgsql');
+
+        $this->assertNotSame(0, $exitCode, "generator must fail loud on an inline '--' comment inside the param list, but exited 0:\n$output");
+        $this->assertStringContainsString('create_order', $output);
+        $this->assertStringContainsString('comment', $output);
+        $this->assertFileDoesNotExist($fixture . 'src/App/Database/Functions/FnCreateOrder.php');
+    }
+
+    /**
+     * Nullability-drift guard, layer 1 (identifier safety): a parameter name
+     * the parser cannot resolve to a plain identifier must fail loud rather
+     * than emit a DTO with a garbage property name/type.
+     */
+    public function test_unparseable_default_expression_still_emits_correct_nullability(): void
+    {
+        $fixture = $this->buildFixture();
+
+        // A DEFAULT expression that itself contains a comma-like function
+        // call and an explicit cast -- exercises split_parameters()' paren
+        // depth tracking plus the DEFAULT-stripping regex together. Must
+        // still come out nullable, not silently required.
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/create_ticket.pgsql',
+            "CREATE OR REPLACE FUNCTION create_ticket(\n"
+            . "    p_subject text,\n"
+            . "    p_priority integer default greatest(1, least(5, 3))\n"
+            . ")\n"
+            . "RETURNS TABLE (\n"
+            . "    o_ticket_id integer\n"
+            . ")\n"
+            . "AS \$\$\n"
+            . "BEGIN\nEND;\n"
+            . "\$\$ LANGUAGE plpgsql;\n"
+        );
+
+        [$exitCode, $output] = $this->runGenerator($fixture, 'create_ticket.pgsql');
+        $this->assertSame(0, $exitCode, "generator exited non-zero:\n$output");
+
+        $php = file_get_contents($fixture . 'src/App/Database/Functions/FnCreateTicket.php');
+        $this->assertStringContainsString('public string $p_subject;', $php);
+        $this->assertStringContainsString('public ?int $p_priority = null;', $php);
+    }
+
+    /**
+     * A DEFAULT'd JSON/JSONB parameter -- a common, everyday pattern (an
+     * items/metadata payload) -- must NOT emit `?mixed`, which is a genuine
+     * PHP fatal error ("Type mixed cannot be marked as nullable since mixed
+     * already includes null"). `mixed` is implicitly nullable already.
+     * Discovered via the schema-contract proof harness against a real
+     * production function with exactly this shape.
+     */
+    public function test_default_jsonb_param_emits_bare_mixed_not_nullable_mixed(): void
+    {
+        $fixture = $this->buildFixture();
+
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/create_shipment.pgsql',
+            "CREATE OR REPLACE FUNCTION create_shipment(\n"
+            . "    p_carrier text,\n"
+            . "    p_items jsonb default '[]'::jsonb\n"
+            . ")\n"
+            . "RETURNS TABLE (\n"
+            . "    o_shipment_id integer\n"
+            . ")\n"
+            . "AS \$\$\n"
+            . "BEGIN\nEND;\n"
+            . "\$\$ LANGUAGE plpgsql;\n"
+        );
+
+        [$exitCode, $output] = $this->runGenerator($fixture, 'create_shipment.pgsql');
+        $this->assertSame(0, $exitCode, "generator exited non-zero:\n$output");
+
+        $file = $fixture . 'src/App/Database/Functions/FnCreateShipment.php';
+        $this->assertPhpSyntaxValid($file);
+
+        $php = file_get_contents($file);
+        $this->assertStringContainsString('public mixed $p_items = null;', $php);
+        $this->assertStringNotContainsString('?mixed', $php);
+    }
+
     private function assertPhpSyntaxValid(string $file): void
     {
         $output = [];
