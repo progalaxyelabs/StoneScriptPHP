@@ -74,4 +74,41 @@ class PostRazorpayWebhookRouteViaPayTest extends TestCase
         $this->expectException(\StoneScriptPay\Exceptions\SignatureVerificationException::class);
         $driver->handleWebhook(new \StoneScriptPay\DTO\WebhookRequest($body, 'wrong-signature'));
     }
+
+    /**
+     * BC guard pin (v9.17.0): pay stays suggest/require-dev, never a hard
+     * framework require — an existing razorpay_webhook consumer upgrading
+     * WITHOUT `pay` installed must get an actionable 503, never a raw
+     * "Class not found" fatal. This dev environment always has `pay`
+     * installed (it's require-dev here), so the missing-class branch
+     * itself cannot be exercised in-process without uninstalling a
+     * dependency mid-suite — this test instead pins that the guard's
+     * source is present and structured correctly, so the behavior can't
+     * silently regress via an unrelated refactor.
+     */
+    public function test_route_source_guards_against_pay_not_installed_with_actionable_message(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../src/Subscriptions/Routes/PostRazorpayWebhookRoute.php');
+        $this->assertIsString($source);
+
+        $this->assertStringContainsString(
+            'class_exists(\StoneScriptPay\Drivers\RazorpayDriver::class)',
+            $source,
+            'the class_exists() BC guard must run BEFORE any RazorpayDriver instantiation'
+        );
+        $this->assertStringContainsString(
+            'install stonescriptphp-pay',
+            $source,
+            'the guard must give an actionable install instruction, not a bare failure'
+        );
+
+        // The guard must appear BEFORE the first real instantiation of
+        // RazorpayDriver in process() — never after (a guard placed after
+        // the fatal-causing line is worthless).
+        $guardPos = strpos($source, 'class_exists(\StoneScriptPay\Drivers\RazorpayDriver::class)');
+        $instantiatePos = strpos($source, 'new \StoneScriptPay\Drivers\RazorpayDriver(');
+        $this->assertNotFalse($guardPos);
+        $this->assertNotFalse($instantiatePos);
+        $this->assertLessThan($instantiatePos, $guardPos, 'the guard must run before RazorpayDriver is instantiated');
+    }
 }

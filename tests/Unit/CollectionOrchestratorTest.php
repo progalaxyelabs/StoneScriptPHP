@@ -46,7 +46,7 @@ class CollectionOrchestratorTest extends TestCase
             ),
         ]);
         $payment = new FakePaymentProviderForOrchestrator();
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
         $checkout = $orchestrator->initiateCollection('inv_1');
 
@@ -76,7 +76,7 @@ class CollectionOrchestratorTest extends TestCase
             ),
         ]);
         $payment = new FakePaymentProviderForOrchestrator();
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
         $checkout = $orchestrator->initiateCollection('inv_paid');
 
@@ -89,7 +89,7 @@ class CollectionOrchestratorTest extends TestCase
     public function test_initiate_collection_throws_without_invoice_source(): void
     {
         $payment = new FakePaymentProviderForOrchestrator();
-        $orchestrator = new CollectionOrchestrator($payment, null, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, null);
 
         $this->expectException(\LogicException::class);
         $orchestrator->initiateCollection('inv_1');
@@ -112,7 +112,7 @@ class CollectionOrchestratorTest extends TestCase
             currency: 'INR',
             capturedAt: new \DateTimeImmutable('2026-09-14T00:00:00+00:00'),
         ));
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
         $outcome = $orchestrator->settleFromWebhook(new WebhookRequest('{}', 'sig'));
 
@@ -147,7 +147,7 @@ class CollectionOrchestratorTest extends TestCase
             currency: 'INR',
             capturedAt: new \DateTimeImmutable(),
         ));
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
         $outcome = $orchestrator->settleFromWebhook(new WebhookRequest('{}', 'sig'));
 
@@ -163,7 +163,7 @@ class CollectionOrchestratorTest extends TestCase
             providerEvent: 'payment.failed',
             payload: [],
         ));
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
         $outcome = $orchestrator->settleFromWebhook(new WebhookRequest('{}', 'sig'));
 
@@ -188,7 +188,7 @@ class CollectionOrchestratorTest extends TestCase
             currency: 'USD',
             capturedAt: new \DateTimeImmutable(),
         ));
-        $orchestrator = new CollectionOrchestrator($payment, null, GatewayCode::PAYPAL);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::PAYPAL, null);
 
         $outcome = $orchestrator->settleFromWebhook(new WebhookRequest('{}', 'sig'));
 
@@ -210,7 +210,7 @@ class CollectionOrchestratorTest extends TestCase
             providerEvent: 'payment.captured',
             payload: ['some' => 'provider-native-shape'],
         ));
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
         $this->expectException(\RuntimeException::class);
         $orchestrator->settleFromWebhook(new WebhookRequest('{}', 'sig'));

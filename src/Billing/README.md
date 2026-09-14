@@ -46,7 +46,10 @@ use StoneScriptPay\Drivers\RazorpayDriver;
 $payment = new RazorpayDriver($keyId, $keySecret, $webhookSecret);
 $invoices = new InvoiceSourceAdapter(/* ... */); // or null under MoR
 
-$orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+// gatewayCode is REQUIRED, no default — pass the code that matches $payment.
+// (A defaulted value here would let a non-Razorpay integrator silently
+// mis-tag every recorded payment with the wrong gateway code.)
+$orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
 // Flow 1 — initiate collection (server redirects the payer to the returned checkout)
 $checkout = $orchestrator->initiateCollection($invoiceRef);
@@ -82,7 +85,8 @@ numbering, currency, or gateway-ROUTING decision is ever made in PHP. See
   never touch `stonescriptphp-invoice`.
 - **Path C — an MoR provider, NO separate invoicing.** Implement a
   `PaymentProvider` driver whose `settlementModel()` returns `'mor'`.
-  Construct `new CollectionOrchestrator($driver, null, $gatewayCode)`.
+  Construct `new CollectionOrchestrator($driver, $gatewayCode)` (the third
+  arg, `$invoices`, defaults to `null`).
   `settleFromWebhook()` acknowledges without recording;
   `initiateCollection()` is not used (there is no invoice to resolve a
   payable intent from) — initiate checkout directly against the driver

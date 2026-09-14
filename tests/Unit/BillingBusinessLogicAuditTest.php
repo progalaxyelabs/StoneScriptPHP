@@ -64,7 +64,7 @@ class BillingBusinessLogicAuditTest extends TestCase
             checkoutEndpoint: 'https://pay.example.com/audit',
         ));
         $payment = new AuditFakePaymentProvider();
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
         $checkout = $orchestrator->initiateCollection('audit_invoice_ref');
 
@@ -94,7 +94,7 @@ class BillingBusinessLogicAuditTest extends TestCase
             checkoutEndpoint: 'https://pay.example.com/audit2',
         ));
         $payment = new AuditFakePaymentProvider();
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::RAZORPAY);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
         // Must NOT throw — the orchestrator does not police the invoicing
         // system's routing decision; it only relays it.
@@ -131,7 +131,7 @@ class BillingBusinessLogicAuditTest extends TestCase
             currency: $oddCurrency,
             capturedAt: $capturedAt,
         ));
-        $orchestrator = new CollectionOrchestrator($payment, $invoices, GatewayCode::PAYPAL);
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::PAYPAL, $invoices);
 
         $orchestrator->settleFromWebhook(new WebhookRequest('{}', 'sig'));
 

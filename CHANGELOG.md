@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.17.1]
+
+### Fixed — post-review hardening of the 9.17.0 Billing seam
+
+- **`CollectionOrchestrator::__construct()`**: `$gatewayCode` is now a
+  **required** constructor argument (no default; validated against
+  `GatewayCode::isKnown()`, throws `\InvalidArgumentException` otherwise)
+  and moved before the optional `$invoices` parameter. Previously defaulted
+  to `GatewayCode::RAZORPAY`, which meant a non-Razorpay integrator using
+  the natural constructor call would silently record every payment tagged
+  with the wrong gateway code. **BC break for `Billing\`-seam adopters
+  only** (nobody has adopted it outside this framework's own tests yet,
+  landing the same day as 9.17.0) — update positional constructor calls
+  from `new CollectionOrchestrator($payment, $invoices, $gatewayCode)` to
+  `new CollectionOrchestrator($payment, $gatewayCode, $invoices)`, or use
+  named arguments.
+- **`CollectionOrchestrator::settleFromWebhook()`** no longer treats
+  `subscription.charged` as a settlement event — no shipped driver
+  populates its normalised fields, so routing it here always hit the
+  null-guard and threw (an infinite webhook-retry loop, never settling).
+  Only `payment.captured` is a settlement event until a driver actually
+  normalises `subscription.charged`.
+- **`CollectionOrchestrator::settleFromWebhook()`** no longer defaults a
+  missing `capturedAt` to `new \DateTimeImmutable()` — it now fails loud
+  (same guard as the other normalised fields) instead of silently
+  substituting "now" for what becomes `inv_invoices.paid_at`, a
+  business-meaningful timestamp. Both shipped drivers already populate it
+  for `payment.captured`, so this only bites a broken/incomplete driver.
+- **BC (razorpay_webhook feature only):** `PostRazorpayWebhookRoute` now
+  fails loud with an actionable 503 ("install stonescriptphp-pay to use
+  the razorpay_webhook feature") if `progalaxyelabs/stonescriptphp-pay` is
+  not installed, instead of a raw "Class not found" fatal — `pay` stays
+  `suggest`/`require-dev` only, never a hard framework `require`. An
+  existing `razorpay_webhook` consumer upgrading to 9.17.0+ that hasn't yet
+  run `composer require progalaxyelabs/stonescriptphp-pay` will see this
+  guard the first time a webhook arrives; run that composer command to
+  resolve it.
+- `tests/Unit/GatewayCodeTest.php`'s docblock previously oversold a
+  self-referential literal assertion (`assertSame(['razorpay','paypal'],
+  GatewayCode::all())`) as if it were a live cross-package drift check
+  against `stonescriptphp-invoice`'s SQL seed data. Docblock corrected, and
+  a genuine (skip-if-absent) cross-check against a sibling
+  `stonescriptphp-invoice` checkout was added alongside it.
+
 ## [9.16.0] - 2026-09-14
 
 ### Added — canonical login-user chokepoint for builtin Google OAuth
