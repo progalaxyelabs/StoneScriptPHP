@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.17.2]
+
+### Fixed — dependency-inversion: framework no longer depends on `stonescriptphp-pay`
+
+- **Backwards dependency removed.** `Billing\Contracts\PaymentContract`
+  previously `extends \StoneScriptPay\Contracts\PaymentProvider` — the
+  core framework reaching across a package boundary into a downstream
+  payment package for its own contract shape. `Billing\Contracts\PaymentProvider`
+  is now a fully self-contained, framework-owned port (own DTOs under
+  `Billing\Dto\*`, own exceptions under `Billing\Exceptions\*`).
+  `PaymentContract` is kept only as a BC alias of `PaymentProvider`.
+- **`CollectionOrchestrator`** now type-hints only the framework's own
+  `PaymentProvider` port and DTOs — zero `StoneScriptPay\*` references.
+- **`PostRazorpayWebhookRoute`** no longer `new`s
+  `\StoneScriptPay\Drivers\RazorpayDriver` directly. It now requires an
+  injected `Billing\Contracts\PaymentProvider` — pass one via
+  `SubscriptionRoutes::register($router, ['payment_provider' => $driver,
+  ...])` (flows through `SubscriptionConfig::$paymentProvider`); throws at
+  registration time if `razorpay_webhook` is enabled without one.
+- **`stonescriptphp-pay` stays a standalone, framework-free library** — it
+  does NOT implement `Billing\Contracts\PaymentProvider` directly (its own
+  `StoneScriptPay\Contracts\PaymentProvider` is a separate, structurally
+  identical contract) and has no dependency on this framework. Bridging a
+  `pay` driver into this framework's port is a small app-side adapter —
+  see `src/Billing/README.md`'s "Bridging `stonescriptphp-pay` into this
+  port" section for the shape.
+- `composer.json`: removed the `repositories` path entry and the
+  `stonescriptphp-pay` `require-dev`; `stonescriptphp-pay` remains a
+  `suggest` only.
+- Framework tests (`CollectionOrchestratorTest`,
+  `BillingBusinessLogicAuditTest`, `PostRazorpayWebhookRouteViaPayTest`)
+  now use fakes implementing the framework's own `PaymentProvider` port —
+  no `StoneScriptPay\*` imports.
+
 ## [9.17.1]
 
 ### Fixed — post-review hardening of the 9.17.0 Billing seam

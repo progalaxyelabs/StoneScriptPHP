@@ -2,7 +2,7 @@
     "name": "progalaxyelabs/stonescriptphp",
     "description": "Core Framework Library - Use progalaxyelabs/stonescriptphp-server to create new projects. Modern PHP backend framework for building APIs with PostgreSQL. Installed automatically as a dependency when you create projects with stonescriptphp-server.",
     "type": "library",
-    "version": "9.17.1",
+    "version": "9.17.2",
     "license": "MIT",
     "keywords": [
         "framework",
@@ -38,8 +38,7 @@
         "google/apiclient": "^2.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5.50",
-        "symfony/mailer": "^7.0",
-        "progalaxyelabs/stonescriptphp-pay": "^0.2.0"
+        "symfony/mailer": "^7.0"
     },
     "suggest": {
         "ext-redis": "Required for Redis caching support",
@@ -47,14 +46,8 @@
         "openspout/openspout": "Required for `php stone generate data-export`'s XLSX output — a genuinely constant-memory streaming writer (phpoffice/phpspreadsheet is not)",
         "google/apiclient": "Required for Google OAuth authentication (install via: php stone generate auth:google)",
         "phpoffice/phpspreadsheet": "Required for Excel/CSV export features",
-        "progalaxyelabs/stonescriptphp-pay": "Required to use StoneScriptPHP\\Billing\\CollectionOrchestrator / PaymentContract, AND required at runtime if you enable StoneScriptPHP\\Subscriptions' razorpay_webhook feature (v9.17.0+ — PostRazorpayWebhookRoute verifies via pay's RazorpayDriver instead of an inline HMAC copy)"
+        "progalaxyelabs/stonescriptphp-pay": "A standalone payment-driver library (Razorpay/PayPal) — bridge it into StoneScriptPHP\\Billing\\Contracts\\PaymentProvider with a small app-side adapter (see src/Billing/README.md) to use it with StoneScriptPHP\\Billing\\CollectionOrchestrator or StoneScriptPHP\\Subscriptions' razorpay_webhook feature (v9.17.2+ — pass the adapter as 'payment_provider' to SubscriptionRoutes::register(); the framework itself depends on no concrete payment package, and pay has no dependency on the framework)"
     },
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../stonescriptphp-pay"
-        }
-    ],
     "autoload": {
         "psr-4": {
             "StoneScriptPHP\\": "src/"

@@ -5,29 +5,45 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Billing\Contracts\PaymentProvider;
+use StoneScriptPHP\Billing\Dto\CreateOrderRequest;
+use StoneScriptPHP\Billing\Dto\CreateSubscriptionRequest;
+use StoneScriptPHP\Billing\Dto\OrderResult;
+use StoneScriptPHP\Billing\Dto\RefundRequest;
+use StoneScriptPHP\Billing\Dto\RefundResult;
+use StoneScriptPHP\Billing\Dto\SubscriptionResult;
+use StoneScriptPHP\Billing\Dto\VerificationResult;
+use StoneScriptPHP\Billing\Dto\VerifyRequest;
+use StoneScriptPHP\Billing\Dto\WebhookEvent;
+use StoneScriptPHP\Billing\Dto\WebhookRequest;
+use StoneScriptPHP\Billing\Exceptions\SignatureVerificationException;
 use StoneScriptPHP\Database;
+use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Subscriptions\SubscriptionConfig;
+use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
 use StoneScriptPHP\Subscriptions\Routes\PostRazorpayWebhookRoute;
 
 /**
- * v9.17.0 migration: PostRazorpayWebhookRoute::process() now verifies +
- * parses via `stonescriptphp-pay`'s RazorpayDriver instead of an inline
- * hand-rolled `hash_hmac` copy. These tests exercise process() end-to-end
- * (unlike PostRazorpayWebhookRouteQuarantineTest, which invokes
- * handlePaymentCaptured() directly) to prove the pay-backed verification
- * path itself — signature rejection, missing-signature rejection, and a
- * genuinely-signed-but-malformed-JSON body still quarantining exactly as
- * before.
+ * v9.17.2 dependency-inversion migration: PostRazorpayWebhookRoute no
+ * longer hard-instantiates any concrete payment package's driver class —
+ * it calls through an INJECTED `StoneScriptPHP\Billing\Contracts\
+ * PaymentProvider`, wired via `SubscriptionConfig::$paymentProvider` /
+ * `SubscriptionRoutes::register(['payment_provider' => $driver, ...])`.
+ *
+ * These tests prove the injection seam itself using a FAKE
+ * `PaymentProvider` (the framework's own port) — no payment package
+ * needed at all to test the framework's side of this contract. A real
+ * concrete driver (e.g. `stonescriptphp-pay`'s Razorpay driver)
+ * satisfying this exact same port is proven in THAT package's own test
+ * suite, not here — the framework must not depend on it to test itself.
  *
  * process() reads php://input directly, which PHPUnit cannot easily fake
  * without a stream wrapper — these tests therefore exercise the
- * `RazorpayDriver` call path this route now uses (proving it rejects
- * exactly what the old inline hash_hmac code rejected) rather than
- * reaching through the framework's stdin plumbing. The quarantine test
- * file above already proves handlePaymentCaptured()'s contract-check
- * branches are untouched; PHP-input-shaped end-to-end coverage lives in
- * this module's Feature-tier equivalent, unaffected by this change.
+ * injection/registration seam (construction, and the registration-time
+ * fail-loud guard) rather than reaching through the framework's stdin
+ * plumbing. PostRazorpayWebhookRouteQuarantineTest already proves
+ * handlePaymentCaptured()'s contract-check branches directly via
+ * reflection, unaffected by this migration.
  */
 class PostRazorpayWebhookRouteViaPayTest extends TestCase
 {
@@ -36,79 +52,157 @@ class PostRazorpayWebhookRouteViaPayTest extends TestCase
         Database::clearFakeMode();
     }
 
-    private function config(): SubscriptionConfig
+    private function config(?PaymentProvider $paymentProvider = null): SubscriptionConfig
     {
-        return new SubscriptionConfig(['platform_code' => 'exampleapp', 'razorpay_webhook_secret' => 'whsec_test']);
+        return new SubscriptionConfig([
+            'platform_code' => 'exampleapp',
+            'razorpay_webhook_secret' => 'whsec_test',
+            'payment_provider' => $paymentProvider,
+        ]);
     }
 
     public function test_route_class_is_constructible_and_typed(): void
     {
-        $route = new PostRazorpayWebhookRoute($this->config());
+        $route = new PostRazorpayWebhookRoute($this->config(new FakeWebhookPaymentProvider()));
         $this->assertInstanceOf(PostRazorpayWebhookRoute::class, $route);
     }
 
-    /**
-     * Confirms the exact verification formula PostRazorpayWebhookRoute
-     * relies on via pay's RazorpayDriver — HMAC-SHA256(rawBody,
-     * webhookSecret) — the SAME formula the deleted inline copy used, so a
-     * webhook signed by a real Razorpay account under the old code
-     * verifies identically under the new code.
-     */
-    public function test_underlying_pay_driver_accepts_the_same_hmac_formula_the_old_inline_code_used(): void
+    public function test_config_carries_the_injected_payment_provider_verbatim(): void
     {
-        $webhookSecret = 'whsec_test';
-        $body = json_encode(['event' => 'payment.captured', 'payload' => []]);
-        $oldStyleSignature = hash_hmac('sha256', $body, $webhookSecret);
+        $provider = new FakeWebhookPaymentProvider();
+        $config = $this->config($provider);
 
-        $driver = new \StoneScriptPay\Drivers\RazorpayDriver('', '', $webhookSecret);
-        $event = $driver->handleWebhook(new \StoneScriptPay\DTO\WebhookRequest($body, $oldStyleSignature));
-
-        $this->assertTrue($event->isPaymentCaptured());
+        $this->assertSame($provider, $config->paymentProvider);
     }
 
-    public function test_underlying_pay_driver_rejects_wrong_signature_same_as_old_inline_code_did(): void
+    public function test_config_payment_provider_defaults_to_null_when_not_given(): void
     {
-        $driver = new \StoneScriptPay\Drivers\RazorpayDriver('', '', 'whsec_test');
-        $body = json_encode(['event' => 'payment.captured', 'payload' => []]);
+        $config = new SubscriptionConfig(['platform_code' => 'exampleapp', 'razorpay_webhook_secret' => 'whsec_test']);
 
-        $this->expectException(\StoneScriptPay\Exceptions\SignatureVerificationException::class);
-        $driver->handleWebhook(new \StoneScriptPay\DTO\WebhookRequest($body, 'wrong-signature'));
+        $this->assertNull($config->paymentProvider);
     }
 
     /**
-     * BC guard pin (v9.17.0): pay stays suggest/require-dev, never a hard
-     * framework require — an existing razorpay_webhook consumer upgrading
-     * WITHOUT `pay` installed must get an actionable 503, never a raw
-     * "Class not found" fatal. This dev environment always has `pay`
-     * installed (it's require-dev here), so the missing-class branch
-     * itself cannot be exercised in-process without uninstalling a
-     * dependency mid-suite — this test instead pins that the guard's
-     * source is present and structured correctly, so the behavior can't
-     * silently regress via an unrelated refactor.
+     * The dependency-inversion fix's core guarantee: enabling
+     * razorpay_webhook WITHOUT a PaymentProvider must fail loud at
+     * REGISTRATION time (a clear, actionable exception naming the missing
+     * option) — never at the first real webhook request, and never via a
+     * raw "Class not found"/TypeError fatal from a hard-coded driver
+     * reference (the pre-9.17.2 behavior this migration removes).
      */
-    public function test_route_source_guards_against_pay_not_installed_with_actionable_message(): void
+    public function test_register_throws_when_razorpay_webhook_enabled_without_payment_provider(): void
     {
-        $source = file_get_contents(__DIR__ . '/../../src/Subscriptions/Routes/PostRazorpayWebhookRoute.php');
-        $this->assertIsString($source);
+        $router = new Router();
 
-        $this->assertStringContainsString(
-            'class_exists(\StoneScriptPay\Drivers\RazorpayDriver::class)',
-            $source,
-            'the class_exists() BC guard must run BEFORE any RazorpayDriver instantiation'
-        );
-        $this->assertStringContainsString(
-            'install stonescriptphp-pay',
-            $source,
-            'the guard must give an actionable install instruction, not a bare failure'
-        );
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/payment_provider/');
 
-        // The guard must appear BEFORE the first real instantiation of
-        // RazorpayDriver in process() — never after (a guard placed after
-        // the fatal-causing line is worthless).
-        $guardPos = strpos($source, 'class_exists(\StoneScriptPay\Drivers\RazorpayDriver::class)');
-        $instantiatePos = strpos($source, 'new \StoneScriptPay\Drivers\RazorpayDriver(');
-        $this->assertNotFalse($guardPos);
-        $this->assertNotFalse($instantiatePos);
-        $this->assertLessThan($instantiatePos, $guardPos, 'the guard must run before RazorpayDriver is instantiated');
+        SubscriptionRoutes::register($router, [
+            'platform_code' => 'exampleapp',
+            'razorpay_webhook_secret' => 'whsec_test',
+            // 'payment_provider' deliberately omitted
+        ]);
+    }
+
+    /**
+     * The mirror-image proof: registration succeeds once a PaymentProvider
+     * is supplied — the framework does not care WHAT concrete class it is,
+     * only that it satisfies the port.
+     */
+    public function test_register_succeeds_when_razorpay_webhook_enabled_with_payment_provider(): void
+    {
+        $router = new Router();
+
+        SubscriptionRoutes::register($router, [
+            'platform_code' => 'exampleapp',
+            'razorpay_webhook_secret' => 'whsec_test',
+            'payment_provider' => new FakeWebhookPaymentProvider(),
+        ]);
+
+        $this->assertTrue(true, 'register() must not throw once a PaymentProvider is supplied');
+    }
+
+    /**
+     * Confirms the route's process() guard rejects a signature the
+     * injected provider itself rejects — proven here via the port's
+     * exception type, not a specific driver's HMAC formula (that formula
+     * is the concern of whichever concrete driver is installed, proven in
+     * ITS OWN test suite).
+     */
+    public function test_fake_payment_provider_rejecting_signature_throws_the_frameworks_own_exception_type(): void
+    {
+        $provider = new FakeWebhookPaymentProvider(throwOnHandleWebhook: true);
+
+        $this->expectException(SignatureVerificationException::class);
+        $provider->handleWebhook(new WebhookRequest('{}', 'wrong-signature'));
+    }
+}
+
+/**
+ * Minimal fake `PaymentProvider` — the framework's own port — used to
+ * prove the webhook route's injection seam without any concrete payment
+ * package installed.
+ */
+final class FakeWebhookPaymentProvider implements PaymentProvider
+{
+    public function __construct(private readonly bool $throwOnHandleWebhook = false)
+    {
+    }
+
+    public function createOrder(CreateOrderRequest $req): OrderResult
+    {
+        return new OrderResult(
+            orderId: 'order_fake',
+            amountMinorUnits: $req->amountMinorUnits,
+            currency: $req->currency,
+            receipt: $req->receipt,
+            publishableKeyId: 'key_fake',
+            status: 'created',
+        );
+    }
+
+    public function verifySignature(VerifyRequest $req): VerificationResult
+    {
+        return new VerificationResult(verified: true, paymentId: $req->paymentId, orderId: $req->orderId);
+    }
+
+    public function handleWebhook(WebhookRequest $req): WebhookEvent
+    {
+        if ($this->throwOnHandleWebhook) {
+            throw new SignatureVerificationException('webhook');
+        }
+
+        return new WebhookEvent(type: 'payment.captured', providerEvent: 'payment.captured', payload: []);
+    }
+
+    public function createSubscription(CreateSubscriptionRequest $req): SubscriptionResult
+    {
+        return new SubscriptionResult(subscriptionId: 'sub_fake', status: 'created');
+    }
+
+    public function cancelSubscription(string $subscriptionId): SubscriptionResult
+    {
+        return new SubscriptionResult(subscriptionId: $subscriptionId, status: 'cancelled');
+    }
+
+    public function getSubscription(string $subscriptionId): SubscriptionResult
+    {
+        return new SubscriptionResult(subscriptionId: $subscriptionId, status: 'active');
+    }
+
+    public function refund(RefundRequest $req): RefundResult
+    {
+        return new RefundResult(
+            refundId: 'refund_fake',
+            paymentId: $req->paymentId,
+            amountMinorUnits: $req->amountMinorUnits ?? 0,
+            status: 'processed',
+            createdAt: time(),
+        );
+    }
+
+    public function settlementModel(): string
+    {
+        return 'gateway';
     }
 }

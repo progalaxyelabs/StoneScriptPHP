@@ -5,28 +5,21 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Billing\Contracts;
 
 /**
- * The framework's published alias for THE payment contract.
+ * BC alias for {@see PaymentProvider} — the framework's payment contract.
  *
- * `progalaxyelabs/stonescriptphp-pay`'s `\StoneScriptPay\Contracts\PaymentProvider`
- * IS the payment contract — it does not need redesigning. This interface
- * exists purely so framework-owned code (and consumers) can reference a
- * `StoneScriptPHP\Billing\` FQCN instead of reaching across package
- * boundaries by hand, WITHOUT giving the framework a require-time
- * dependency on `pay`.
+ * Before v9.17.2 this interface `extends` a downstream payment package's
+ * own contract interface, purely so framework-owned code could
+ * reference a `StoneScriptPHP\Billing\` FQCN without a hard `require` on
+ * `stonescriptphp-pay`. That was a backwards dependency: the core
+ * framework must not reach across a package boundary for its own contract
+ * shape.
  *
- * This file is only ever loaded (autoloaded) when something actually
- * references `PaymentContract` — a project that never touches `Billing\`
- * never triggers the `\StoneScriptPay\Contracts\PaymentProvider` class
- * lookup this `extends` clause performs, so the framework's own
- * composer.json deliberately does NOT `require` `stonescriptphp-pay`.
- * Using `CollectionOrchestrator` (which type-hints `PaymentProvider`
- * directly, not this alias) or `PaymentContract` implies your project has
- * `progalaxyelabs/stonescriptphp-pay` installed.
- *
- * Every `pay` driver (RazorpayDriver, PaypalDriver, a future PaddleDriver,
- * ...) already implements `PaymentProvider` and therefore already
- * satisfies `PaymentContract` — no extra work needed on the driver side.
+ * v9.17.2+: `PaymentProvider` (this same namespace) is now a fully
+ * self-contained, framework-owned port — no cross-package `extends`
+ * needed at all. This alias is kept only so existing code typed against
+ * `PaymentContract` keeps compiling; new code should reference
+ * {@see PaymentProvider} directly.
  */
-interface PaymentContract extends \StoneScriptPay\Contracts\PaymentProvider
+interface PaymentContract extends PaymentProvider
 {
 }

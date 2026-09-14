@@ -13,10 +13,21 @@ independently installable and usable on its own.
 - `pay` + `invoice` + this package = automated collection, wired through
   `CollectionOrchestrator`.
 
-Using `StoneScriptPHP\Billing\` implies you have
-`progalaxyelabs/stonescriptphp-pay` installed (the framework itself does
-NOT `require` it — only `require-dev`, for this package's own tests — so a
-project that never touches `Billing\` never needs `pay` installed).
+The framework OWNS the payment-provider port itself
+(`Contracts\PaymentProvider` + `Dto\*` + `Exceptions\*`, all
+self-contained — no cross-package `extends`/`use`). The framework never
+depends on any payment package, and `stonescriptphp-pay` never depends on
+the framework — both stay independently publishable/requireable.
+
+`stonescriptphp-pay` ships its OWN, structurally-identical
+`StoneScriptPay\Contracts\PaymentProvider` contract (same method names,
+separate DTO namespace `StoneScriptPay\DTO\*`) — it does not implement
+this framework port directly. To use a `pay` driver (e.g.
+`RazorpayDriver`) through THIS port, the CONSUMING APPLICATION writes a
+small adapter — see "Bridging `stonescriptphp-pay` into this port" below.
+A hand-rolled driver, or any other payment package, can instead implement
+`Contracts\PaymentProvider` directly with no adapter needed. The framework
+itself resolves and compiles with zero payment package present.
 
 ## The two contracts
 
@@ -27,9 +38,11 @@ project that never touches `Billing\` never needs `pay` installed).
   invoice to paid are folded into ONE atomic call on purpose, so the
   "should this settle?" decision stays in the invoicing implementation
   (SQL, for `stonescriptphp-invoice`), never in PHP.
-- `\StoneScriptPay\Contracts\PaymentProvider` (from `stonescriptphp-pay`) —
-  already an adequate payment contract; not redesigned here. Every driver
-  additionally reports `settlementModel(): 'gateway'|'mor'`.
+- `Contracts\PaymentProvider` — the framework's OWN payment port (see
+  above). `stonescriptphp-pay`'s drivers do NOT implement this interface
+  directly (see the bridging section below); a hand-rolled driver or a
+  small app-side adapter does. Every implementation additionally reports
+  `settlementModel(): 'gateway'|'mor'`.
 - `Contracts\GatewayCode` — the published gateway-code vocabulary
   (`'razorpay'`, `'paypal'`, ...) both sides' data must agree on. A
   vocabulary, not logic — it fixes the spelling, never the routing
@@ -40,10 +53,11 @@ project that never touches `Billing\` never needs `pay` installed).
 ```php
 use StoneScriptPHP\Billing\CollectionOrchestrator;
 use StoneScriptPHP\Billing\Contracts\GatewayCode;
-use StoneScriptPay\Drivers\RazorpayDriver;
+use StoneScriptPHP\Billing\Dto\WebhookRequest;
+// use App\Billing\StoneScriptPayAdapter; // your own adapter — see below
 // use StoneScriptPHP\Invoice\Php\InvoiceSourceAdapter; // from stonescriptphp-invoice
 
-$payment = new RazorpayDriver($keyId, $keySecret, $webhookSecret);
+$payment = new StoneScriptPayAdapter(new \StoneScriptPay\Drivers\RazorpayDriver($keyId, $keySecret, $webhookSecret));
 $invoices = new InvoiceSourceAdapter(/* ... */); // or null under MoR
 
 // gatewayCode is REQUIRED, no default — pass the code that matches $payment.
@@ -59,7 +73,7 @@ if (!$checkout->isPayable) {
 // redirect to $checkout->checkoutEndpoint with $checkout->orderId / publishableKeyId
 
 // Flow 2 — settle on webhook (called from the provider webhook route)
-$outcome = $orchestrator->settleFromWebhook(new \StoneScriptPay\DTO\WebhookRequest(
+$outcome = $orchestrator->settleFromWebhook(new WebhookRequest(
     rawBody: file_get_contents('php://input'),
     signature: $_SERVER['HTTP_X_RAZORPAY_SIGNATURE'] ?? '',
 ));
@@ -71,11 +85,87 @@ numbering, currency, or gateway-ROUTING decision is ever made in PHP. See
 `CollectionOrchestrator`'s docblock and
 `Tests\Unit\BillingBusinessLogicAuditTest` for the line-by-line proof.
 
+## Bridging `stonescriptphp-pay` into this port
+
+`pay` is a deliberately framework-free library — it has no dependency on
+`progalaxyelabs/stonescriptphp` and its drivers implement its OWN
+`StoneScriptPay\Contracts\PaymentProvider`, not this framework's port.
+Both contracts are structurally identical (same methods, mirrored DTO
+fields), so bridging is a thin, mechanical delegate-and-map adapter that
+YOUR APPLICATION owns (it lives in neither core package):
+
+```php
+namespace App\Billing;
+
+use StoneScriptPHP\Billing\Contracts\PaymentProvider;
+use StoneScriptPHP\Billing\Dto as FwDto;
+use StoneScriptPay\Contracts\PaymentProvider as PayProvider;
+use StoneScriptPay\DTO as PayDto;
+
+final class StoneScriptPayAdapter implements PaymentProvider
+{
+    public function __construct(private readonly PayProvider $driver) {}
+
+    public function createOrder(FwDto\CreateOrderRequest $req): FwDto\OrderResult
+    {
+        $r = $this->driver->createOrder(new PayDto\CreateOrderRequest(
+            amountMinorUnits: $req->amountMinorUnits,
+            currency: $req->currency,
+            receipt: $req->receipt,
+            notes: $req->notes,
+        ));
+
+        return new FwDto\OrderResult(
+            orderId: $r->orderId,
+            amountMinorUnits: $r->amountMinorUnits,
+            currency: $r->currency,
+            receipt: $r->receipt,
+            publishableKeyId: $r->publishableKeyId,
+            status: $r->status,
+            raw: $r->raw,
+        );
+    }
+
+    public function handleWebhook(FwDto\WebhookRequest $req): FwDto\WebhookEvent
+    {
+        $e = $this->driver->handleWebhook(new PayDto\WebhookRequest($req->rawBody, $req->signature, $req->headers ?? []));
+
+        return new FwDto\WebhookEvent(
+            type: $e->type,
+            providerEvent: $e->providerEvent,
+            payload: $e->payload,
+            raw: $e->raw,
+            invoiceRef: $e->invoiceRef,
+            gatewayTxnRef: $e->gatewayTxnRef,
+            amountMinorUnits: $e->amountMinorUnits,
+            currency: $e->currency,
+            capturedAt: $e->capturedAt,
+        );
+    }
+
+    public function settlementModel(): string
+    {
+        return $this->driver->settlementModel();
+    }
+
+    // ...verifySignature() / createSubscription() / cancelSubscription() /
+    // getSubscription() / refund() follow the same delegate-and-map shape.
+}
+```
+
+Exceptions (`PaymentException`, `SignatureVerificationException`,
+`WebhookException`) also exist in both namespaces with the same names and
+meaning — either let the `StoneScriptPay\Exceptions\*` ones propagate (a
+caller catching the framework's `Billing\Exceptions\*` types would then
+need to catch both), or re-throw the framework's own exception type from
+inside the adapter for a cleaner boundary. Pick one and be consistent.
+
 ## Four integration paths — the contract is OPTIONAL, never a forced coupling
 
 - **Path A — our `pay` + our `invoice` (reference pairing).** `composer
-  require` both + the framework; register `RazorpayDriver`/`PaypalDriver`
-  and `InvoiceSourceAdapter`; use `CollectionOrchestrator` as above.
+  require` both + the framework; write (or reuse) the adapter above to
+  bridge `RazorpayDriver`/`PaypalDriver` into `PaymentProvider`; use
+  `InvoiceSourceAdapter`; wire `CollectionOrchestrator` as above.
 - **Path B — our `pay` + a DIFFERENT invoicing system** (Zoho, QuickBooks,
   Stripe Invoicing, hand-rolled). Implement `InvoiceSource`'s two methods
   against your system — `resolvePayableIntent` reads your invoice's

@@ -4,18 +4,21 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Billing;
 
-use StoneScriptPay\Contracts\PaymentProvider;
-use StoneScriptPay\DTO\CreateOrderRequest;
-use StoneScriptPay\DTO\WebhookRequest;
 use StoneScriptPHP\Billing\Contracts\GatewayCode;
 use StoneScriptPHP\Billing\Contracts\InvoiceSource;
+use StoneScriptPHP\Billing\Contracts\PaymentProvider;
 use StoneScriptPHP\Billing\Contracts\RecordPaymentRequest;
+use StoneScriptPHP\Billing\Dto\CreateOrderRequest;
+use StoneScriptPHP\Billing\Dto\WebhookRequest;
 
 /**
- * Reference glue binding a `PaymentProvider` (from `stonescriptphp-pay`) and
- * an OPTIONAL `InvoiceSource` for the two collection flows. Ships in the
- * framework — not in `pay` or `invoice` — because it is the only place
- * that can type-hint both contracts while keeping each package standalone.
+ * Reference glue binding a `Billing\Contracts\PaymentProvider` (a
+ * framework-owned port — see that interface's docblock; `stonescriptphp-pay`
+ * stays standalone and does not implement it directly, an app-side adapter
+ * bridges the two if `pay` is used) and an OPTIONAL `InvoiceSource` for the
+ * two collection flows. Ships in the framework — not in `pay` or `invoice`
+ * — because it is the only place that can type-hint both contracts while
+ * keeping each package standalone.
  *
  * Contains ONLY sequencing + marshalling — zero business decisions. It
  * computes no amount, decides no tax, assigns no invoice number, and
@@ -31,8 +34,11 @@ use StoneScriptPHP\Billing\Contracts\RecordPaymentRequest;
 final class CollectionOrchestrator
 {
     /**
-     * @param PaymentProvider $payment The bound payment driver (e.g.
-     *   `StoneScriptPay\Drivers\RazorpayDriver`).
+     * @param PaymentProvider $payment The bound payment driver/adapter —
+     *   any implementation of the framework's own `PaymentProvider` port
+     *   (e.g. a small app-side adapter wrapping `stonescriptphp-pay`'s
+     *   Razorpay driver, or a hand-rolled driver implementing this
+     *   interface directly).
      * @param string $gatewayCode This orchestrator instance's gateway code
      *   (see {@see GatewayCode}) — one orchestrator is bound to one
      *   payment driver, hence one gateway code. Used to tag recorded
@@ -117,9 +123,9 @@ final class CollectionOrchestrator
     }
 
     /**
-     * FLOW 2 — settle on webhook. Verifies + parses via `pay`
-     * (`PaymentProvider::handleWebhook()` — verification lives entirely in
-     * `pay`, never re-implemented here), then — on a capture/charge event —
+     * FLOW 2 — settle on webhook. Verifies + parses via the bound
+     * `PaymentProvider` (`handleWebhook()` — verification lives entirely in
+     * the driver/adapter, never re-implemented here), then — on a capture/charge event —
      * records the verified payment via the bound `InvoiceSource` (or, under
      * MoR, simply acknowledges — there is nothing to record locally).
      *
@@ -131,8 +137,8 @@ final class CollectionOrchestrator
      */
     public function settleFromWebhook(WebhookRequest $req): SettlementOutcome
     {
-        // Verification + parsing lives ENTIRELY in `pay` — throws on a bad
-        // signature, which the caller lets propagate (401/400).
+        // Verification + parsing lives ENTIRELY in the bound driver/adapter
+        // — throws on a bad signature, which the caller lets propagate (401/400).
         $event = $this->payment->handleWebhook($req);
 
         // Only 'payment.captured' is treated as a settlement event today.

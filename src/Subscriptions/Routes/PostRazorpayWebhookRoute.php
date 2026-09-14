@@ -6,6 +6,9 @@ namespace StoneScriptPHP\Subscriptions\Routes;
 
 use StoneScriptPHP\IRouteHandler;
 use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Billing\Dto\WebhookRequest;
+use StoneScriptPHP\Billing\Exceptions\SignatureVerificationException;
+use StoneScriptPHP\Billing\Exceptions\WebhookException;
 use StoneScriptPHP\Database;
 use StoneScriptPHP\Subscriptions\SubscriptionConfig;
 use StoneScriptPHP\Webhooks\WebhookQuarantine;
@@ -13,11 +16,28 @@ use StoneScriptPHP\Webhooks\WebhookQuarantine;
 /**
  * POST /subscription/webhook/razorpay
  *
- * Receives Razorpay payment webhooks. Verifies the signature via
- * `stonescriptphp-pay`'s `RazorpayDriver` (v9.17.0+ — the inline hand-rolled
- * `hash_hmac('sha256', ...)` copy this route used to carry has been
- * removed in favour of the shared, tested verification in `pay`), matches
- * payment to a tenant subscription by owner_email, and auto-activates.
+ * Receives Razorpay payment webhooks. Verifies the signature via an
+ * INJECTED `StoneScriptPHP\Billing\Contracts\PaymentProvider` (v9.17.2+ —
+ * the framework no longer hard-references any concrete payment package's
+ * driver class directly; the consuming app builds a `PaymentProvider`
+ * implementation — e.g. a small adapter wrapping the
+ * `progalaxyelabs/stonescriptphp-pay` package's Razorpay driver (`pay` is
+ * a standalone library with its own, differently-namespaced contract —
+ * see `Billing/README.md`'s bridging section for the adapter shape), or a
+ * hand-rolled driver implementing this interface directly — and passes it
+ * via `SubscriptionRoutes::register($router, ['payment_provider' =>
+ * $driver, ...])`, which flows through `SubscriptionConfig::$paymentProvider`
+ * to this route. This is the ports-and-adapters direction: the framework
+ * defines the port (`Billing\Contracts\PaymentProvider`), an
+ * app-owned driver/adapter satisfies it, the CONSUMING APP wires the two
+ * together — the framework itself depends on no concrete payment package,
+ * and no payment package depends on the framework. Before v9.17.2 this
+ * route directly instantiated a payment package's driver class, which was
+ * the same backwards-dependency defect `Billing\Contracts\PaymentContract`
+ * had.
+ *
+ * matches payment to a tenant subscription by owner_email, and
+ * auto-activates.
  *
  * NOT routed through `StoneScriptPHP\Billing\CollectionOrchestrator`,
  * even though that seam exists elsewhere in this framework — a deliberate
@@ -31,12 +51,12 @@ use StoneScriptPHP\Webhooks\WebhookQuarantine;
  * either (a) silently no-op on every real webhook (invoiceRef always
  * null → the orchestrator throws), or (b) require inventing an
  * email-as-invoiceRef business mapping inside PHP glue, which is worse
- * than the status quo, not better. `pay` is adopted for what it actually
- * offers here — shared, tested signature verification + canonical event
- * dispatch — and nothing more is forced.
+ * than the status quo, not better. An injected `PaymentProvider` is used
+ * for what it actually offers here — shared, tested signature
+ * verification + canonical event dispatch — and nothing more is forced.
  *
- * Public endpoint (no JWT) — verified by Razorpay's signature via `pay`.
- * Processes locally — no curl forwarding.
+ * Public endpoint (no JWT) — verified by Razorpay's signature via the
+ * injected provider. Processes locally — no curl forwarding.
  *
  * @package StoneScriptPHP\Subscriptions\Routes
  */
@@ -63,41 +83,31 @@ class PostRazorpayWebhookRoute implements IRouteHandler
             return res_error('Webhook not configured', 503);
         }
 
-        // BC GUARD (v9.17.0+): this route now verifies via
-        // `progalaxyelabs/stonescriptphp-pay`'s RazorpayDriver instead of an
-        // inline hash_hmac copy — but `pay` is deliberately only a
-        // `suggest`/`require-dev`, never a hard framework `require` (every
-        // other Billing\/Subscriptions feature must keep working without
-        // it installed). An existing razorpay_webhook consumer upgrading to
-        // 9.17.0+ WITHOUT running `composer require
-        // progalaxyelabs/stonescriptphp-pay` would otherwise hit a raw,
-        // unhelpful "Class not found" fatal the first time a real webhook
-        // arrives — fail loud with an actionable message instead.
-        if (!class_exists(\StoneScriptPay\Drivers\RazorpayDriver::class)) {
-            error_log(
-                '[Razorpay Webhook] progalaxyelabs/stonescriptphp-pay is not installed. '
-                . 'v9.17.0+ verifies Razorpay webhooks via that package\'s RazorpayDriver — run: '
-                . 'composer require progalaxyelabs/stonescriptphp-pay'
-            );
+        // v9.17.2+: the framework no longer instantiates any concrete
+        // driver itself — it only ever calls through the injected
+        // `Billing\Contracts\PaymentProvider` port. `SubscriptionRoutes::
+        // register()` already refuses to register this route without one
+        // (fails loud at registration time), so reaching process() with a
+        // null provider means the route was constructed directly,
+        // bypassing register() — guard defensively rather than trust that.
+        $driver = $this->config->paymentProvider;
+        if ($driver === null) {
+            error_log('[Razorpay Webhook] No PaymentProvider injected via SubscriptionConfig::$paymentProvider');
             return res_error(
-                'Server misconfiguration: install stonescriptphp-pay to use the razorpay_webhook feature '
-                . '(composer require progalaxyelabs/stonescriptphp-pay)',
+                'Server misconfiguration: razorpay_webhook requires a PaymentProvider — build one '
+                . '(e.g. an adapter wrapping composer require progalaxyelabs/stonescriptphp-pay\'s '
+                . "Razorpay driver — see Billing/README.md) and pass it as 'payment_provider' => "
+                . '$driver to SubscriptionRoutes::register()',
                 503
             );
         }
 
-        // Webhook-only driver — no API keyId/keySecret needed, just the
-        // webhook secret (RazorpayDriver v0.2.0+ builds the real API
-        // client lazily, only when an API-touching method is called; this
-        // route never calls one). See RazorpayDriver::getApi().
-        $driver = new \StoneScriptPay\Drivers\RazorpayDriver('', '', $webhookSecret);
-
         try {
-            $event = $driver->handleWebhook(new \StoneScriptPay\DTO\WebhookRequest($rawBody, $signature));
-        } catch (\StoneScriptPay\Exceptions\SignatureVerificationException $e) {
+            $event = $driver->handleWebhook(new WebhookRequest($rawBody, $signature));
+        } catch (SignatureVerificationException $e) {
             error_log('[Razorpay Webhook] Signature verification FAILED: ' . $e->getMessage());
             return res_error(empty($signature) ? 'Missing signature' : 'Invalid signature', 400);
-        } catch (\StoneScriptPay\Exceptions\WebhookException $e) {
+        } catch (WebhookException $e) {
             // The driver verifies the signature BEFORE parsing JSON (same
             // ordering the old inline code used), so reaching here means the
             // signature was genuinely verified and the body is what's

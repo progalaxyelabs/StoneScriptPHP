@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Subscriptions;
 
+use StoneScriptPHP\Billing\Contracts\PaymentProvider;
+
 /**
  * Subscription Module Configuration
  *
@@ -15,6 +17,10 @@ namespace StoneScriptPHP\Subscriptions;
  *   SubscriptionRoutes::register($router, [
  *       'platform_code' => 'my_trading_platform',
  *       'razorpay_webhook_secret' => 'whsec_xxx',   // enables webhook
+ *       'payment_provider' => $driver,               // required with the webhook above —
+ *                                                     // a StoneScriptPHP\Billing\Contracts\PaymentProvider
+ *                                                     // (e.g. an adapter wrapping stonescriptphp-pay's
+ *                                                     // Razorpay driver — see Billing/README.md)
  *       'admin_api_key' => 'secret-key',             // enables admin activate
  *       'prefix' => '/subscription',                 // optional, default: /subscription
  *   ]);
@@ -31,6 +37,16 @@ class SubscriptionConfig
 
     /** Razorpay webhook HMAC secret — required to enable razorpay_webhook */
     public readonly ?string $razorpayWebhookSecret;
+
+    /**
+     * The `PaymentProvider` used to verify + parse the razorpay_webhook
+     * route's inbound webhooks (v9.17.2+ — the framework no longer
+     * constructs a concrete driver itself; the consuming app builds one
+     * and passes it in via `$options['payment_provider']`). Required by
+     * `SubscriptionRoutes::register()` whenever razorpay_webhook is
+     * enabled — see that method for the fail-loud check.
+     */
+    public readonly ?PaymentProvider $paymentProvider;
 
     /** Admin API key for X-Admin-Key header authentication */
     public readonly ?string $adminApiKey;
@@ -53,6 +69,8 @@ class SubscriptionConfig
 
         $this->razorpayWebhookSecret = $options['razorpay_webhook_secret']
             ?? ($env->RAZORPAY_WEBHOOK_SECRET ?? null);
+
+        $this->paymentProvider = $options['payment_provider'] ?? null;
 
         $this->adminApiKey = $options['admin_api_key']
             ?? ($env->ADMIN_API_KEY ?? null);

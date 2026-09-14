@@ -30,10 +30,16 @@ use StoneScriptPHP\Binding\TypedArray;
  *       'prefix'                  => '/subscription',                  // default
  *   ]);
  *
- * v9.17.0+: enabling razorpay_webhook (i.e. setting razorpay_webhook_secret)
- * requires `composer require progalaxyelabs/stonescriptphp-pay` — the
- * webhook route verifies via pay's RazorpayDriver instead of an inline
- * hand-rolled HMAC copy. No other Subscriptions feature needs `pay`.
+ * v9.17.2+: enabling razorpay_webhook (i.e. setting razorpay_webhook_secret)
+ * ALSO requires passing `'payment_provider' => $driver` — an instance of
+ * `StoneScriptPHP\Billing\Contracts\PaymentProvider` (e.g. `composer
+ * require progalaxyelabs/stonescriptphp-pay` and wrap its Razorpay driver
+ * in a small app-side adapter — `pay` is a standalone library with its own
+ * contract, not this one; see `Billing/README.md`'s bridging section).
+ * register() throws at registration time if razorpay_webhook is enabled
+ * without one. The framework never constructs a concrete driver itself —
+ * see PostRazorpayWebhookRoute's docblock. No other Subscriptions feature
+ * needs a PaymentProvider.
  *
  *   // Exclude public subscription paths from JWT middleware:
  *   $jwtMiddleware = new JwtAuthMiddleware([
@@ -75,6 +81,16 @@ class SubscriptionRoutes
         // client, so it's excluded from the emitted package outright rather
         // than typed for a consumer that will never invoke it.
         if ($config->isEnabled('razorpay_webhook')) {
+            if ($config->paymentProvider === null) {
+                throw new \InvalidArgumentException(
+                    "SubscriptionRoutes::register(): razorpay_webhook is enabled (razorpay_webhook_secret "
+                    . "is set) but no 'payment_provider' was given. Pass a "
+                    . 'StoneScriptPHP\\Billing\\Contracts\\PaymentProvider instance — e.g. an adapter '
+                    . "wrapping progalaxyelabs/stonescriptphp-pay's Razorpay driver (see Billing/README.md) "
+                    . "— as \$options['payment_provider'] to SubscriptionRoutes::register()."
+                );
+            }
+
             $router->post(
                 "$prefix/webhook/razorpay",
                 new PostRazorpayWebhookRoute($config),
