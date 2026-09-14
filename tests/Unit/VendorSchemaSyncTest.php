@@ -67,7 +67,7 @@ class VendorSchemaSyncTest extends TestCase
         $result = syncVendorSchema($vendorSrc, $target);
 
         $this->assertSame(2, $result['copied']);
-        $this->assertSame(['RequestLogging'], $result['features']);
+        $this->assertSame(['progalaxyelabs/stonescriptphp/RequestLogging'], $result['features']);
         $this->assertFileExists($target . '/tables/req_001_request_logs.pgsql');
         $this->assertFileExists($target . '/functions/rl_insert_request_log.pgsql');
     }
@@ -83,7 +83,7 @@ class VendorSchemaSyncTest extends TestCase
 
         $this->assertSame(2, $result['copied']);
         sort($result['features']);
-        $this->assertSame(['RequestLogging', 'SomeOtherFeature'], $result['features']);
+        $this->assertSame(['progalaxyelabs/stonescriptphp/RequestLogging', 'progalaxyelabs/stonescriptphp/SomeOtherFeature'], $result['features']);
         $this->assertFileExists($target . '/functions/rl_insert_request_log.pgsql');
         $this->assertFileExists($target . '/functions/other_fn.pgsql');
     }
@@ -106,6 +106,23 @@ class VendorSchemaSyncTest extends TestCase
         $this->assertSame(1, $result['copied'], 'stale files from a no-longer-present feature must not survive a re-sync');
         $this->assertFileDoesNotExist($target . '/functions/old_fn.pgsql');
         $this->assertFileExists($target . '/functions/rl_insert_request_log.pgsql');
+    }
+
+    public function test_nested_feature_directory_schema_is_still_staged(): void
+    {
+        // Regression: src/Auth/BuiltinOAuth/Schema is TWO directories deep
+        // (Auth, then BuiltinOAuth) — the original glob('*/Schema') only
+        // matched exactly one directory between src/ and Schema/, so this
+        // silently staged zero files (no error) for a nested Feature path.
+        $vendorSrc = $this->tmpRoot . '/vendor-src';
+        $this->makeFile($vendorSrc . '/Auth/BuiltinOAuth/Schema/functions/ssp_oauth_resolve_profile.pgsql');
+
+        $target = $this->tmpRoot . '/target';
+        $result = syncVendorSchema($vendorSrc, $target);
+
+        $this->assertSame(1, $result['copied']);
+        $this->assertSame(['progalaxyelabs/stonescriptphp/BuiltinOAuth'], $result['features']);
+        $this->assertFileExists($target . '/functions/ssp_oauth_resolve_profile.pgsql');
     }
 
     public function test_only_sql_pgsql_pssql_extensions_are_staged(): void

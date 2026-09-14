@@ -77,6 +77,63 @@ function ssp_package_slug(string $packageName): string
 }
 
 /**
+ * Find every directory literally named `Schema` anywhere under a package's
+ * src/, at ANY depth — not just one Feature-directory deep.
+ *
+ * Originally this was `glob($packageSrc . '/*\/Schema')`, which only matched
+ * `src/<Feature>/Schema` (exactly one directory between src/ and Schema/).
+ * That silently failed to stage a nested feature such as
+ * `src/Auth/BuiltinOAuth/Schema` (two directories deep) — the package would
+ * report success (no error, no warning) while simply never staging the file,
+ * discovered when `progalaxyelabs/stonescriptphp` 9.16.0 shipped
+ * `ssp_oauth_resolve_profile.pgsql` under exactly that nested path and it
+ * never appeared in any consumer's `src/postgresql/vendor/`. Recursing fixes
+ * every existing one-level-deep package (Webhooks, RequestLogging, Analytics,
+ * Subscriptions — still found, since a match at depth 1 is still a match) as
+ * a strict superset, so this is additive, not behavior-changing for them.
+ *
+ * Does not recurse INTO a matched Schema/ directory — a Schema dir's own
+ * children are buckets/scopes (tables, functions, main, ...), never another
+ * nested Schema dir, so stopping there avoids any pathological rescanning.
+ *
+ * @return string[] Absolute paths to every `Schema` directory found.
+ */
+function ssp_find_schema_dirs(string $packageSrc): array
+{
+    if (!is_dir($packageSrc)) {
+        return [];
+    }
+
+    $out = [];
+    $rii = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($packageSrc, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+    foreach ($rii as $item) {
+        if (!$item->isDir()) {
+            continue;
+        }
+        if ($item->getFilename() === 'Schema') {
+            $out[] = $item->getPathname();
+        }
+    }
+
+    // RecursiveDirectoryIterator has no built-in "don't descend into this
+    // dir" hook mid-iteration without a custom filter class, so instead
+    // filter out any path that has an ANCESTOR match already collected
+    // (defends against a pathological "Schema/Schema" nesting; harmless
+    // no-op for every real package today).
+    return array_values(array_filter($out, function (string $path) use ($out) {
+        foreach ($out as $other) {
+            if ($other !== $path && str_starts_with($path, $other . '/')) {
+                return false;
+            }
+        }
+        return true;
+    }));
+}
+
+/**
  * Stage every Schema/ folder found under one package's src/ into $targetBase,
  * handling BOTH the bucket and ordered-scope layouts (see file header).
  *
@@ -96,7 +153,7 @@ function ssp_stage_package_schema(string $packageSrc, string $targetBase, string
     }
 
     $slug = ssp_package_slug($packageName);
-    $schemaDirs = glob($packageSrc . '/*/Schema', GLOB_ONLYDIR) ?: [];
+    $schemaDirs = ssp_find_schema_dirs($packageSrc);
 
     foreach ($schemaDirs as $schemaDir) {
         $featureName = basename(dirname($schemaDir));
