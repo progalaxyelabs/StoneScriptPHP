@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit;
+namespace StoneScriptPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Auth\MultiAuthJwtValidator;

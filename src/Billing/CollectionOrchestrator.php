@@ -25,7 +25,7 @@ use StoneScriptPHP\Billing\Dto\WebhookRequest;
  * chooses no gateway ROUTE. It picks a driver/gateway-code by the
  * already-decided value the invoicing system (or the constructor caller)
  * supplied — a lookup, never a decision. See
- * `Tests\Unit\BillingBusinessLogicAuditTest` for the line-by-line proof.
+ * `StoneScriptPHP\Tests\Unit\BillingBusinessLogicAuditTest` for the line-by-line proof.
  *
  * Third-party integration paths (A/B/C/D — reference vs alternate
  * invoicing vs MoR-no-invoicing vs alternate payment module) are

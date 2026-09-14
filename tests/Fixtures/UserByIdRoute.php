@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Fixtures;
+namespace StoneScriptPHP\Tests\Fixtures;
 
 use StoneScriptPHP\IRouteHandler;
 use StoneScriptPHP\ApiResponse;

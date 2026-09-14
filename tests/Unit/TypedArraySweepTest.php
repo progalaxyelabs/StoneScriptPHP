@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit;
+namespace StoneScriptPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Attributes\RequiresPermission;

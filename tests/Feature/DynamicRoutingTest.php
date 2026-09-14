@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Feature;
+namespace StoneScriptPHP\Tests\Feature;
 
 use PHPUnit\Framework\TestCase;
 

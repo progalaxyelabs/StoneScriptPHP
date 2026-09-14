@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit;
+namespace StoneScriptPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 
@@ -49,7 +49,7 @@ class ClientGeneratorRequestDtoAndStrictGateTest extends TestCase
 
     public function test_route_request_ts_type_resolves_declared_dto(): void
     {
-        $route = ['request' => \Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class];
+        $route = ['request' => \StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class];
         $this->assertSame('T.CreateWidgetRequestFixtureDto', routeRequestTsType($route));
     }
 
@@ -67,7 +67,7 @@ class ClientGeneratorRequestDtoAndStrictGateTest extends TestCase
 
     public function test_route_request_ts_type_registers_interface_in_types_registry(): void
     {
-        routeRequestTsType(['request' => \Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class]);
+        routeRequestTsType(['request' => \StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class]);
         $this->assertArrayHasKey('CreateWidgetRequestFixtureDto', $GLOBALS['__dtoInterfaces']);
         $this->assertStringContainsString('name: string;', $GLOBALS['__dtoInterfaces']['CreateWidgetRequestFixtureDto']);
     }
@@ -114,7 +114,7 @@ class ClientGeneratorRequestDtoAndStrictGateTest extends TestCase
         $violations = typedContractViolations([
             'method' => 'GET',
             'path' => '/portal/widgets',
-            'response' => \Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
+            'response' => \StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
         ]);
         $this->assertSame([], $violations);
     }
@@ -124,8 +124,8 @@ class ClientGeneratorRequestDtoAndStrictGateTest extends TestCase
         $violations = typedContractViolations([
             'method' => 'POST',
             'path' => '/portal/widgets',
-            'response' => \Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
-            'request' => \Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
+            'response' => \StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
+            'request' => \StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
         ]);
         $this->assertSame([], $violations);
     }
@@ -136,7 +136,7 @@ class ClientGeneratorRequestDtoAndStrictGateTest extends TestCase
             $violations = typedContractViolations([
                 'method' => $method,
                 'path' => '/portal/widgets/{id}',
-                'response' => \Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
+                'response' => \StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
             ]);
             $this->assertCount(1, $violations, "expected exactly one violation (missing request) for $method");
             $this->assertStringContainsString('request', $violations[0]);
@@ -153,12 +153,12 @@ class ClientGeneratorRequestDtoAndStrictGateTest extends TestCase
             'CreateWidgetRoute',
             group: 'widgets',
             service: 'portal',
-            request: \Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
+            request: \StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
         );
 
         $meta = $router->getRouteMeta();
         $this->assertCount(1, $meta);
-        $this->assertSame(\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class, $meta[0]['request']);
+        $this->assertSame(\StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class, $meta[0]['request']);
     }
 
     public function test_router_load_routes_array_format_threads_request_dto(): void
@@ -170,12 +170,12 @@ class ClientGeneratorRequestDtoAndStrictGateTest extends TestCase
                     'handler' => 'CreateWidgetRoute',
                     'service' => 'portal',
                     'group' => 'widgets',
-                    'request' => \Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
+                    'request' => \StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class,
                 ],
             ],
         ]);
 
         $meta = $router->getRouteMeta();
-        $this->assertSame(\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class, $meta[0]['request']);
+        $this->assertSame(\StoneScriptPHP\Tests\Fixtures\Dto\CreateWidgetRequestFixtureDto::class, $meta[0]['request']);
     }
 }

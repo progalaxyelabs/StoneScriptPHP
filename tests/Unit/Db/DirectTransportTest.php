@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Db;
+namespace StoneScriptPHP\Tests\Unit\Db;
 
 use PDO;
 use PDOException;

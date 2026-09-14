@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Fixtures\Dto;
+namespace StoneScriptPHP\Tests\Fixtures\Dto;
 
 /**
  * Minimal fixture DTO used by ClientGeneratorRequestDtoAndStrictGateTest to

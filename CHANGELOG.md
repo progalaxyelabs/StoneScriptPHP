@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.18.0]
+
+Consolidated public release. Republishes the work previously carried by tags
+`9.15.0`–`9.17.2` (those tags were retracted before Packagist ingestion and
+replaced by this single clean release). The change detail for that work is
+recorded in the `9.15.0`–`9.17.2` sections below; no code changes beyond the
+version bump relative to the retracted `9.17.2`.
+
 ## [9.17.2]
 
 ### Fixed — dependency-inversion: framework no longer depends on `stonescriptphp-pay`

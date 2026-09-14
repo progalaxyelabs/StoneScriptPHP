@@ -25,7 +25,7 @@ if (!defined('ROOT_PATH'))   define('ROOT_PATH', $frameworkRoot);
 if (!defined('SRC_PATH'))    define('SRC_PATH', $frameworkRoot . 'src' . DIRECTORY_SEPARATOR);
 if (!defined('CONFIG_PATH')) define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
 
-// StoneScriptPHP\* and Tests\* are autoloaded via composer PSR-4.
+// StoneScriptPHP\* and StoneScriptPHP\Tests\* are autoloaded via composer PSR-4.
 // App\* is used by a handful of test fixtures under src/App/* — register a
 // minimal autoloader so those still resolve.
 spl_autoload_register(function ($class) use ($frameworkRoot) {

@@ -83,7 +83,7 @@ $outcome = $orchestrator->settleFromWebhook(new WebhookRequest(
 The orchestrator contains ONLY sequencing + marshalling — no amount, tax,
 numbering, currency, or gateway-ROUTING decision is ever made in PHP. See
 `CollectionOrchestrator`'s docblock and
-`Tests\Unit\BillingBusinessLogicAuditTest` for the line-by-line proof.
+`StoneScriptPHP\Tests\Unit\BillingBusinessLogicAuditTest` for the line-by-line proof.
 
 ## Bridging `stonescriptphp-pay` into this port
 

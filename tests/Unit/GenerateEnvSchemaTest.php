@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit;
+namespace StoneScriptPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 
@@ -86,10 +86,10 @@ class GenerateEnvSchemaTest extends TestCase
 
     public function test_includes_inherited_and_subclass_properties(): void
     {
-        if (!class_exists('Tests\\Unit\\FixtureChildEnv')) {
-            eval('namespace Tests\\Unit; class FixtureChildEnv extends FixtureEnv { public string $CHILD_VAR = "c"; }');
+        if (!class_exists('StoneScriptPHP\Tests\\Unit\\FixtureChildEnv')) {
+            eval('namespace StoneScriptPHP\Tests\\Unit; class FixtureChildEnv extends FixtureEnv { public string $CHILD_VAR = "c"; }');
         }
-        $schema = \buildSchemaFromReflection(new \ReflectionClass('Tests\\Unit\\FixtureChildEnv'));
+        $schema = \buildSchemaFromReflection(new \ReflectionClass('StoneScriptPHP\Tests\\Unit\\FixtureChildEnv'));
         $this->assertArrayHasKey('APP_NAME', $schema, 'inherited property present (App\\Env case)');
         $this->assertArrayHasKey('CHILD_VAR', $schema, 'subclass-declared property present');
     }

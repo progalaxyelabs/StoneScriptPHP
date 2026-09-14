@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests;
+namespace StoneScriptPHP\Tests;
 
 use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Cache;
