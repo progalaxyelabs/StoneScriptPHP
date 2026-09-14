@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Subscriptions\Routes;
 
+use StoneScriptPay\DTO\WebhookRequest;
+use StoneScriptPay\Drivers\RazorpayDriver;
+use StoneScriptPay\Exceptions\SignatureVerificationException;
+use StoneScriptPay\Exceptions\WebhookException;
 use StoneScriptPHP\IRouteHandler;
 use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\Database;
@@ -13,10 +17,29 @@ use StoneScriptPHP\Webhooks\WebhookQuarantine;
 /**
  * POST /subscription/webhook/razorpay
  *
- * Receives Razorpay payment webhooks. Verifies HMAC-SHA256 signature, matches
+ * Receives Razorpay payment webhooks. Verifies the signature via
+ * `stonescriptphp-pay`'s `RazorpayDriver` (v9.17.0+ — the inline hand-rolled
+ * `hash_hmac('sha256', ...)` copy this route used to carry has been
+ * removed in favour of the shared, tested verification in `pay`), matches
  * payment to a tenant subscription by owner_email, and auto-activates.
  *
- * Public endpoint (no JWT) — verified by Razorpay HMAC-SHA256 signature.
+ * NOT routed through `StoneScriptPHP\Billing\CollectionOrchestrator`,
+ * even though that seam exists elsewhere in this framework — a deliberate
+ * call, not an oversight. This module's `sub_*` domain identifies a
+ * payment's owner by e-mail (`sub_find_by_
+ * email`), not by an `invoiceRef` an order was tagged with at creation
+ * time — this route never creates the order in the first place (order
+ * creation happens outside this framework module, in the consuming app),
+ * so no `notes.invoice_ref` is ever set for `CollectionOrchestrator` to
+ * extract. Forcing this through `InvoiceSource`/the orchestrator would
+ * either (a) silently no-op on every real webhook (invoiceRef always
+ * null → the orchestrator throws), or (b) require inventing an
+ * email-as-invoiceRef business mapping inside PHP glue, which is worse
+ * than the status quo, not better. `pay` is adopted for what it actually
+ * offers here — shared, tested signature verification + canonical event
+ * dispatch — and nothing more is forced.
+ *
+ * Public endpoint (no JWT) — verified by Razorpay's signature via `pay`.
  * Processes locally — no curl forwarding.
  *
  * @package StoneScriptPHP\Subscriptions\Routes
@@ -44,22 +67,24 @@ class PostRazorpayWebhookRoute implements IRouteHandler
             return res_error('Webhook not configured', 503);
         }
 
-        if (empty($signature)) {
-            error_log('[Razorpay Webhook] Missing X-Razorpay-Signature header');
-            return res_error('Missing signature', 400);
-        }
+        // Webhook-only driver — no API keyId/keySecret needed, just the
+        // webhook secret (RazorpayDriver v0.2.0+ builds the real API
+        // client lazily, only when an API-touching method is called; this
+        // route never calls one). See RazorpayDriver::getApi().
+        $driver = new RazorpayDriver('', '', $webhookSecret);
 
-        $expectedSignature = hash_hmac('sha256', $rawBody, $webhookSecret);
-        if (!hash_equals($expectedSignature, $signature)) {
-            error_log('[Razorpay Webhook] Signature verification FAILED');
-            return res_error('Invalid signature', 400);
-        }
-
-        $payload = json_decode($rawBody, true);
-        if (!$payload || !is_array($payload)) {
-            // SIGNATURE ALREADY VERIFIED above — this is a genuinely malformed
-            // envelope from an otherwise-authentic sender, not a spoofed request.
-            // Quarantine rather than drop: never lose a signed payment event.
+        try {
+            $event = $driver->handleWebhook(new WebhookRequest($rawBody, $signature));
+        } catch (SignatureVerificationException $e) {
+            error_log('[Razorpay Webhook] Signature verification FAILED: ' . $e->getMessage());
+            return res_error(empty($signature) ? 'Missing signature' : 'Invalid signature', 400);
+        } catch (WebhookException $e) {
+            // The driver verifies the signature BEFORE parsing JSON (same
+            // ordering the old inline code used), so reaching here means the
+            // signature was genuinely verified and the body is what's
+            // malformed — a genuinely malformed envelope from an otherwise-
+            // authentic sender, not a spoofed request. Quarantine rather
+            // than drop: never lose a signed payment event.
             WebhookQuarantine::quarantine(
                 $this->config->platformCode ?? '',
                 'razorpay',
@@ -72,13 +97,17 @@ class PostRazorpayWebhookRoute implements IRouteHandler
             return res_error('Invalid payload', 400);
         }
 
-        $event = $payload['event'] ?? '';
-        error_log("[Razorpay Webhook] Event: {$event}");
+        error_log("[Razorpay Webhook] Event: {$event->providerEvent}");
 
-        if ($event === 'payment.captured') {
-            $this->handlePaymentCaptured($payload);
+        if ($event->isPaymentCaptured()) {
+            // handlePaymentCaptured() expects the FULL decoded webhook
+            // envelope (unchanged signature/shape) — $event->raw is exactly
+            // that (WebhookEvent::$payload is the narrower payment.entity
+            // projection; $raw is the whole body, same as the old $payload
+            // local variable this call site used to pass).
+            $this->handlePaymentCaptured($event->raw);
         } else {
-            error_log("[Razorpay Webhook] Ignoring event: {$event}");
+            error_log("[Razorpay Webhook] Ignoring event: {$event->providerEvent}");
         }
 
         return res_ok(['status' => 'received']);

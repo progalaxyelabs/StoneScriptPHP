@@ -30,6 +30,11 @@ use StoneScriptPHP\Binding\TypedArray;
  *       'prefix'                  => '/subscription',                  // default
  *   ]);
  *
+ * v9.17.0+: enabling razorpay_webhook (i.e. setting razorpay_webhook_secret)
+ * requires `composer require progalaxyelabs/stonescriptphp-pay` — the
+ * webhook route verifies via pay's RazorpayDriver instead of an inline
+ * hand-rolled HMAC copy. No other Subscriptions feature needs `pay`.
+ *
  *   // Exclude public subscription paths from JWT middleware:
  *   $jwtMiddleware = new JwtAuthMiddleware([
  *       'excludedPaths' => array_merge(

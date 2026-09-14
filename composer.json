@@ -2,7 +2,7 @@
     "name": "progalaxyelabs/stonescriptphp",
     "description": "Core Framework Library - Use progalaxyelabs/stonescriptphp-server to create new projects. Modern PHP backend framework for building APIs with PostgreSQL. Installed automatically as a dependency when you create projects with stonescriptphp-server.",
     "type": "library",
-    "version": "9.16.1",
+    "version": "9.17.0",
     "license": "MIT",
     "keywords": [
         "framework",
@@ -38,15 +38,23 @@
         "google/apiclient": "^2.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5.50",
-        "symfony/mailer": "^7.0"
+        "symfony/mailer": "^7.0",
+        "progalaxyelabs/stonescriptphp-pay": "^0.2.0"
     },
     "suggest": {
         "ext-redis": "Required for Redis caching support",
         "ext-pdo_pgsql": "Required for DB_MODE=direct (pluggable database transport — talks to PostgreSQL directly via PDO instead of the gateway); also required by the `php stone generate data-export` worker for genuine server-side cursor streaming",
         "openspout/openspout": "Required for `php stone generate data-export`'s XLSX output — a genuinely constant-memory streaming writer (phpoffice/phpspreadsheet is not)",
         "google/apiclient": "Required for Google OAuth authentication (install via: php stone generate auth:google)",
-        "phpoffice/phpspreadsheet": "Required for Excel/CSV export features"
+        "phpoffice/phpspreadsheet": "Required for Excel/CSV export features",
+        "progalaxyelabs/stonescriptphp-pay": "Required to use StoneScriptPHP\\Billing\\CollectionOrchestrator / PaymentContract, AND required at runtime if you enable StoneScriptPHP\\Subscriptions' razorpay_webhook feature (v9.17.0+ — PostRazorpayWebhookRoute verifies via pay's RazorpayDriver instead of an inline HMAC copy)"
     },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../stonescriptphp-pay"
+        }
+    ],
     "autoload": {
         "psr-4": {
             "StoneScriptPHP\\": "src/"
