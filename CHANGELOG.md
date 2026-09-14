@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.16.0] - 2026-09-14
+
+### Added — canonical login-user chokepoint for builtin Google OAuth
+
+Closes a real defect class: `GoogleOAuthUserResolver::resolve()` returned an
+arbitrary array that was used verbatim as both the minted JWT claims and the
+client `user` payload — a resolver returning the display name under a
+legacy/misnamed key (e.g. `name` instead of `display_name`) silently shipped
+a broken contract to the client, with no error anywhere in the chain.
+
+- **`StoneScriptPHP\Auth\BuiltinOAuth\LoginUser`** — new immutable value
+  object + factory (`LoginUser::create()`) that is now the ONLY way to build
+  a login-user payload. Throws `\RuntimeException` when `email` or
+  `display_name` is empty; emits exactly `user_id, identity_id, email,
+  display_name, is_email_verified, photo_url` plus a `name` alias mirror
+  (set by the serializer, never the resolver, for legacy consumers still
+  reading `name`) plus any extra claims. `LoginUser::fromResolverArray()`
+  converts a resolver's plain-array return value through this factory.
+- **`GoogleOAuthUserResolver`** contract updated (see its docblock): a
+  resolver returns `user_id`/`email`/`display_name` (required) plus optional
+  `identity_id`/`is_email_verified`/`photo_url`/`extra_claims` — it can no
+  longer freely shape the JWT/client payload.
+- **`GoogleOAuthCallbackRoute`** now builds tokens + the `user` payload only
+  from `LoginUser::toArray()`, via a newly-extracted, independently
+  unit-testable `resolveAndMintTokens()` method. A resolver that omits or
+  misnames `display_name` now fails loud (`oauth_error` bridged, no token
+  minted) instead of shipping a malformed login user.
+- **`ssp_oauth_resolve_profile(...)`** — new pure SQL function
+  (`src/Auth/BuiltinOAuth/Schema/functions/`, staged via the existing
+  vendor-schema-sync mechanism) implementing a shared provider-name/picture
+  refresh algorithm: picture is provider-owned and refreshed every login
+  (never nulled on omission); display name refreshes from the provider
+  unless the platform has recorded it as user-set, and a brand-new identity
+  with no provider name seeds a real default (email local-part) rather than
+  a blank/null value. Platforms adopt this one function so every
+  `upsert_google_user`-style upsert gets identical refresh semantics instead
+  of re-implementing (and drifting on) the rule per platform.
+
+### Breaking
+
+`GoogleOAuthUserResolver::resolve()` implementations that only ever returned
+`email`/`user_id` will now fail login (LoginUser throws on missing
+`display_name`) — supply `display_name` explicitly. Existing consumers
+pinned to an older exact version are unaffected until they upgrade.
+
 ## [9.14.0] - 2026-09-07
 
 ### Added — codegen + deploy-gate defenses against DTO/DB nullability drift

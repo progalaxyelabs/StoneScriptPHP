@@ -106,18 +106,41 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
             'picture' => $payload['picture'] ?? null,
         ];
 
+        return $this->resolveAndMintTokens($profile);
+    }
+
+    /**
+     * Resolver call -> LoginUser (the R1 chokepoint) -> token minting ->
+     * postMessage bridge. Extracted from process() so it is independently
+     * unit-testable without needing a real Google network round-trip (the
+     * network exchange happens in process() before this is called; a test
+     * can invoke this directly with a hand-built $profile — see
+     * tests/Unit/GoogleOAuthBuiltinTest.php, matrix C11).
+     *
+     * Every path here that can fail (resolver throws, or LoginUser::create()
+     * throws on an empty/misnamed email or display_name) is caught and
+     * bridged as `oauth_error` — NO token is ever minted from a
+     * partially-built or contract-violating login user.
+     *
+     * @param array{sub?:string,email:?string,email_verified:bool,name:?string,picture:?string} $profile
+     */
+    public function resolveAndMintTokens(array $profile): HtmlResponse
+    {
         try {
-            $userClaims = $this->userResolver->resolve($profile);
+            $resolved = $this->userResolver->resolve($profile);
+            $loginUser = LoginUser::fromResolverArray($resolved, $profile);
         } catch (\Exception $e) {
             log_error('GoogleOAuthCallbackRoute: user resolver failed: ' . $e->getMessage());
             return $this->bridge('oauth_error', 'Could not create or update your account.');
         }
 
+        $userClaims = $loginUser->toArray();
+
         $env = Env::get_instance();
         $accessToken = $this->jwtHandler->generateToken($userClaims, $env->JWT_ACCESS_TOKEN_EXPIRY ?? 900, 'access');
         $refreshToken = $this->jwtHandler->generateToken($userClaims, $env->JWT_REFRESH_TOKEN_EXPIRY ?? 15552000, 'refresh');
 
-        log_info('GoogleOAuthCallbackRoute: sign-in complete', ['email' => $profile['email']]);
+        log_info('GoogleOAuthCallbackRoute: sign-in complete', ['email' => $loginUser->getEmail()]);
 
         return $this->bridge('oauth_success', null, [
             'access_token' => $accessToken,

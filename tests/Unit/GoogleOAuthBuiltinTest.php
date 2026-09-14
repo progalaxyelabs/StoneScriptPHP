@@ -245,6 +245,73 @@ class GoogleOAuthBuiltinTest extends TestCase
         $this->assertStringContainsString('oauth_error', $response->html);
     }
 
+    // ─── resolveAndMintTokens() — matrix C11 (R1 guard) ─────────────────────
+    //
+    // The Google code-exchange + ID-token verification steps in process()
+    // require real network access and are out of scope for a unit test (see
+    // class docblock). resolveAndMintTokens() is the extracted, independently
+    // testable seam covering everything AFTER that verification succeeds:
+    // resolver -> LoginUser (R1 chokepoint) -> token minting -> bridge.
+
+    public function testResolveAndMintTokensBridgesOauthErrorAndMintsNoTokenWhenResolverOmitsDisplayName(): void
+    {
+        // The exact regression this design closes: a resolver returning the
+        // display name under the LEGACY key `name` (not `display_name`).
+        $route = new GoogleOAuthCallbackRoute(
+            'test-client-id.apps.googleusercontent.com',
+            'test-client-secret',
+            'https://api.example.com/oauth/google/callback',
+            new RsaJwtHandler(),
+            $this->legacyShapedResolver()
+        );
+
+        $profile = ['sub' => 'g-1', 'email' => 'ann@example.com', 'email_verified' => true, 'name' => 'Ann Lee', 'picture' => null];
+        $response = $route->resolveAndMintTokens($profile);
+
+        $this->assertInstanceOf(HtmlResponse::class, $response);
+        $this->assertStringContainsString('oauth_error', $response->html);
+        $this->assertStringNotContainsString('access_token', $response->html);
+        $this->assertStringNotContainsString('refresh_token', $response->html);
+    }
+
+    public function testResolveAndMintTokensBridgesOauthErrorWhenResolverReturnsEmptyDisplayName(): void
+    {
+        $route = new GoogleOAuthCallbackRoute(
+            'test-client-id.apps.googleusercontent.com',
+            'test-client-secret',
+            'https://api.example.com/oauth/google/callback',
+            new RsaJwtHandler(),
+            $this->emptyDisplayNameResolver()
+        );
+
+        $profile = ['sub' => 'g-1', 'email' => 'ann@example.com', 'email_verified' => true, 'name' => 'Ann Lee', 'picture' => null];
+        $response = $route->resolveAndMintTokens($profile);
+
+        $this->assertInstanceOf(HtmlResponse::class, $response);
+        $this->assertStringContainsString('oauth_error', $response->html);
+        $this->assertStringNotContainsString('access_token', $response->html);
+    }
+
+    public function testResolveAndMintTokensSucceedsWithCorrectlyShapedResolver(): void
+    {
+        $route = new GoogleOAuthCallbackRoute(
+            'test-client-id.apps.googleusercontent.com',
+            'test-client-secret',
+            'https://api.example.com/oauth/google/callback',
+            new RsaJwtHandler(),
+            $this->fakeResolver()
+        );
+
+        $profile = ['sub' => 'g-1', 'email' => 'ann@example.com', 'email_verified' => true, 'name' => 'Ann Lee', 'picture' => 'P1'];
+        $response = $route->resolveAndMintTokens($profile);
+
+        $this->assertInstanceOf(HtmlResponse::class, $response);
+        $this->assertStringContainsString('oauth_success', $response->html);
+        $this->assertStringContainsString('access_token', $response->html);
+        $this->assertStringContainsString('"display_name":"Ann Lee"', $response->html);
+        $this->assertStringContainsString('"name":"Ann Lee"', $response->html);
+    }
+
     private function makeCallbackRoute(): GoogleOAuthCallbackRoute
     {
         return new GoogleOAuthCallbackRoute(
@@ -261,7 +328,34 @@ class GoogleOAuthBuiltinTest extends TestCase
         return new class implements GoogleOAuthUserResolver {
             public function resolve(array $profile): array
             {
-                return ['user_id' => 1, 'email' => $profile['email'] ?? null];
+                return [
+                    'user_id' => 1,
+                    'email' => $profile['email'] ?? null,
+                    'display_name' => $profile['name'] ?? null,
+                    'is_email_verified' => $profile['email_verified'] ?? false,
+                    'photo_url' => $profile['picture'] ?? null,
+                ];
+            }
+        };
+    }
+
+    /** Resolver reproducing the exact pre-fix regression: `name`, no `display_name`. */
+    private function legacyShapedResolver(): GoogleOAuthUserResolver
+    {
+        return new class implements GoogleOAuthUserResolver {
+            public function resolve(array $profile): array
+            {
+                return ['user_id' => 1, 'email' => $profile['email'] ?? null, 'name' => $profile['name'] ?? null];
+            }
+        };
+    }
+
+    private function emptyDisplayNameResolver(): GoogleOAuthUserResolver
+    {
+        return new class implements GoogleOAuthUserResolver {
+            public function resolve(array $profile): array
+            {
+                return ['user_id' => 1, 'email' => $profile['email'] ?? null, 'display_name' => ''];
             }
         };
     }
