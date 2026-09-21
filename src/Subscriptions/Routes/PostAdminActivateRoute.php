@@ -87,12 +87,30 @@ class PostAdminActivateRoute implements IRouteHandler
 
                 $durationDays = $plan['duration_days'] ?? 365;
 
+                // 2026-09-21 (independent code review before the
+                // sub_activate idempotency fix shipped): this USED to
+                // substitute the literal string 'manual' whenever no real
+                // gateway payment_id was supplied. Once sub_activate()
+                // gained its unique-index idempotency gate on
+                // gateway_payment_id, that sentinel became a footgun — the
+                // FIRST manual/admin activation in a database would insert
+                // a payment row with gateway_payment_id='manual', and
+                // EVERY subsequent admin activation for EVERY tenant in
+                // that database would then collide on it, silently return
+                // already_applied:true, and never actually extend the
+                // subscription (while this route still reported 200 OK
+                // "Subscription activated"). Pass the real, nullable
+                // payment_id through untouched — sub_activate()'s
+                // idempotency gate only ever applies when a real gateway
+                // payment_id is given; a NULL payment_id always performs a
+                // fresh activation, which is exactly what an admin
+                // (re-)activation call means.
                 $result = Database::fn('sub_activate', [
                     $this->platform_code,
                     $this->tenant_id,
                     $this->plan_code,
                     $durationDays,
-                    $this->payment_id ?? 'manual',
+                    $this->payment_id,
                     $this->payer_email ?? '',
                     $this->payer_phone ?? '',
                     $this->amount_cents ?? 0,
@@ -117,6 +135,12 @@ class PostAdminActivateRoute implements IRouteHandler
                 }
             } finally {
                 $gw->setTenantId($prev);
+            }
+
+            $alreadyApplied = $data['already_applied'] ?? false;
+            if ($alreadyApplied) {
+                error_log("[Admin Activate] Payment already applied (no-op replay): platform={$this->platform_code}, tenant={$this->tenant_id}, plan={$this->plan_code}, payment_id={$this->payment_id}");
+                return res_ok($data, 'Payment already applied — subscription unchanged');
             }
 
             error_log("[Admin Activate] Subscription activated: platform={$this->platform_code}, tenant={$this->tenant_id}, plan={$this->plan_code}");

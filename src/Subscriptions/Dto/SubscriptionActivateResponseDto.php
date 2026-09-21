@@ -21,5 +21,6 @@ class SubscriptionActivateResponseDto
     public bool $is_active = false;
     public string $expires_at = '';
     public ?string $payment_id = null;
+    public bool $already_applied = false;
     public string $activated_at = '';
 }

@@ -241,7 +241,7 @@ class PostRazorpayWebhookRoute implements IRouteHandler
 
                 $durationDays = $plan['duration_days'] ?? 365;
 
-                Database::fn('sub_activate', [
+                $activateResult = Database::fn('sub_activate', [
                     $sub['platform_code'],
                     $sub['tenant_id'],
                     'annual',
@@ -254,7 +254,26 @@ class PostRazorpayWebhookRoute implements IRouteHandler
                     json_encode($payload),
                 ]);
 
-                error_log("[Razorpay Webhook] Subscription ACTIVATED: platform={$sub['platform_code']}, tenant={$sub['tenant_id']}, payment={$paymentId}");
+                // 2026-09-21 (independent code review): previously logged
+                // "ACTIVATED" unconditionally regardless of what
+                // sub_activate() actually did, making a genuine first-time
+                // activation indistinguishable from a no-op idempotent
+                // replay in the logs — exactly the two outcomes this
+                // fix needs to be distinguishable for production triage.
+                $activateRow = $activateResult[0] ?? null;
+                if (is_object($activateRow)) {
+                    $activateRow = (array) $activateRow;
+                }
+                $activateData = isset($activateRow['sub_activate'])
+                    ? (is_string($activateRow['sub_activate']) ? json_decode($activateRow['sub_activate'], true) : $activateRow['sub_activate'])
+                    : $activateRow;
+                $alreadyApplied = $activateData['already_applied'] ?? false;
+
+                if ($alreadyApplied) {
+                    error_log("[Razorpay Webhook] Payment already applied (idempotent no-op replay): platform={$sub['platform_code']}, tenant={$sub['tenant_id']}, payment={$paymentId}");
+                } else {
+                    error_log("[Razorpay Webhook] Subscription ACTIVATED: platform={$sub['platform_code']}, tenant={$sub['tenant_id']}, payment={$paymentId}");
+                }
             } finally {
                 $gw->setTenantId($prev);
             }
