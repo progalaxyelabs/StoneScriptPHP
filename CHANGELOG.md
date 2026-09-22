@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.19.0]
+
+### Changed
+- **Billing contracts now require tenant identity.** `Billing\Contracts\InvoiceSource::resolvePayableIntent()` and `RecordPaymentRequest` now carry `tenantId` + `platformCode`, and `CollectionOrchestrator` requires tenant identity on collection initiate and webhook settlement (fails loud if a payment driver omits it). Consumers implementing these contracts must supply tenant identity sourced from the authenticated principal, never from request input. This closes a cross-tenant gap on the payment path.
+
+### Fixed
+- **`sub_activate` idempotency + admin-activation regression.** Subscription activation is now race-safe (`FOR UPDATE` + `ON CONFLICT`); a replayed or concurrent activation no longer double-applies, and admin activation with a null payment reference is handled correctly.
+
 ## [9.18.0]
 
 Consolidated public release. Republishes the work previously carried by tags
