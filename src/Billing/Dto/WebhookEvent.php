@@ -50,6 +50,13 @@ final class WebhookEvent
      * @param ?int    $amountMinorUnits  Normalised: captured amount in minor units (paise/cents).
      * @param ?string $currency          Normalised: ISO 4217 currency code.
      * @param ?\DateTimeImmutable $capturedAt Normalised: the gateway's own capture time.
+     * @param ?string $tenantId          Normalised (added 2026-09-22, TENANT ISOLATION):
+     *                                   the tenant that initiated checkout, echoed back from
+     *                                   order-creation notes/metadata (Razorpay: notes.tenant_id).
+     *                                   Required for {@see \StoneScriptPHP\Billing\CollectionOrchestrator::settleFromWebhook()}
+     *                                   to enforce the same tenant-ownership check on the webhook
+     *                                   settlement path as a direct call — see {@see \StoneScriptPHP\Billing\Contracts\InvoiceSource}.
+     * @param ?string $platformCode      Normalised: paired with $tenantId (Razorpay: notes.platform_code).
      */
     public function __construct(
         public readonly string $type,
@@ -61,6 +68,8 @@ final class WebhookEvent
         public readonly ?int $amountMinorUnits = null,
         public readonly ?string $currency = null,
         public readonly ?\DateTimeImmutable $capturedAt = null,
+        public readonly ?string $tenantId = null,
+        public readonly ?string $platformCode = null,
     ) {
     }
 

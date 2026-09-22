@@ -48,7 +48,7 @@ class CollectionOrchestratorTest extends TestCase
         $payment = new FakePaymentProviderForOrchestrator();
         $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
-        $checkout = $orchestrator->initiateCollection('inv_1');
+        $checkout = $orchestrator->initiateCollection('inv_1', 'tenant-1', 'platform-1');
 
         $this->assertTrue($checkout->isPayable);
         $this->assertSame('order_fake_1', $checkout->orderId);
@@ -78,7 +78,7 @@ class CollectionOrchestratorTest extends TestCase
         $payment = new FakePaymentProviderForOrchestrator();
         $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
-        $checkout = $orchestrator->initiateCollection('inv_paid');
+        $checkout = $orchestrator->initiateCollection('inv_paid', 'tenant-1', 'platform-1');
 
         $this->assertFalse($checkout->isPayable);
         $this->assertSame('already_paid', $checkout->reason);
@@ -92,7 +92,7 @@ class CollectionOrchestratorTest extends TestCase
         $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, null);
 
         $this->expectException(\LogicException::class);
-        $orchestrator->initiateCollection('inv_1');
+        $orchestrator->initiateCollection('inv_1', 'tenant-1', 'platform-1');
     }
 
     public function test_settle_from_webhook_records_verified_payment_and_reports_settlement(): void
@@ -111,6 +111,8 @@ class CollectionOrchestratorTest extends TestCase
             amountMinorUnits: 49900,
             currency: 'INR',
             capturedAt: new \DateTimeImmutable('2026-09-14T00:00:00+00:00'),
+            tenantId: 'tenant-1',
+            platformCode: 'platform-1',
         ));
         $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
@@ -128,6 +130,39 @@ class CollectionOrchestratorTest extends TestCase
         $this->assertSame(49900, $invoices->lastRecordPaymentRequest->amountMinorUnits);
         $this->assertSame('INR', $invoices->lastRecordPaymentRequest->currency);
         $this->assertSame('success', $invoices->lastRecordPaymentRequest->status);
+        $this->assertSame('tenant-1', $invoices->lastRecordPaymentRequest->tenantId);
+        $this->assertSame('platform-1', $invoices->lastRecordPaymentRequest->platformCode);
+    }
+
+    /**
+     * TENANT ISOLATION (added 2026-09-22): a driver returning a
+     * payment.captured event with every OTHER normalised field populated
+     * but no tenantId/platformCode must still fail loud — settling a
+     * payment without an enforceable tenant-ownership check is exactly the
+     * cross-tenant gap this closed. This is deliberately a SEPARATE
+     * assertion from test_settle_from_webhook_throws_when_driver_omits_normalised_fields
+     * (which omits every field) — it isolates that tenantId/platformCode
+     * alone are enough to trip the guard.
+     */
+    public function test_settle_from_webhook_throws_when_driver_omits_only_tenant_fields(): void
+    {
+        $invoices = new FakeInvoiceSourceForOrchestrator([]);
+        $payment = new FakePaymentProviderForOrchestrator(webhookEvent: new WebhookEvent(
+            type: 'payment.captured',
+            providerEvent: 'payment.captured',
+            payload: [],
+            invoiceRef: 'inv_1',
+            gatewayTxnRef: 'pay_ABC',
+            amountMinorUnits: 49900,
+            currency: 'INR',
+            capturedAt: new \DateTimeImmutable(),
+            // tenantId/platformCode deliberately omitted (default null)
+        ));
+        $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
+
+        $this->expectException(\RuntimeException::class);
+        $orchestrator->settleFromWebhook(new WebhookRequest('{}', 'sig'));
+        $this->assertNull($invoices->lastRecordPaymentRequest, 'no payment must be recorded when the tenant check cannot be enforced');
     }
 
     public function test_settle_from_webhook_replay_reports_already_recorded(): void
@@ -146,6 +181,8 @@ class CollectionOrchestratorTest extends TestCase
             amountMinorUnits: 49900,
             currency: 'INR',
             capturedAt: new \DateTimeImmutable(),
+            tenantId: 'tenant-1',
+            platformCode: 'platform-1',
         ));
         $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
@@ -302,7 +339,7 @@ final class FakeInvoiceSourceForOrchestrator implements InvoiceSource
     ) {
     }
 
-    public function resolvePayableIntent(string $invoiceRef): PayableIntent
+    public function resolvePayableIntent(string $invoiceRef, string $tenantId, string $platformCode): PayableIntent
     {
         return $this->intentsByRef[$invoiceRef]
             ?? throw new \OutOfBoundsException("no fake intent registered for invoiceRef '$invoiceRef'");

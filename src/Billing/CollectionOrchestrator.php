@@ -81,9 +81,18 @@ final class CollectionOrchestrator
      * driver instead of through this flow; there is no invoice to resolve
      * a payable intent from.
      *
+     * @param string $tenantId The CALLER's own tenant id, from its
+     *   authenticated session/JWT — NEVER re-derived from $invoiceRef.
+     *   Required (added 2026-09-22, TENANT ISOLATION) so the bound
+     *   InvoiceSource can refuse to resolve/checkout an invoice that does
+     *   not belong to this tenant (see {@see \StoneScriptPHP\Billing\Contracts\InvoiceSource}).
+     *   Also embedded into the created order's notes/metadata so it round-
+     *   trips back through the gateway's webhook, letting
+     *   {@see self::settleFromWebhook()} enforce the SAME check on settlement.
+     * @param string $platformCode The caller's own platform code, paired with $tenantId.
      * @throws \LogicException if constructed without an InvoiceSource.
      */
-    public function initiateCollection(string $invoiceRef): CheckoutInfo
+    public function initiateCollection(string $invoiceRef, string $tenantId, string $platformCode): CheckoutInfo
     {
         if ($this->invoices === null) {
             throw new \LogicException(
@@ -94,8 +103,10 @@ final class CollectionOrchestrator
         }
 
         // The invoicing system DECIDES amount/currency/gateway/payability —
-        // the orchestrator only asks and relays.
-        $intent = $this->invoices->resolvePayableIntent($invoiceRef);
+        // the orchestrator only asks and relays. tenantId/platformCode are
+        // the CALLER's identity, not a decision — the invoicing system uses
+        // them only to enforce ownership, never to pick amount/gateway.
+        $intent = $this->invoices->resolvePayableIntent($invoiceRef, $tenantId, $platformCode);
 
         if (!$intent->isPayable) {
             // No order created — e.g. already_paid.
@@ -103,12 +114,15 @@ final class CollectionOrchestrator
         }
 
         // Amount/currency/receipt are the server-set values the invoicing
-        // system returned — NEVER client input.
+        // system returned — NEVER client input. tenant_id/platform_code are
+        // embedded here (NOT decided by the driver) purely so a verified
+        // webhook echoes them back to settleFromWebhook() — see
+        // RecordPaymentRequest's docblock for why this round-trip exists.
         $order = $this->payment->createOrder(new CreateOrderRequest(
             amountMinorUnits: $intent->amountMinorUnits,
             currency: $intent->currency,
             receipt: $intent->reference ?? $invoiceRef,
-            notes: ['invoice_ref' => $invoiceRef],
+            notes: ['invoice_ref' => $invoiceRef, 'tenant_id' => $tenantId, 'platform_code' => $platformCode],
         ));
 
         return new CheckoutInfo(
@@ -178,17 +192,32 @@ final class CollectionOrchestrator
             || $event->amountMinorUnits === null
             || $event->currency === null
             || $event->capturedAt === null
+            // tenantId/platformCode (added 2026-09-22, TENANT ISOLATION):
+            // required for exactly the same reason as the fields above —
+            // recordVerifiedPayment() cannot enforce the tenant-ownership
+            // check InvoiceSource now requires without them, and settling a
+            // payment WITHOUT that check is exactly the cross-tenant gap
+            // this fixed. Both shipped drivers populate them for
+            // payment.captured because CollectionOrchestrator::initiateCollection()
+            // always embeds them in the order's notes at checkout time; a
+            // driver/integration that reaches this point without them is
+            // itself broken/incomplete and must fail loud, not settle
+            // ownership-unchecked.
+            || $event->tenantId === null
+            || $event->platformCode === null
         ) {
             throw new \RuntimeException(
                 "CollectionOrchestrator: driver returned a '{$event->type}' event without the "
-                . 'normalised invoiceRef/gatewayTxnRef/amountMinorUnits/currency/capturedAt fields '
-                . 'needed to record a payment. The driver must populate WebhookEvent\'s normalised '
-                . 'fields for settlement event types.'
+                . 'normalised invoiceRef/gatewayTxnRef/amountMinorUnits/currency/capturedAt/tenantId/'
+                . 'platformCode fields needed to record a payment. The driver must populate WebhookEvent\'s '
+                . 'normalised fields for settlement event types.'
             );
         }
 
         $result = $this->invoices->recordVerifiedPayment(new RecordPaymentRequest(
             invoiceRef: $event->invoiceRef,
+            tenantId: $event->tenantId,
+            platformCode: $event->platformCode,
             gatewayCode: $this->gatewayCode,
             gatewayTxnRef: $event->gatewayTxnRef,
             amountMinorUnits: $event->amountMinorUnits,

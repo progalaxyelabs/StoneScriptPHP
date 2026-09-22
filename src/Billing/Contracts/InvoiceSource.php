@@ -30,6 +30,21 @@ namespace StoneScriptPHP\Billing\Contracts;
  *     verified event; it does not re-verify signatures.
  *   - $invoiceRef is an OPAQUE string end to end — the framework never
  *     assumes its type or internal structure.
+ *   - $tenantId/$platformCode (added 2026-09-22, TENANT ISOLATION) are the
+ *     caller's OWN tenant identity — resolved by the caller from its
+ *     authenticated session/JWT, never from the invoice itself. An
+ *     implementation backed by tenant-scoped storage (e.g.
+ *     `stonescriptphp-pay`'s SQL invoicing side) MUST constrain both
+ *     lookup/mutation to an invoice/payable actually owned by this tenant,
+ *     and MUST reject (never silently no-op or fall through to another
+ *     tenant's data) a mismatch. This closes a real bare-id cross-tenant
+ *     gap: $invoiceRef alone (e.g. a numeric surrogate id) has no tenant
+ *     boundary of its own — the implementation must enforce one using
+ *     these params, exactly as `stonescriptphp-pay`'s `inv_invoice_
+ *     payability`/`inv_resolve_gateway`/`inv_record_payment` SQL functions
+ *     now do (ER067). An implementation with no tenant concept of its own
+ *     (single-tenant deployment) may ignore them, but must still accept the
+ *     params (the contract is the same for every implementation).
  */
 interface InvoiceSource
 {
@@ -43,9 +58,14 @@ interface InvoiceSource
      * before creating a payment order — never after.
      *
      * @param string $invoiceRef Opaque key identifying the invoice/payable.
+     * @param string $tenantId The CALLER's own tenant id (from its
+     *   authenticated session/JWT) — the implementation must reject a
+     *   lookup for an invoice that does not belong to this tenant.
+     * @param string $platformCode The caller's own platform code, paired
+     *   with $tenantId (see the class docblock's tenant-isolation note).
      * @return PayableIntent
      */
-    public function resolvePayableIntent(string $invoiceRef): PayableIntent;
+    public function resolvePayableIntent(string $invoiceRef, string $tenantId, string $platformCode): PayableIntent;
 
     /**
      * Record a verified payment against an invoice/payable IDEMPOTENTLY

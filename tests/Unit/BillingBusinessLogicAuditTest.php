@@ -66,13 +66,18 @@ class BillingBusinessLogicAuditTest extends TestCase
         $payment = new AuditFakePaymentProvider();
         $orchestrator = new CollectionOrchestrator($payment, GatewayCode::RAZORPAY, $invoices);
 
-        $checkout = $orchestrator->initiateCollection('audit_invoice_ref');
+        $checkout = $orchestrator->initiateCollection('audit_invoice_ref', 'tenant-audit', 'platform-audit');
 
         $this->assertSame($oddAmount, $payment->lastCreateOrderRequest?->amountMinorUnits);
         $this->assertSame($oddCurrency, $payment->lastCreateOrderRequest?->currency);
         $this->assertSame($oddReceipt, $payment->lastCreateOrderRequest?->receipt);
         $this->assertSame($oddAmount, $checkout->amountMinorUnits);
         $this->assertSame($oddCurrency, $checkout->currency);
+        // TENANT ISOLATION (added 2026-09-22): the caller's tenant identity
+        // is relayed to the InvoiceSource verbatim, never re-derived from
+        // the invoiceRef or altered by the orchestrator.
+        $this->assertSame('tenant-audit', $invoices->lastResolveTenantId);
+        $this->assertSame('platform-audit', $invoices->lastResolvePlatformCode);
     }
 
     /**
@@ -98,7 +103,7 @@ class BillingBusinessLogicAuditTest extends TestCase
 
         // Must NOT throw — the orchestrator does not police the invoicing
         // system's routing decision; it only relays it.
-        $checkout = $orchestrator->initiateCollection('audit_invoice_ref_2');
+        $checkout = $orchestrator->initiateCollection('audit_invoice_ref_2', 'tenant-audit', 'platform-audit');
         $this->assertTrue($checkout->isPayable);
     }
 
@@ -130,6 +135,8 @@ class BillingBusinessLogicAuditTest extends TestCase
             amountMinorUnits: $oddAmount,
             currency: $oddCurrency,
             capturedAt: $capturedAt,
+            tenantId: 'tenant-audit',
+            platformCode: 'platform-audit',
         ));
         $orchestrator = new CollectionOrchestrator($payment, GatewayCode::PAYPAL, $invoices);
 
@@ -141,6 +148,12 @@ class BillingBusinessLogicAuditTest extends TestCase
         $this->assertSame($oddCurrency, $req->currency);
         $this->assertSame('txn_audit_1', $req->gatewayTxnRef);
         $this->assertSame($capturedAt, $req->capturedAt);
+        // TENANT ISOLATION (added 2026-09-22): tenantId/platformCode are
+        // relayed from the driver's normalised WebhookEvent verbatim too —
+        // the orchestrator makes no tenant decision, it only carries the
+        // value through to the InvoiceSource that enforces it.
+        $this->assertSame('tenant-audit', $req->tenantId);
+        $this->assertSame('platform-audit', $req->platformCode);
         // gatewayCode tagged onto the payment record is the orchestrator's
         // OWN constructor binding (one orchestrator == one driver == one
         // gateway) — a lookup of which instance is running, not a routing
@@ -244,6 +257,8 @@ final class AuditFakePaymentProvider implements PaymentProvider
 final class AuditFakeInvoiceSource implements InvoiceSource
 {
     public ?RecordPaymentRequest $lastRecordPaymentRequest = null;
+    public ?string $lastResolveTenantId = null;
+    public ?string $lastResolvePlatformCode = null;
 
     public function __construct(
         private readonly ?PayableIntent $intent = null,
@@ -251,8 +266,11 @@ final class AuditFakeInvoiceSource implements InvoiceSource
     ) {
     }
 
-    public function resolvePayableIntent(string $invoiceRef): PayableIntent
+    public function resolvePayableIntent(string $invoiceRef, string $tenantId, string $platformCode): PayableIntent
     {
+        $this->lastResolveTenantId = $tenantId;
+        $this->lastResolvePlatformCode = $platformCode;
+
         return $this->intent ?? throw new \LogicException('no fake intent configured');
     }
 
