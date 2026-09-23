@@ -1,30 +1,32 @@
 # StoneScriptPHP\Billing — the pay <-> invoice integration seam
 
 The framework owns the CONTRACT (and a reference implementation of the
-glue) between any payment module (`stonescriptphp-pay` or a hand-rolled
+glue) between any payment module (`stonescriptphp-payments` or a hand-rolled
 `PaymentProvider`) and any invoicing/billing system (`stonescriptphp-invoice`
-or a hand-rolled `InvoiceSource`). Neither `pay` nor `invoice` knows about
-the other — this namespace is the ONLY place that binds both, so each stays
-independently installable and usable on its own.
+or a hand-rolled `InvoiceSource`). Neither `stonescriptphp-payments` nor
+`invoice` knows about the other — this namespace is the ONLY place that
+binds both, so each stays independently installable and usable on its own.
 
-- `pay` alone = works (no invoicing dependency at all).
+- `stonescriptphp-payments` (payment-driver half) alone = works (no
+  invoicing dependency at all).
 - `invoice` alone = works (SQL-only: issue invoices, run the CRM chase,
   mark paid manually — no PHP adapter needed).
-- `pay` + `invoice` + this package = automated collection, wired through
-  `CollectionOrchestrator`.
+- `stonescriptphp-payments` (both halves) + `invoice` + this package =
+  automated collection, wired through `CollectionOrchestrator`.
 
 The framework OWNS the payment-provider port itself
 (`Contracts\PaymentProvider` + `Dto\*` + `Exceptions\*`, all
 self-contained — no cross-package `extends`/`use`). The framework never
-depends on any payment package, and `stonescriptphp-pay` never depends on
-the framework — both stay independently publishable/requireable.
+depends on any payment package, and `stonescriptphp-payments` never depends
+on the framework — both stay independently publishable/requireable.
 
-`stonescriptphp-pay` ships its OWN, structurally-identical
+`stonescriptphp-payments` ships its OWN, structurally-identical
 `StoneScriptPay\Contracts\PaymentProvider` contract (same method names,
 separate DTO namespace `StoneScriptPay\DTO\*`) — it does not implement
-this framework port directly. To use a `pay` driver (e.g.
-`RazorpayDriver`) through THIS port, the CONSUMING APPLICATION writes a
-small adapter — see "Bridging `stonescriptphp-pay` into this port" below.
+this framework port directly. To use a `stonescriptphp-payments` driver
+(e.g. `RazorpayDriver`) through THIS port, the CONSUMING APPLICATION writes
+a small adapter — see "Bridging `stonescriptphp-payments` into this port"
+below.
 A hand-rolled driver, or any other payment package, can instead implement
 `Contracts\PaymentProvider` directly with no adapter needed. The framework
 itself resolves and compiles with zero payment package present.
@@ -39,7 +41,7 @@ itself resolves and compiles with zero payment package present.
   "should this settle?" decision stays in the invoicing implementation
   (SQL, for `stonescriptphp-invoice`), never in PHP.
 - `Contracts\PaymentProvider` — the framework's OWN payment port (see
-  above). `stonescriptphp-pay`'s drivers do NOT implement this interface
+  above). `stonescriptphp-payments`'s drivers do NOT implement this interface
   directly (see the bridging section below); a hand-rolled driver or a
   small app-side adapter does. Every implementation additionally reports
   `settlementModel(): 'gateway'|'mor'`.
@@ -85,9 +87,9 @@ numbering, currency, or gateway-ROUTING decision is ever made in PHP. See
 `CollectionOrchestrator`'s docblock and
 `StoneScriptPHP\Tests\Unit\BillingBusinessLogicAuditTest` for the line-by-line proof.
 
-## Bridging `stonescriptphp-pay` into this port
+## Bridging `stonescriptphp-payments` into this port
 
-`pay` is a deliberately framework-free library — it has no dependency on
+`stonescriptphp-payments` is a deliberately framework-free library — it has no dependency on
 `progalaxyelabs/stonescriptphp` and its drivers implement its OWN
 `StoneScriptPay\Contracts\PaymentProvider`, not this framework's port.
 Both contracts are structurally identical (same methods, mirrored DTO
@@ -162,17 +164,19 @@ inside the adapter for a cleaner boundary. Pick one and be consistent.
 
 ## Four integration paths — the contract is OPTIONAL, never a forced coupling
 
-- **Path A — our `pay` + our `invoice` (reference pairing).** `composer
-  require` both + the framework; write (or reuse) the adapter above to
-  bridge `RazorpayDriver`/`PaypalDriver` into `PaymentProvider`; use
-  `InvoiceSourceAdapter`; wire `CollectionOrchestrator` as above.
-- **Path B — our `pay` + a DIFFERENT invoicing system** (Zoho, QuickBooks,
-  Stripe Invoicing, hand-rolled). Implement `InvoiceSource`'s two methods
-  against your system — `resolvePayableIntent` reads your invoice's
-  balance/currency/gateway choice; `recordVerifiedPayment` posts a payment
-  to your ledger idempotently. Wire your implementation into
-  `CollectionOrchestrator`. `pay` and the orchestrator are unchanged; you
-  never touch `stonescriptphp-invoice`.
+- **Path A — our `stonescriptphp-payments` + our `invoice` (reference
+  pairing).** `composer require` both + the framework; write (or reuse)
+  the adapter above to bridge `RazorpayDriver`/`PaypalDriver` into
+  `PaymentProvider`; use `InvoiceSourceAdapter`; wire
+  `CollectionOrchestrator` as above.
+- **Path B — our `stonescriptphp-payments` + a DIFFERENT invoicing system**
+  (Zoho, QuickBooks, Stripe Invoicing, hand-rolled). Implement
+  `InvoiceSource`'s two methods against your system —
+  `resolvePayableIntent` reads your invoice's balance/currency/gateway
+  choice; `recordVerifiedPayment` posts a payment to your ledger
+  idempotently. Wire your implementation into `CollectionOrchestrator`.
+  `stonescriptphp-payments` and the orchestrator are unchanged; you never
+  touch `stonescriptphp-invoice`.
 - **Path C — an MoR provider, NO separate invoicing.** Implement a
   `PaymentProvider` driver whose `settlementModel()` returns `'mor'`.
   Construct `new CollectionOrchestrator($driver, $gatewayCode)` (the third

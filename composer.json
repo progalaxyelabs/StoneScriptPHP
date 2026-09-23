@@ -46,7 +46,7 @@
         "openspout/openspout": "Required for `php stone generate data-export`'s XLSX output — a genuinely constant-memory streaming writer (phpoffice/phpspreadsheet is not)",
         "google/apiclient": "Required for Google OAuth authentication (install via: php stone generate auth:google)",
         "phpoffice/phpspreadsheet": "Required for Excel/CSV export features",
-        "progalaxyelabs/stonescriptphp-pay": "A standalone payment-driver library (Razorpay/PayPal) — bridge it into StoneScriptPHP\\Billing\\Contracts\\PaymentProvider with a small app-side adapter (see src/Billing/README.md) to use it with StoneScriptPHP\\Billing\\CollectionOrchestrator or StoneScriptPHP\\Subscriptions' razorpay_webhook feature (v9.17.2+ — pass the adapter as 'payment_provider' to SubscriptionRoutes::register(); the framework itself depends on no concrete payment package, and pay has no dependency on the framework)"
+        "progalaxyelabs/stonescriptphp-payments": "A standalone payments + invoicing library (Razorpay/PayPal drivers, GST-aware invoicing) — bridge it into StoneScriptPHP\\Billing\\Contracts\\PaymentProvider with a small app-side adapter (see src/Billing/README.md) to use it with StoneScriptPHP\\Billing\\CollectionOrchestrator; the framework itself depends on no concrete payment package, and the library has no dependency on the framework"
     },
     "autoload": {
         "psr-4": {

@@ -33,7 +33,7 @@ use StoneScriptPHP\Subscriptions\Routes\PostRazorpayWebhookRoute;
  * These tests prove the injection seam itself using a FAKE
  * `PaymentProvider` (the framework's own port) — no payment package
  * needed at all to test the framework's side of this contract. A real
- * concrete driver (e.g. `stonescriptphp-pay`'s Razorpay driver)
+ * concrete driver (e.g. `stonescriptphp-payments`'s Razorpay driver)
  * satisfying this exact same port is proven in THAT package's own test
  * suite, not here — the framework must not depend on it to test itself.
  *

@@ -19,7 +19,7 @@ use StoneScriptPHP\Billing\Contracts\PaymentProvider;
  *       'razorpay_webhook_secret' => 'whsec_xxx',   // enables webhook
  *       'payment_provider' => $driver,               // required with the webhook above —
  *                                                     // a StoneScriptPHP\Billing\Contracts\PaymentProvider
- *                                                     // (e.g. an adapter wrapping stonescriptphp-pay's
+ *                                                     // (e.g. an adapter wrapping stonescriptphp-payments's
  *                                                     // Razorpay driver — see Billing/README.md)
  *       'admin_api_key' => 'secret-key',             // enables admin activate
  *       'prefix' => '/subscription',                 // optional, default: /subscription

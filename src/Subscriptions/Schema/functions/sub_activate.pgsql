@@ -31,10 +31,11 @@
 --      against the OLD shape produced 15 duplicate payment rows (see this
 --      task's concurrency-test evidence).
 --
--- FIX SHAPE — mirrors stonescriptphp-pay's canonical
+-- FIX SHAPE — mirrors stonescriptphp-payments's canonical
 -- pay_captured_payments / pay_record_captured_payment() primitive (this
--- function does NOT call into pay's SQL directly: Subscriptions has ZERO
--- required dependency on the `pay` package — see
+-- function does NOT call into stonescriptphp-payments's SQL directly:
+-- Subscriptions has ZERO required dependency on the `stonescriptphp-payments`
+-- package — see
 -- StoneScriptPHP\Billing\README.md's "the framework depends on no concrete
 -- payment package" law — so a hard cross-package SQL call here would break
 -- every Subscriptions-without-pay installation. `stonescriptphp-invoice`'s

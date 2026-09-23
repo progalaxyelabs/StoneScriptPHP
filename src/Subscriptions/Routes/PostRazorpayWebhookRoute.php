@@ -21,8 +21,9 @@ use StoneScriptPHP\Webhooks\WebhookQuarantine;
  * the framework no longer hard-references any concrete payment package's
  * driver class directly; the consuming app builds a `PaymentProvider`
  * implementation — e.g. a small adapter wrapping the
- * `progalaxyelabs/stonescriptphp-pay` package's Razorpay driver (`pay` is
- * a standalone library with its own, differently-namespaced contract —
+ * `progalaxyelabs/stonescriptphp-payments` package's Razorpay driver
+ * (`stonescriptphp-payments` is a standalone library with its own,
+ * differently-namespaced contract —
  * see `Billing/README.md`'s bridging section for the adapter shape), or a
  * hand-rolled driver implementing this interface directly — and passes it
  * via `SubscriptionRoutes::register($router, ['payment_provider' =>
@@ -95,7 +96,7 @@ class PostRazorpayWebhookRoute implements IRouteHandler
             error_log('[Razorpay Webhook] No PaymentProvider injected via SubscriptionConfig::$paymentProvider');
             return res_error(
                 'Server misconfiguration: razorpay_webhook requires a PaymentProvider — build one '
-                . '(e.g. an adapter wrapping composer require progalaxyelabs/stonescriptphp-pay\'s '
+                . '(e.g. an adapter wrapping composer require progalaxyelabs/stonescriptphp-payments\'s '
                 . "Razorpay driver — see Billing/README.md) and pass it as 'payment_provider' => "
                 . '$driver to SubscriptionRoutes::register()',
                 503

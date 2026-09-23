@@ -13,11 +13,12 @@ use StoneScriptPHP\Billing\Dto\WebhookRequest;
 
 /**
  * Reference glue binding a `Billing\Contracts\PaymentProvider` (a
- * framework-owned port — see that interface's docblock; `stonescriptphp-pay`
+ * framework-owned port — see that interface's docblock; `stonescriptphp-payments`
  * stays standalone and does not implement it directly, an app-side adapter
- * bridges the two if `pay` is used) and an OPTIONAL `InvoiceSource` for the
- * two collection flows. Ships in the framework — not in `pay` or `invoice`
- * — because it is the only place that can type-hint both contracts while
+ * bridges the two if `stonescriptphp-payments` is used) and an OPTIONAL
+ * `InvoiceSource` for the two collection flows. Ships in the framework —
+ * not in `stonescriptphp-payments` or `invoice` — because it is the only
+ * place that can type-hint both contracts while
  * keeping each package standalone.
  *
  * Contains ONLY sequencing + marshalling — zero business decisions. It
@@ -36,7 +37,7 @@ final class CollectionOrchestrator
     /**
      * @param PaymentProvider $payment The bound payment driver/adapter —
      *   any implementation of the framework's own `PaymentProvider` port
-     *   (e.g. a small app-side adapter wrapping `stonescriptphp-pay`'s
+     *   (e.g. a small app-side adapter wrapping `stonescriptphp-payments`'s
      *   Razorpay driver, or a hand-rolled driver implementing this
      *   interface directly).
      * @param string $gatewayCode This orchestrator instance's gateway code

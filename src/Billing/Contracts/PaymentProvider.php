@@ -21,7 +21,7 @@ use StoneScriptPHP\Billing\Exceptions\WebhookException;
 /**
  * The framework-owned payment provider PORT (ports-and-adapters: the
  * framework defines what it needs from a payment module; any payment
- * module — `progalaxyelabs/stonescriptphp-pay` or a hand-rolled one —
+ * module — `progalaxyelabs/stonescriptphp-payments` or a hand-rolled one —
  * ADAPTS to this, never the other way around).
  *
  * Before v9.17.2 the framework's `Billing\Contracts\PaymentContract`
@@ -32,15 +32,16 @@ use StoneScriptPHP\Billing\Exceptions\WebhookException;
  * framework, referencing only framework DTOs/exceptions (`Billing\Dto\*`,
  * `Billing\Exceptions\*`).
  *
- * `stonescriptphp-pay` stays a STANDALONE, framework-free library — it does
- * NOT implement this interface and has no dependency on this framework (so
- * it remains independently publishable/requireable without pulling in
- * StoneScriptPHP). Its own `StoneScriptPay\Contracts\PaymentProvider` is a
- * structurally identical, separately-owned contract. A consuming
- * application that wants to use `pay`'s drivers (e.g. `RazorpayDriver`)
- * through THIS port writes a small adapter class implementing
- * `StoneScriptPHP\Billing\Contracts\PaymentProvider` that delegates to a
- * `pay` driver instance, mapping `StoneScriptPay\DTO\*` <-> `Billing\Dto\*`
+ * `stonescriptphp-payments` stays a STANDALONE, framework-free library — it
+ * does NOT implement this interface and has no dependency on this
+ * framework (so it remains independently publishable/requireable without
+ * pulling in StoneScriptPHP). Its own `StoneScriptPay\Contracts\PaymentProvider`
+ * is a structurally identical, separately-owned contract. A consuming
+ * application that wants to use `stonescriptphp-payments`'s drivers (e.g.
+ * `RazorpayDriver`) through THIS port writes a small adapter class
+ * implementing `StoneScriptPHP\Billing\Contracts\PaymentProvider` that
+ * delegates to a `stonescriptphp-payments` driver instance, mapping
+ * `StoneScriptPay\DTO\*` <-> `Billing\Dto\*`
  * at each call (the shapes mirror each other 1:1, so the mapping is
  * mechanical) — see `Billing/README.md` for an illustrative adapter. Any
  * OTHER payment module, or a hand-rolled driver, can instead implement

@@ -26,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_subscription_payments_gateway ON subscription_pay
 -- record the same captured payment twice. This partial UNIQUE index is the
 -- DB-level backstop half of the fix; sub_activate() (see that file's
 -- docblock) now gates the expiry-extension side effect on winning THIS
--- insert, mirroring stonescriptphp-pay's pay_captured_payments /
+-- insert, mirroring stonescriptphp-payments's pay_captured_payments /
 -- pay_record_captured_payment() primitive (INSERT ... ON CONFLICT DO
 -- NOTHING — no side effect of its own to roll back, so no advisory lock or
 -- exception-savepoint machinery is needed here either).

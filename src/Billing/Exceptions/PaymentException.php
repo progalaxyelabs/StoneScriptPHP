@@ -7,7 +7,7 @@ namespace StoneScriptPHP\Billing\Exceptions;
 /**
  * Base exception for all payment errors raised by a
  * `StoneScriptPHP\Billing\Contracts\PaymentProvider` implementation
- * (e.g. `stonescriptphp-pay`'s drivers).
+ * (e.g. `stonescriptphp-payments`'s drivers).
  *
  * Wraps provider-level errors (network failures, API errors) so consuming
  * code can catch a single, framework-owned type without coupling to any

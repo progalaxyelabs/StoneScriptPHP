@@ -33,9 +33,10 @@ use StoneScriptPHP\Binding\TypedArray;
  * v9.17.2+: enabling razorpay_webhook (i.e. setting razorpay_webhook_secret)
  * ALSO requires passing `'payment_provider' => $driver` — an instance of
  * `StoneScriptPHP\Billing\Contracts\PaymentProvider` (e.g. `composer
- * require progalaxyelabs/stonescriptphp-pay` and wrap its Razorpay driver
- * in a small app-side adapter — `pay` is a standalone library with its own
- * contract, not this one; see `Billing/README.md`'s bridging section).
+ * require progalaxyelabs/stonescriptphp-payments` and wrap its Razorpay
+ * driver in a small app-side adapter — `stonescriptphp-payments` is a
+ * standalone library with its own contract, not this one; see
+ * `Billing/README.md`'s bridging section).
  * register() throws at registration time if razorpay_webhook is enabled
  * without one. The framework never constructs a concrete driver itself —
  * see PostRazorpayWebhookRoute's docblock. No other Subscriptions feature
@@ -86,7 +87,7 @@ class SubscriptionRoutes
                     "SubscriptionRoutes::register(): razorpay_webhook is enabled (razorpay_webhook_secret "
                     . "is set) but no 'payment_provider' was given. Pass a "
                     . 'StoneScriptPHP\\Billing\\Contracts\\PaymentProvider instance — e.g. an adapter '
-                    . "wrapping progalaxyelabs/stonescriptphp-pay's Razorpay driver (see Billing/README.md) "
+                    . "wrapping progalaxyelabs/stonescriptphp-payments's Razorpay driver (see Billing/README.md) "
                     . "— as \$options['payment_provider'] to SubscriptionRoutes::register()."
                 );
             }
