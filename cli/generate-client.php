@@ -1489,7 +1489,8 @@ export function isReadOnlyError(e: unknown): e is ReadOnlyError {
     && (e as { httpStatus?: unknown }).httpStatus === 423;
 }
 
-export type SubscriptionNoticeState = 'ok' | 'trial_ending' | 'plan_ending' | 'read_only';
+/** 'blocked' = server runs expired_mode 'block': reads are refused too (not read-only). */
+export type SubscriptionNoticeState = 'ok' | 'trial_ending' | 'plan_ending' | 'read_only' | 'blocked';
 
 /** Parsed `X-Subscription-State` response header (or the 423 payload). */
 export interface SubscriptionNotice {
@@ -1499,7 +1500,7 @@ export interface SubscriptionNotice {
   /** ISO-8601 UTC; set for read_only when known. */
   endedAt: string | null;
   daysRemaining: number | null;
-  /** read_only only: 'trial_expired' | 'plan_ended' | 'no_subscription'. */
+  /** read_only / blocked only: 'trial_expired' | 'plan_ended' | 'no_subscription'. */
   reason: string | null;
 }
 
@@ -1511,7 +1512,7 @@ export function parseSubscriptionStateHeader(value: string | null | undefined): 
   if (!value) return null;
   const parts = value.split(';').map((p) => p.trim()).filter((p) => p.length > 0);
   const state = parts[0];
-  if (state !== 'ok' && state !== 'trial_ending' && state !== 'plan_ending' && state !== 'read_only') {
+  if (state !== 'ok' && state !== 'trial_ending' && state !== 'plan_ending' && state !== 'read_only' && state !== 'blocked') {
     return null;
   }
   const kv: Record<string, string> = {};

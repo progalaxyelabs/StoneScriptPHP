@@ -92,7 +92,7 @@
 --     normal replay. Now RAISEs instead of silently reporting
 --     `already_applied: true` to a tenant a payment doesn't belong to.
 --   - `is_active` on the winner path changed from a hardcoded `true` to
---     the same `expires_at > NOW() AND status NOT IN ('cancelled')`
+--     the same `expires_at > NOW()` (cancel-at-period-end: cancelled stays active until expires_at)
 --     expression used on the replay path, so a `p_duration_days = 0` edge
 --     case can't make this function and `sub_get_status` disagree about
 --     whether the subscription is actually active.
@@ -213,7 +213,7 @@ BEGIN
                 'tenant_id', v_sub.tenant_id,
                 'plan_code', v_sub.plan_code,
                 'status', v_sub.status,
-                'is_active', (v_sub.expires_at > NOW() AND v_sub.status NOT IN ('cancelled')),
+                'is_active', (v_sub.expires_at > NOW()),
                 'expires_at', v_sub.expires_at,
                 'payment_id', v_payment_id,
                 'already_applied', v_already_applied,
@@ -255,7 +255,7 @@ BEGIN
         'tenant_id', v_sub.tenant_id,
         'plan_code', v_sub.plan_code,
         'status', v_sub.status,
-        'is_active', (v_sub.expires_at > NOW() AND v_sub.status NOT IN ('cancelled')),
+        'is_active', (v_sub.expires_at > NOW()),
         'expires_at', v_sub.expires_at,
         'payment_id', v_payment_id,
         'already_applied', v_already_applied,

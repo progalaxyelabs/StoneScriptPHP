@@ -23,6 +23,8 @@ final class SubscriptionState
     public const TRIAL_ENDING = 'trial_ending';
     public const PLAN_ENDING  = 'plan_ending';
     public const READ_ONLY    = 'read_only';
+    /** block mode only: reads are refused as well (never `read_only`). */
+    public const BLOCKED      = 'blocked';
 
     public const REASON_TRIAL_EXPIRED   = 'trial_expired';
     public const REASON_PLAN_ENDED      = 'plan_ended';
@@ -36,6 +38,11 @@ final class SubscriptionState
         public readonly ?string $status = null,
         public readonly bool $isTrial = false,
     ) {
+    }
+
+    public function asBlocked(): self
+    {
+        return new self(self::BLOCKED, $this->reason, $this->endsAt, $this->daysRemaining, $this->status, $this->isTrial);
     }
 
     public function isReadOnly(): bool
@@ -72,7 +79,7 @@ final class SubscriptionState
         // deterministic; fall back to the SQL-computed is_active when the date
         // is absent/unparseable.
         $active = $endsAt !== null
-            ? ($endsAt > $now && $status !== 'cancelled')
+            ? ($endsAt > $now)   // cancelled-at-period-end stays active until expires_at
             : (bool) ($row['is_active'] ?? false);
 
         if (!$active) {
@@ -113,7 +120,7 @@ final class SubscriptionState
         if ($this->state === self::TRIAL_ENDING || $this->state === self::PLAN_ENDING) {
             $parts[] = 'ends_at=' . $date;
             $parts[] = 'days=' . (int) $this->daysRemaining;
-        } elseif ($this->state === self::READ_ONLY) {
+        } elseif ($this->state === self::READ_ONLY || $this->state === self::BLOCKED) {
             if ($date !== null) {
                 $parts[] = 'ended_at=' . $date;
             }

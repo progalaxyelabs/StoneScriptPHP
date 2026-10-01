@@ -27,5 +27,7 @@ function mk(status, body, hdr) { global.fetch = async () => ({ status, headers: 
   assert(!isReadOnlyError(err)); assert.equal(toasts.length,1);
   // 423 never triggers refresh handler
   let refreshed=false; h.setRefreshHandler(async()=>{refreshed=true;}); mk(423,{status:'error',message:'ro',data:{error_code:'READ_ONLY_TRIAL_EXPIRED'}}); try{await h.post('/a',{});}catch{} assert(!refreshed);
+  { const { parseSubscriptionStateHeader } = require(process.env.GEN_CJS + '/errors');
+    assert.equal(parseSubscriptionStateHeader('blocked; ended_at=2026-09-10T00:00:00Z; reason=trial_expired').state, 'blocked'); }
   console.log('generated-client 423 OK');
 })().catch(e=>{console.error(e);process.exit(1)});

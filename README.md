@@ -74,7 +74,7 @@ the customer's data accessible instead of locking them out:
 | Request | Result |
 |---|---|
 | `GET` / `HEAD` / `OPTIONS` | allowed |
-| writes on the allow-list (`/auth`, `/account` incl. deletion, `/subscription`, `/export`, `/internal`, `/health` + your `write_allow_list`) | allowed |
+| writes on the allow-list (`/health`, `/auth`, `/subscription`, `/export`, `/internal`, `/account/subscription`, `DELETE /account`, `POST /account/delete`, `POST /account/cancel-deletion` + your `write_allow_list`) | allowed |
 | any other write | **HTTP 423**, `data.error_code` = `READ_ONLY_TRIAL_EXPIRED` / `READ_ONLY_PLAN_ENDED` / `READ_ONLY_NO_SUBSCRIPTION` |
 
 Every authenticated response carries `X-Subscription-State` (`ok`, `trial_ending; ends_at=..; days=..`,
@@ -89,6 +89,25 @@ no extra call (default window: 7 days).
     'missing_subscription' => 'read_only',        // or 'allow'
 ],
 ```
+
+**Your deletion and renewal routes MUST be allow-listed.** Every prefix in the defaults
+(`/auth`, `/subscription`, `/export`, `/internal`, `/account/subscription`) is unprotected for all methods,
+and only the exact account routes named above are exempt. If your account-deletion, cancel-deletion,
+renewal or payment routes live elsewhere (e.g. tenant-scoped), list them, or an expired tenant gets a
+423 on its right to erasure:
+
+```php
+'write_allow_list' => [
+    'POST /portal/tenant/{tenantId}/account/delete',           // {param} = exactly one segment
+    'POST /portal/tenant/{tenantId}/account/cancel-deletion',
+    '/portal/tenant/{tenantId}/files/authorize',               // any method, and sub-paths
+    'POST /devices/pairing/redeem',                            // METHOD /path = exact path
+],
+```
+Forms: `/p` (exact or sub-path), `/p/` (prefix), `METHOD /p` (that method, exact path),
+`{param}` (one non-empty segment, like the Router).
+A `cancelled` subscription stays active until its `expires_at` (cancel-at-period-end).
+In `block` mode the state header says `blocked`, not `read_only`.
 
 **Behaviour change in v10:** earlier versions returned HTTP 402 on every call. Set
 `'expired_mode' => 'block'` to keep that. See the CHANGELOG for details.

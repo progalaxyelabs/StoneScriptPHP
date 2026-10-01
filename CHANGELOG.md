@@ -19,16 +19,27 @@ subscription/trial has expired. The new default (`expired_mode => 'read_only'`):
   machine-readable payload in `data`: `error_code` (`READ_ONLY_TRIAL_EXPIRED`,
   `READ_ONLY_PLAN_ENDED` or `READ_ONLY_NO_SUBSCRIPTION`), `subscription_state`, `reason`,
   `status`, `is_trial`, `ended_at` (ISO-8601 UTC).
-- **Write allow-list** (always writable): `/auth`, `/account` (incl. account deletion/cancel —
-  data-erasure rights), `/subscription`, `/export`, `/internal`, `/health`. Add more through
-  `write_allow_list` (extras only; the defaults cannot be removed). Entries may be method-scoped
-  (`'POST /devices/pair'`). A leading `/api` path segment is ignored when matching.
+- **Write allow-list** (writable while read-only): `/health`, `/auth`, `/subscription` and `/export`,
+  `/internal`, `/account/subscription` (all methods, whole prefix), plus METHOD-SCOPED, EXACT account
+  entries: `DELETE /account`, `POST /account/delete`, `POST /account/cancel-deletion`, `POST /account/password`,
+  `POST /account/password-reset/` (data-erasure rights + account recovery). Any other `/account/*` write is
+  refused. **Every prefix entry in the defaults is unprotected for all methods** — a platform's own deletion
+  and renewal/payment routes MUST be on the list. Add entries with `write_allow_list` (extras only; the
+  defaults cannot be removed). Entry forms: `/p` (exact or sub-path), `/p/` (prefix), `METHOD /p` (that
+  method, exact path), and `{param}` segments matching exactly one non-empty segment
+  (`'POST /portal/tenant/{tenantId}/account/delete'`). A leading `/api` path segment is ignored.
 - **Advance warning / state header**: every authenticated, non-exempt response carries
   `X-Subscription-State`: `ok` | `trial_ending; ends_at=<iso>; days=<n>` |
-  `plan_ending; ends_at=<iso>; days=<n>` | `read_only; ended_at=<iso>; reason=<reason>`.
+  `plan_ending; ends_at=<iso>; days=<n>` | `read_only; ended_at=<iso>; reason=<reason>`
+  (`blocked; ...` instead of `read_only` in `expired_mode => 'block'`, where reads are refused too).
   The warning window is `warning_days` (default 7). `CorsMiddleware` now sends
   `Access-Control-Expose-Headers: X-Subscription-State` by default (new 6th constructor arg
   `$exposedHeaders`).
+- **Cancel-at-period-end**: a `cancelled` subscription with a future `expires_at` stays ACTIVE until that
+  date (`sub_get_status` and `sub_activate` now agree: `is_active = expires_at > NOW()`); `ended_at` is
+  never in the future. Re-run the subscription schema (`sub_get_status`, `sub_activate`) after upgrading.
+- The middleware reads the path from the dispatched request (like the Router), not only `REQUEST_URI`;
+  the fail-open log line is rate-limited to once per 60s per process.
 - **No subscription row** is treated like an expired subscription (read-only) instead of 402;
   `missing_subscription => 'allow'` opts out. DB/gateway errors still **fail open**.
 

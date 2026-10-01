@@ -31,6 +31,16 @@ use StoneScriptPHP\Routing\MiddlewareInterface;
  *     plan_ending;  ends_at=...; days=N
  *     read_only; ended_at=2026-09-10T00:00:00Z; reason=trial_expired
  *
+ * Allow-list matching (write_allow_list and the defaults):
+ *  - `/path`            exact, or any sub-path (path-component prefix), every method.
+ *  - `/path/`           prefix only (trailing slash).
+ *  - `METHOD /path`     only that method, EXACT path (add a trailing slash for a prefix).
+ *  - `{param}` segments match exactly ONE non-empty path segment, like the Router:
+ *    `POST /portal/tenant/{tenantId}/account/delete`.
+ *  - a leading `/api` segment of the request path is ignored when matching.
+ * EVERY prefix entry in the defaults is unprotected for all methods; a platform's
+ * own deletion and renewal/payment routes MUST be on the list (see README).
+ *
  * Failure policy:
  *  - DB/gateway error → fail OPEN (no header, request proceeds).
  *  - No subscription row → treated like an expired subscription (read-only,
@@ -52,10 +62,16 @@ class SubscriptionMiddleware implements MiddlewareInterface
     public const DEFAULT_WRITE_ALLOW_LIST = [
         '/health',
         '/auth',
-        '/account',
-        '/subscription',
+        '/subscription',            // renewal / payment — every method, whole prefix
         '/export',
         '/internal',
+        '/account/subscription',    // renewal / payment under /account
+        // Data-erasure rights + account recovery, METHOD-SCOPED and EXACT (no sub-paths):
+        'DELETE /account',
+        'POST /account/delete',
+        'POST /account/cancel-deletion',
+        'POST /account/password',
+        'POST /account/password-reset/',   // trailing slash = prefix: /request, /confirm
     ];
 
     /** Exempt (no lookup, no header) defaults per mode. */
@@ -132,7 +148,7 @@ class SubscriptionMiddleware implements MiddlewareInterface
 
     public function handle(array $request, callable $next): ?ApiResponse
     {
-        $path = $this->extractPath();
+        $path = $this->extractPath($request);
 
         if ($this->matchesAny($path, $this->exemptPaths)) {
             return $next($request);
@@ -156,7 +172,7 @@ class SubscriptionMiddleware implements MiddlewareInterface
             $row = ($this->statusProvider)($tenantId);
         } catch (\Throwable $e) {
             // Fail OPEN on lookup errors — never block users on infra trouble.
-            error_log('[SubscriptionMiddleware] lookup failed for tenant=' . $tenantId . ': ' . $e->getMessage());
+            $this->logFailOpen($tenantId, $e);
             return $next($request);
         }
 
@@ -165,7 +181,9 @@ class SubscriptionMiddleware implements MiddlewareInterface
         }
 
         $state = SubscriptionState::fromRow($row, ($this->clock)(), $this->warningDays);
-        $this->sendHeader(self::HEADER_NAME, $state->toHeaderValue());
+        // In block mode reads are refused too, so never advertise `read_only`.
+        $headerState = ($state->isReadOnly() && $this->expiredMode === self::MODE_BLOCK) ? $state->asBlocked() : $state;
+        $this->sendHeader(self::HEADER_NAME, $headerState->toHeaderValue());
 
         if (!$state->isReadOnly()) {
             return $next($request);
@@ -195,6 +213,19 @@ class SubscriptionMiddleware implements MiddlewareInterface
         );
     }
 
+    private static int $lastFailOpenLog = 0;
+
+    /** Fail-open log, at most once per 60s per process (an outage must not flood the log). */
+    private function logFailOpen(string $tenantId, \Throwable $e): void
+    {
+        $now = time();
+        if ($now - self::$lastFailOpenLog < 60) {
+            return;
+        }
+        self::$lastFailOpenLog = $now;
+        error_log('[SubscriptionMiddleware] lookup failed (failing open; further occurrences suppressed for 60s) tenant=' . $tenantId . ': ' . $e->getMessage());
+    }
+
     /** Overridable seam so tests can capture headers (header() is a no-op once PHPUnit output started). */
     protected function sendHeader(string $name, string $value): void
     {
@@ -207,13 +238,15 @@ class SubscriptionMiddleware implements MiddlewareInterface
     {
         foreach ($this->writeAllowList as $entry) {
             $entry = trim((string) $entry);
+            $scoped = false;
             if (preg_match('/^([A-Za-z]+)\s+(\/.*)$/', $entry, $m)) {
                 if (strtoupper($m[1]) !== $method) {
                     continue;
                 }
                 $entry = $m[2];
+                $scoped = true;
             }
-            if ($this->matchesAny($path, [$entry])) {
+            if ($this->matchesAny($path, [$entry], !$scoped)) {
                 return true;
             }
         }
@@ -222,9 +255,11 @@ class SubscriptionMiddleware implements MiddlewareInterface
 
     /**
      * Match $path (and $path with a leading /api segment stripped, so config
-     * written without the prefix works for both) against prefix/exact entries.
+     * written without the prefix works for both) against entries. `{param}`
+     * matches exactly one non-empty segment. A trailing-slash entry is always a
+     * prefix; otherwise a component-prefix is allowed only when $componentPrefix.
      */
-    private function matchesAny(string $path, array $entries): bool
+    private function matchesAny(string $path, array $entries, bool $componentPrefix = true): bool
     {
         $candidates = [$path];
         $stripped = preg_replace('#^/api(?=/|$)#', '', $path);
@@ -232,18 +267,35 @@ class SubscriptionMiddleware implements MiddlewareInterface
             $candidates[] = $stripped === '' ? '/' : $stripped;
         }
 
-        foreach ($candidates as $p) {
-            foreach ($entries as $entry) {
-                if (str_ends_with($entry, '/')) {
-                    if ($p === rtrim($entry, '/') || str_starts_with($p, $entry)) {
-                        return true;
-                    }
-                } elseif ($p === $entry || str_starts_with($p, $entry . '/')) {
+        foreach ($entries as $entry) {
+            $entry = (string) $entry;
+            $prefix = str_ends_with($entry, '/');
+            $base = $prefix ? rtrim($entry, '/') : $entry;
+            $regex = self::compileEntry($base, $prefix || $componentPrefix);
+            foreach ($candidates as $p) {
+                if (preg_match($regex, $p) === 1) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    /** @var array<string,string> */
+    private static array $regexCache = [];
+
+    private static function compileEntry(string $base, bool $prefix): string
+    {
+        $key = ($prefix ? 'p:' : 'e:') . $base;
+        if (isset(self::$regexCache[$key])) {
+            return self::$regexCache[$key];
+        }
+        $parts = preg_split('/(\{[A-Za-z_][A-Za-z0-9_]*\})/', $base, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
+        $body = '';
+        foreach ($parts as $part) {
+            $body .= preg_match('/^\{[A-Za-z_][A-Za-z0-9_]*\}$/', $part) === 1 ? '[^/]+' : preg_quote($part, '#');
+        }
+        return self::$regexCache[$key] = '#^' . $body . ($prefix ? '(?:/.*)?' : '') . '$#';
     }
 
     /**
@@ -281,8 +333,13 @@ class SubscriptionMiddleware implements MiddlewareInterface
         return is_array($data) && $data !== [] ? $data : null;
     }
 
-    private function extractPath(): string
+    /** Same source as the Router: the dispatched request path, REQUEST_URI as fallback. */
+    private function extractPath(array $request): string
     {
+        $path = $request['path'] ?? null;
+        if (is_string($path) && $path !== '') {
+            return $path;
+        }
         $uri = $_SERVER['REQUEST_URI'] ?? '/';
         return parse_url($uri, PHP_URL_PATH) ?? '/';
     }
