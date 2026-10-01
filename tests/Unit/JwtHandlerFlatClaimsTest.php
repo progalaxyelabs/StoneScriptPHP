@@ -10,7 +10,7 @@ use StoneScriptPHP\Auth\RsaJwtHandler;
 use StoneScriptPHP\Env;
 
 /**
- * Tests that JWT handlers produce flat (top-level) claim structure per AUTH-SPEC §4.
+ * Tests that JWT handlers produce flat (top-level) claim structure per the auth contract.
  *
  * Prior to this fix, both JwtHandler and RsaJwtHandler wrapped all custom claims
  * inside a 'data' sub-key: { "iss": "...", "data": { "user_id": 1 } }.

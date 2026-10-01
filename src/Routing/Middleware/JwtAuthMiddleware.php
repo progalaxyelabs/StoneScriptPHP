@@ -169,7 +169,7 @@ class JwtAuthMiddleware implements MiddlewareInterface
             // and RequestContextTrait). Without this, every guard reads an always-empty
             // $request['jwt_claims'] and silently passes every request through, whether
             // authenticated or not (framework-spec.md §6 §5.1 — see CHANGELOG for the
-            // fleet-wide fix). This is the single contract both middleware families
+            // platform-wide fix). This is the single contract both middleware families
             // must agree on; AuthContext and jwt_claims are populated from the SAME
             // validated $payload so they can never drift apart.
             $request['jwt_claims'] = $payload;

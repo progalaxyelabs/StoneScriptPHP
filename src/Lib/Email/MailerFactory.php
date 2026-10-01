@@ -6,7 +6,7 @@ namespace StoneScriptPHP\Lib\Email;
 
 /**
  * MailerFactory — chooses the email provider per recipient, mirroring
- * the fleet's central auth service's send-time routing:
+ * the platforms's central auth service's send-time routing:
  *
  *   - recipient domain == TEST_EMAIL_DOMAIN  AND  Mailpit configured
  *         -> MailpitMailer   (plain SMTP, captured by the dev/test mail catcher)

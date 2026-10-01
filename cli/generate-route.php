@@ -4,7 +4,7 @@
  * Route Generator
  *
  * Generates a route handler implementing IRouteHandler directly — the only
- * pattern used by any real platform in the fleet — and registers it in
+ * pattern used by any real platform in the platforms — and registers it in
  * src/config/routes.php using the flat array format with v4.0 metadata
  * (service/group/action/is_public). See ROUTING-CONSOLIDATION-PLAN.md and
  * SPEC.md §3 Routing Conventions.
@@ -112,7 +112,7 @@ if (!str_starts_with($path, '/')) {
 if ($flags['group'] === null && !in_array($flags['service'], ['infra', 'webhook'], true)) {
     echo "Warning: no --group=NAME given and service '{$flags['service']}' is not infra/webhook.\n";
     echo "This route will be excluded from client generation until you add a 'group' key\n";
-    echo "to its routes.php entry (CLIENT-SDK-SPEC §0 A2 requires it on includable routes).\n\n";
+    echo "to its routes.php entry (the client SDK contract requires it on includable routes).\n\n";
 }
 
 /**

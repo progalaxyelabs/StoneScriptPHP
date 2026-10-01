@@ -1,15 +1,14 @@
--- package: progalaxyelabs/stonescriptphp v9.19.0
+-- package: progalaxyelabs/stonescriptphp v10.0.0
 -- StoneScriptPHP :: Subscriptions :: functions :: sub_activate
 --
--- 2026-09-17 FIX (task: safe-by-default idempotent payment-capture
--- primitive; this is the ecosystem's ONLY shipped payment example — every
--- auto-provisioned customer app inherits whatever this function does).
+-- 2026-09-17 FIX (safe-by-default idempotent payment-capture primitive;
+-- this is the framework's shipped payment example — every app scaffolded
+-- from it inherits whatever this function does).
 -- TWO independent defects fixed in this pass:
 --
---   1. STALE 3-ARG CALL (a separate, pre-existing bug, confirmed live in
---      two of our own production apps on 2026-08-22 and hotpatched
---      directly on those DBs at the time — but NEVER fixed here at the
---      SOURCE, so every OTHER/future scaffolded app still shipped the
+--   1. STALE 3-ARG CALL (a separate, pre-existing bug, confirmed in
+--      production on 2026-08-22 and hotpatched directly on those DBs at
+--      the time — but never fixed here at the SOURCE, so every OTHER/future scaffolded app still shipped the
 --      broken 3-arg `PERFORM sub_get_status(p_platform_code, p_tenant_id,
 --      p_payer_email)` against a function that only ever took ONE arg
 --      (`sub_get_status(p_tenant_id TEXT)`) — a hard "function does not
@@ -68,9 +67,9 @@
 -- caught 4 production-breaking gaps in the first draft, fixed here rather
 -- than shipped and discovered live):
 --   - Conflict key changed from (payment_gateway, gateway_payment_id) to
---     (platform_code, gateway_payment_id): one of our own production apps
+--     (platform_code, gateway_payment_id): a deployed app
 --     had ALREADY independently converged on a (platform_code,
---     gateway_payment_id) unique key via its own earlier hotpatch. Two
+--     gateway_payment_id) unique key via an earlier hotpatch. Two
 --     competing idempotency keys on the same table is exactly the kind of
 --     footgun this fix exists to close — this function now targets the
 --     SAME key shape, so `CREATE UNIQUE INDEX IF NOT EXISTS` genuinely
@@ -92,7 +91,7 @@
 --     normal replay. Now RAISEs instead of silently reporting
 --     `already_applied: true` to a tenant a payment doesn't belong to.
 --   - `is_active` on the winner path changed from a hardcoded `true` to
---     the same `expires_at > NOW()` (cancel-at-period-end: cancelled stays active until expires_at)
+--     the same `expires_at > NOW()` and a status that is not suspended/refunded/chargeback (cancel-at-period-end: cancelled stays active until expires_at)
 --     expression used on the replay path, so a `p_duration_days = 0` edge
 --     case can't make this function and `sub_get_status` disagree about
 --     whether the subscription is actually active.
@@ -151,7 +150,7 @@ BEGIN
     -- transaction's isolation level — under REPEATABLE READ/SERIALIZABLE,
     -- `INSERT ... ON CONFLICT DO NOTHING` does not raise on a concurrently
     -- committed row, and this SELECT's snapshot could still miss it,
-    -- leaving v_sub NULL. Failing loud here (dev-critique review) beats
+    -- leaving v_sub NULL. Failing loud here (code review) beats
     -- silently inserting a payment row with subscription_id=NULL and
     -- reporting is_active:true with no subscription ever touched — a
     -- payment-captured, subscription-never-activated silent failure.
@@ -194,7 +193,7 @@ BEGIN
             FROM subscription_payments
             WHERE platform_code = p_platform_code AND gateway_payment_id = p_payment_id;
 
-            -- Integrity check (dev-critique review): the replay lookup is
+            -- Integrity check (code review): the replay lookup is
             -- keyed on (platform_code, gateway_payment_id), not tenant_id —
             -- a genuine gateway payment id can only ever belong to ONE
             -- tenant, so if the caller's tenant doesn't match the tenant
@@ -213,7 +212,7 @@ BEGIN
                 'tenant_id', v_sub.tenant_id,
                 'plan_code', v_sub.plan_code,
                 'status', v_sub.status,
-                'is_active', (v_sub.expires_at > NOW()),
+                'is_active', (v_sub.expires_at > NOW() AND v_sub.status NOT IN ('suspended', 'refunded', 'chargeback')),
                 'expires_at', v_sub.expires_at,
                 'payment_id', v_payment_id,
                 'already_applied', v_already_applied,
@@ -225,7 +224,9 @@ BEGIN
     -- This call is either payment-less (admin activation / no payment_id
     -- given) or the exactly-once winner for a NEW payment_id — safe to
     -- extend now, still inside the FOR UPDATE lock taken above.
-    IF v_sub.expires_at > NOW() AND v_sub.status = 'active' THEN
+    -- Renewing before expiry STACKS onto the remaining paid time, also for a subscription
+    -- cancelled at period end (they paid through expires_at). Anything else restarts from NOW().
+    IF v_sub.expires_at > NOW() AND v_sub.status IN ('active', 'cancelled') THEN
         v_new_expires := v_sub.expires_at + MAKE_INTERVAL(days => p_duration_days);
     ELSE
         v_new_expires := NOW() + MAKE_INTERVAL(days => p_duration_days);
@@ -255,7 +256,7 @@ BEGIN
         'tenant_id', v_sub.tenant_id,
         'plan_code', v_sub.plan_code,
         'status', v_sub.status,
-        'is_active', (v_sub.expires_at > NOW()),
+        'is_active', (v_sub.expires_at > NOW() AND v_sub.status NOT IN ('suspended', 'refunded', 'chargeback')),
         'expires_at', v_sub.expires_at,
         'payment_id', v_payment_id,
         'already_applied', v_already_applied,

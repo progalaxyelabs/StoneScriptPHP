@@ -35,7 +35,7 @@ class Database
      * Fake-mode response registry. Null = live gateway mode (default,
      * production behavior, untouched). Non-null = Database::fake() is
      * active; Database::fn() resolves from this map instead of calling a
-     * real gateway. See TESTABILITY-SPEC.md T2-1.
+     * real gateway. See the testability notes T2-1.
      *
      * Declared `mixed` per-value, not `array|\Closure`, for the same reason
      * documented on fake()'s docblock — fake() is the sole writer and
@@ -420,7 +420,7 @@ class Database
             // Closure that throws a GatewayException (to simulate a business-rule
             // failure or a dropped tenant DB) gets the exact same translation
             // below that a real gateway error would — no parallel error-handling
-            // path to keep in sync. See TESTABILITY-SPEC.md T2-1.
+            // path to keep in sync. See the testability notes T2-1.
             if (self::$fakeResponses !== null) {
                 return self::resolveFakeResponse($function_name, $params);
             }

@@ -147,7 +147,7 @@ foreach ($argv as $arg) {
  * default) audit-owner role-split manifest (audit/protected.json), so the
  * gateway knows which role to grant DML-only access to. The gateway's regular
  * pool is built from ONE set of DB_HOST/DB_USER/... env vars shared across the
- * whole fleet (see stonescriptdb-gateway's src/config.rs Config::from_env),
+ * whole platforms (see stonescriptdb-gateway's src/config.rs Config::from_env),
  * defaulting to "gateway_user" — that is the correct default here too. Override
  * with --runtime-role= if a given deployment's gateway uses a non-default
  * DB_USER.
@@ -228,7 +228,7 @@ foreach (['tables' => $tablesDir, 'functions' => $functionsDir, 'migrations' => 
 /**
  * Mirrors resolveGovernanceMigrationFilename() in
  * cli/generate-tenant-governance.php exactly — continue the target's
- * existing sequential numbering if any; else use the fleet's timestamp
+ * existing sequential numbering if any; else use the platforms's timestamp
  * convention rather than inventing 001_ with no basis.
  *
  * @return array{0: string, 1: string} [filename, note]
@@ -272,7 +272,7 @@ function resolveAuditMigrationFilename(string $migrationsDir): array
 
     return [
         "{$timestamp}_create_audit_log.sql",
-        'no sequential-numbered migrations found — used the fleet timestamp convention',
+        'no sequential-numbered migrations found — used the platforms timestamp convention',
     ];
 }
 

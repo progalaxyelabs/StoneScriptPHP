@@ -245,7 +245,7 @@ class TenantRouteProviderSeamTest extends TestCase
      * They MUST register with access=authentication so the 7.x
      * AccessTokenMiddleware admits the auth token — an API token here is a purpose
      * mismatch → 403. Regression guard for the external-mode 7.x boot/journey
-     * (first fleet platform to adopt this pattern; unblocked others behind it).
+     * (first platform to adopt this pattern; unblocked others behind it).
      *
      * invite-member was also one of these tier-2 routes at the time of the
      * 7.1.2 fix, but was removed 2026-07-21 along with the rest of the

@@ -10,7 +10,7 @@ namespace StoneScriptPHP\Auth;
  * ## The gap this closes
  *
  * A framework deployment where multiple platforms share ONE central auth
- * issuer has a single signing key/JWKS across the whole fleet. Signature +
+ * issuer has a single signing key/JWKS across the whole platforms. Signature +
  * `exp` + `iss` verification alone (see {@see TrustedIssuerVerifier},
  * {@see RsaJwtHandler}, {@see JwtHandler}) proves a token is a genuine,
  * unexpired token issued by that shared auth service — it does NOT prove the

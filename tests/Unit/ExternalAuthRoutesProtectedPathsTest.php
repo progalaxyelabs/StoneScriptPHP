@@ -64,7 +64,7 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
     /**
      * With default options (canonical prefix /api/auth, legacy_compat true by
      * default, provision_tenant explicitly enabled), the exact tier-2 route set
-     * used to fix the 2026-07-05 fleet incident (RequireApiTokenMiddleware) must be present.
+     * used to fix the 2026-07-05 platforms failure (RequireApiTokenMiddleware) must be present.
      *
      * `/api/auth/invite-member` was part of this set until
      * `invite`/`accept_invite` were removed from DefaultTenantRouteProvider

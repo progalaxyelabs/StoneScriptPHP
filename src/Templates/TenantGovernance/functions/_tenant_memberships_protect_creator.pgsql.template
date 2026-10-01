@@ -24,7 +24,7 @@
 -- any reason.
 --
 -- TWO conditions authorize the bypass now (either is sufficient), to stay
--- compatible with BOTH fleet states:
+-- compatible with BOTH platforms states:
 --
 -- 1. The GUC check above (`stonescriptphp.tenant_purge_in_progress`).
 --    Honestly-documented limitation (not hidden): set_config() is a plain
@@ -33,7 +33,7 @@
 --    until the gateway audit-owner role-split below is ENABLED) an
 --    application role COULD in principle set this same GUC itself before
 --    issuing a raw DELETE, and this trigger cannot currently distinguish
---    that from the real purge path. Kept for exactly that fleet state —
+--    that from the real purge path. Kept for exactly that platforms state —
 --    removing it would make purge permanently stuck (no tenant EVER
 --    purgeable) on every platform that hasn't yet had the role-split
 --    enabled, which would be a functional regression on today's default.

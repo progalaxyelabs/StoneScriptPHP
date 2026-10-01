@@ -17,10 +17,10 @@
 -- first place. The locked-down search_path prevents a runtime role from
 -- shadowing pg_catalog/public objects this function calls.
 --
--- On a fleet WITHOUT the role-split enabled (flag off), there is only the one
+-- On a platforms WITHOUT the role-split enabled (flag off), there is only the one
 -- connecting role, SECURITY DEFINER is a no-op (invoker == owner), and
 -- `_audit_log` is only tamper-EVIDENT, same as every other table on that
--- fleet — documented, not silent (see the generator's --help output).
+-- platforms — documented, not silent (see the generator's --help output).
 CREATE OR REPLACE FUNCTION _audit_capture_row()
 RETURNS trigger
 LANGUAGE plpgsql

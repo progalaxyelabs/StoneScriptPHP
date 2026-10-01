@@ -10,8 +10,8 @@ use Symfony\Component\Mime\Email;
 
 /**
  * MailpitMailer — an EmailInterface provider that delivers over plain SMTP to
- * Mailpit (https://mailpit.axllent.org), the fleet's dev/test mail catcher.
- * Mirrors the fleet's central auth service's own Mailpit provider: no auth, no TLS,
+ * Mailpit (https://mailpit.axllent.org), the platforms's dev/test mail catcher.
+ * Mirrors the platforms's central auth service's own Mailpit provider: no auth, no TLS,
  * internal network only.
  *
  * WHY THIS EXISTS: the production provider (MyZeptoMail) talks to the ZeptoMail

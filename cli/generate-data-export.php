@@ -228,7 +228,7 @@ function resolveDataExportMigrationFilename(string $migrationsDir): array
 
     return [
         "{$timestamp}_create_data_export_jobs.sql",
-        'no sequential-numbered migrations found — used the fleet timestamp convention',
+        'no sequential-numbered migrations found — used the platforms timestamp convention',
     ];
 }
 

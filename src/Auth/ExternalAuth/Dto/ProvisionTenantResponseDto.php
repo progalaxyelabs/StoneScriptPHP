@@ -6,7 +6,7 @@ namespace StoneScriptPHP\Auth\ExternalAuth\Dto;
 
 /**
  * Response contract for POST {prefix}/provision-tenant (framework-spec.md
- * §6, AUTH-SPEC §5a). See
+ * §6, the auth contract). See
  * {@see \StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute}.
  *
  * A platform-specific subclass of ProvisionTenantRoute (registered via

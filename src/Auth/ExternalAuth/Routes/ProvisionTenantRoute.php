@@ -20,10 +20,10 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  *
  * Flow:
  *   1. Decode JWT — extract identity_id
- *   2. tenant_name (AUTH-SPEC §5a — the only accepted field name for this;
+ *   2. tenant_name (the auth contract — the only accepted field name for this;
  *      `store_name` was removed 2026-08-12) is validated `required` at the
  *      router edge before process() ever runs.
- *   3. Existing-tenant guard (AUTH-SPEC §5a/S9, 2026-08-12): unless
+ *   3. Existing-tenant guard (the auth contract/S9, 2026-08-12): unless
  *      allow_additional_tenant=true, check whether this identity already has
  *      a membership on this platform (findExistingMembership()). If found AND
  *      its tenant_name matches (case/whitespace-insensitive) the name on THIS
@@ -40,7 +40,7 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  *      `tenant_already_exists` instead (the same error code downstream
  *      platforms already converged on independently).
  *   4. Generate tenant_id (or reuse the existing one from step 3), slug, db_schema.
- *   5. AUTH-SPEC §3d: if oauth_state is present (and this is NOT a replay),
+ *   5. the auth contract: if oauth_state is present (and this is NOT a replay),
  *      call ExternalAuthServiceClient::promoteOAuthConnection() to commit the
  *      OAuth connection linkage before provisioning.
  *   6. Call provisioner->provision($data) — sequential platform steps
@@ -51,7 +51,7 @@ use StoneScriptPHP\Exceptions\FrameworkException;
  *        d. seedData()            — platform-specific seeding (default no-op)
  *   7. Call auth's POST /api/internal/create-membership — idempotent on
  *      (identity_id, tenant_id); reports is_new_tenant=false on replay.
- *   8. Return full platform JWT envelope (AUTH-SPEC §5a, framework-spec.md §6):
+ *   8. Return full platform JWT envelope (the auth contract, framework-spec.md §6):
  *      access_token, token_type, expires_in, active_tenant, available_tenants[],
  *      active_role, available_roles[], identity {id, email, display_name},
  *      membership {id, tenant_id, role}
@@ -73,21 +73,21 @@ use StoneScriptPHP\Exceptions\FrameworkException;
 class ProvisionTenantRoute extends BaseExternalAuthRoute
 {
     /**
-     * AUTH-SPEC §5a: the ONLY accepted field name for the tenant's display
+     * the auth contract: the ONLY accepted field name for the tenant's display
      * name. `store_name` was removed entirely (2026-08-12) — it was never
      * part of any spec, and it's what drove real-world field-name divergence
      * between this framework default and downstream platform-specific
-     * overrides. This route's current callers on the fleet have zero live
+     * overrides. This route's current callers on the platforms have zero live
      * frontend traffic exercising it today (confirmed by a repo-wide search
-     * across the fleet — no caller anywhere sends store_name to this route).
+     * across the platforms — no caller anywhere sends store_name to this route).
      * Required — see validation_rules(), same enforcement pattern as
      * idempotency_key below.
      */
     public string $tenant_name      = '';
-    /** AUTH-SPEC §5a S9 — required, client-generated UUID. Prevents double-creates on retry. */
+    /** the auth contract S9 — required, client-generated UUID. Prevents double-creates on retry. */
     public string $idempotency_key  = '';
     /**
-     * AUTH-SPEC §3d. Optional. Present when this call follows an OAuth
+     * the auth contract. Optional. Present when this call follows an OAuth
      * confirm-signup — the Bearer token at this point is the short-lived
      * oauth_pending JWT confirm-signup issued. When set, process() calls
      * ExternalAuthServiceClient::promoteOAuthConnection() to commit the
@@ -137,8 +137,8 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     public function validation_rules(): array
     {
         return array_merge([
-            'tenant_name'     => 'required|string|max:255',   // AUTH-SPEC §5a — only accepted field name
-            'idempotency_key' => 'required|string|max:64',   // AUTH-SPEC §5a S9
+            'tenant_name'     => 'required|string|max:255',   // the auth contract — only accepted field name
+            'idempotency_key' => 'required|string|max:64',   // the auth contract S9
             'oauth_state'     => 'optional|string|max:512',
             'allow_additional_tenant' => 'optional|boolean',
             'display_name'    => 'optional|string|max:255',
@@ -174,7 +174,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             return $denial;
         }
 
-        // AUTH-SPEC §5a: tenant_name is `required` in validation_rules()
+        // the auth contract: tenant_name is `required` in validation_rules()
         // above — the Router validates $allInput against that BEFORE
         // process() ever runs (Router::executeHandler(), before property
         // injection), so it's guaranteed non-empty here on the normal HTTP
@@ -182,7 +182,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // manual guard, consistent with how this route already worked.
         $resolvedName = $this->tenant_name;
 
-        // AUTH-SPEC §5a/S9 — existing-tenant guard (2026-08-12 fix for a real,
+        // the auth contract/S9 — existing-tenant guard (2026-08-12 fix for a real,
         // confirmed bug, not a hypothetical): generateUuid() +
         // provisioner->provision() used to run UNCONDITIONALLY on every call,
         // before idempotency_key was ever checked against anything — a
@@ -207,7 +207,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // correctness guarantee against duplicate MEMBERSHIPS either way.
         //
         // Name comparison (2026-08-12): MembershipObject.tenant_name is
-        // already present on every row getMemberships() returns (AUTH-SPEC —
+        // already present on every row getMemberships() returns (the auth contract —
         // no extra lookup needed). A genuine double-click/retry resubmits the
         // exact same form state, so an existing membership whose tenant_name
         // matches THIS request's tenant_name (normalized: trim + casefold, to
@@ -282,12 +282,12 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             // production: 35/36 live memberships had is_tenant_owner=false,
             // including tenant creators. Never omit this on the creator path.
             'is_tenant_owner'  => true,
-            // AUTH-SPEC §5a/S9 — threaded to create-membership so auth can dedup
+            // the auth contract/S9 — threaded to create-membership so auth can dedup
             // on replay and return the existing tenant instead of double-creating.
             'idempotency_key'  => $this->idempotency_key,
         ];
 
-        // AUTH-SPEC §3d — OAuth promote. Only on the genuinely-new-tenant path:
+        // the auth contract — OAuth promote. Only on the genuinely-new-tenant path:
         // a replay means this identity already has a tenant, so any OAuth
         // connection linkage for it was already promoted on the ORIGINAL call
         // that created that tenant — repeating it here would be redundant, not
@@ -414,7 +414,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // relayed from the auth service (which issues auth tokens, not API tokens).
         $tenantSlug = $data['tenant_slug'] ?? ($result['tenant_slug'] ?? null);
 
-        // AUTH-SPEC §5a/S9 idempotent replay: when the same idempotency_key is reused,
+        // the auth contract/S9 idempotent replay: when the same idempotency_key is reused,
         // auth returns is_new_tenant=false + the EXISTING tenant_id.
         $isNewTenant       = $result['is_new_tenant'] ?? true;
         $effectiveTenantId = $result['tenant_id'] ?? $data['tenant_id'];
@@ -471,7 +471,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      *
      * Returns `['tenant_id' => string, 'tenant_name' => string]` for the
      * first membership found (both fields are always present on
-     * MembershipObject per AUTH-SPEC — no extra lookup needed for the name),
+     * MembershipObject per the auth contract — no extra lookup needed for the name),
      * or null if none found, no Bearer token is present, or the lookup
      * itself failed — every null case is treated as fail-open by process()
      * (proceed to provision), never fail-closed, since this guard is a
@@ -526,7 +526,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      * token shape) without reimplementing all of process(). Was private until
      * 2026-08-12; confirmed via `git log --all -p` that no downstream platform
      * ever attempted `extends ProvisionTenantRoute` before this fix — real
-     * fleet platforms instead reimplemented the entire route from scratch as
+     * platforms instead reimplemented the entire route from scratch as
      * a standalone IRouteHandler, in part because this and the two methods
      * below were unreachable from a subclass either way.
      */

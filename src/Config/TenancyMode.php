@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Config;
 
 /**
- * Tenancy mode constants (AUTH-SPEC §T).
+ * Tenancy mode constants (the auth contract).
  *
  * T1 — Single-tenant: one tenant per deployment (e.g. a white-label install).
  *       No tenant_id in JWT or URL.

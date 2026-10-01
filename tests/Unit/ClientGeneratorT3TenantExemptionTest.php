@@ -19,7 +19,7 @@ use PHPUnit\Framework\TestCase;
  * never exercised the interaction with assertT3RoutesCarryTenantPrefix()
  * (the v4.7 guard that hard-aborts generation if a T3-tenant-scoped route is
  * missing its /{service}/tenant/{tenantId} URL prefix — see that function's
- * docblock for the production incident it prevents). On a real T3 platform
+ * docblock for the production failure it prevents). On a real T3 platform
  * (a downstream production platform with /portal/tenant/{tenantId}/...
  * business routes), declaring access:authentication on an infra-tagged route
  * made it newly INCLUDED in that guard's route set — and an identity-scoped

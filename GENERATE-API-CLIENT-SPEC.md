@@ -61,9 +61,9 @@ Why this is non-negotiable, not a style preference:
   `authorization` → the tenant-scoped API token, with 401-refresh-retry scoped
   correctly) based on what the route actually declares. A hand-rolled call has to
   reimplement or guess this per call site — exactly the kind of drift that has
-  independently caused real bugs across the fleet (routes that run before a tenant
+  independently caused real bugs across the platforms (routes that run before a tenant
   context exists, like provision-tenant, silently sent the wrong token type).
-- **One regeneration, fleet-wide correctness.** When a route's shape changes,
+- **One regeneration, platform-wide correctness.** When a route's shape changes,
   `php stone generate client` regenerates the contract everywhere it's consumed. Code
   that bypassed the client has to be found and fixed by hand, one hand-rolled call at a
   time, with no compiler to catch the ones that were missed.

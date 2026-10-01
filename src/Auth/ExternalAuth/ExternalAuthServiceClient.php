@@ -300,7 +300,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
     }
 
     /**
-     * Commit an OAuth connection linkage (AUTH-SPEC §3d) — moves
+     * Commit an OAuth connection linkage (the auth contract) — moves
      * `oauth_pending_connections` -> `oauth_connections`. Called by
      * ProvisionTenantRoute when `oauth_state` is present on the request,
      * i.e. this provision-tenant call follows an OAuth confirm-signup.

@@ -26,6 +26,9 @@ final class SubscriptionState
     /** block mode only: reads are refused as well (never `read_only`). */
     public const BLOCKED      = 'blocked';
 
+    /** Statuses that are never active regardless of expires_at. */
+    public const NEVER_ACTIVE_STATUSES = ['suspended', 'refunded', 'chargeback'];
+
     public const REASON_TRIAL_EXPIRED   = 'trial_expired';
     public const REASON_PLAN_ENDED      = 'plan_ended';
     public const REASON_NO_SUBSCRIPTION = 'no_subscription';
@@ -78,11 +81,19 @@ final class SubscriptionState
         // Prefer our own clock-based evaluation of expires_at so the result is
         // deterministic; fall back to the SQL-computed is_active when the date
         // is absent/unparseable.
-        $active = $endsAt !== null
-            ? ($endsAt > $now)   // cancelled-at-period-end stays active until expires_at
-            : (bool) ($row['is_active'] ?? false);
+        // Rule (mirrors sub_get_status.pgsql): trial / active / cancelled follow expires_at
+        // (cancel-at-period-end stays active until then); suspended / refunded / chargeback are
+        // NEVER active, whatever expires_at says.
+        $neverActive = in_array($status, self::NEVER_ACTIVE_STATUSES, true);
+        $active = !$neverActive && ($endsAt !== null
+            ? ($endsAt > $now)
+            : (bool) ($row['is_active'] ?? false));
 
         if (!$active) {
+            // `ended_at` is never in the future (a suspended row can carry a future expires_at).
+            if ($endsAt !== null && $endsAt > $now) {
+                $endsAt = null;
+            }
             return new self(
                 self::READ_ONLY,
                 $isTrial ? self::REASON_TRIAL_EXPIRED : self::REASON_PLAN_ENDED,

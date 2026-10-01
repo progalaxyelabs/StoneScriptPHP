@@ -6,7 +6,7 @@ namespace StoneScriptPHP\Auth;
  * Token Storage Interface
  *
  * @deprecated since 6.2.0 — use {@see RefreshTokenStore} for the body-mode
- *   auth-token/API-token refresh flow the fleet actually uses. This interface serves ONLY
+ *   auth-token/API-token refresh flow the platforms actually uses. This interface serves ONLY
  *   the framework's cookie/CSRF `Routes/RefreshRoute`/`LogoutRoute` flow and its
  *   contract is INCOMPATIBLE with the settled model in two ways:
  *     1. Its `revokeRefreshToken()` docblock says "mark as revoked, don't delete —

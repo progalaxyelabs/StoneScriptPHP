@@ -35,7 +35,7 @@ use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
  * ## Non-breaking guarantee
  *
  * `Application::run()` treats `$config['plugins']` as `?? []`. With no plugins
- * configured (the default for every platform today — none of the 11 fleet
+ * configured (the default for every platform today — none of the 11 platforms
  * platforms pass this key yet), every contribution point below returns nothing
  * and behavior is byte-for-byte identical to pre-plugin StoneScriptPHP.
  *

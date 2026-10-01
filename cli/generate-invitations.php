@@ -119,7 +119,7 @@ foreach ($dirs as $name => $dir) {
  * `{next_number}_create_platform_invitations.pgsql` name, following the
  * `001_create_users_table.sql`-style sequential-numbered convention
  * `src/Templates/Migrations/` (and `cli/generate-auth.php`) use for
- * from-scratch scaffolding. Direct inspection of a real fleet platform's
+ * from-scratch scaffolding. Direct inspection of a real platform's
  * migrations directory shows production platforms do NOT use that
  * convention — they use gateway-registration-mode
  * TIMESTAMPED migrations (`YYYY-MM-DD_HH-MM-SS_description.sql`). This
@@ -128,7 +128,7 @@ foreach ($dirs as $name => $dir) {
  *   - If sequential-numbered migrations exist (e.g. this project ran
  *     `php stone generate auth:email-password` first, which does use that
  *     convention) → continue the same sequence exactly.
- *   - Otherwise (no migrations yet, OR the real fleet's timestamp
+ *   - Otherwise (no migrations yet, OR the real platforms's timestamp
  *     convention is already in use) → use a timestamped filename, so the
  *     file this command produces is immediately consistent with what
  *     actually ships to production instead of inventing a sequence number
@@ -175,7 +175,7 @@ function resolveMigrationFilename(string $migrationsDir): array
 
     return [
         "{$timestamp}_create_platform_invitations.sql",
-        'no sequential-numbered migrations found — used the real fleet timestamp convention instead of a from-scratch sequential-number assumption',
+        'no sequential-numbered migrations found — used the real platforms timestamp convention instead of a from-scratch sequential-number assumption',
     ];
 }
 

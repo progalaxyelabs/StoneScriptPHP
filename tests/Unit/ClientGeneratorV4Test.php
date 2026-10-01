@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Routing\Router;
 
 /**
- * Generator v4.0 contract tests (CLIENT-SDK-SPEC §0 A1–A6, approved 2026-06-14).
+ * Generator v4.0 contract tests (the client SDK contract, approved 2026-06-14).
  *
  * Tests cover:
  *  - Router::group() registers routes with service + group + action + streaming + param metadata
@@ -849,7 +849,7 @@ class ClientGeneratorV4Test extends TestCase
      * The generated ApiClient must expose the IApiClient infra-probe passthroughs
      * (get/post delegating to MinimalHttp) so it structurally satisfies the shared
      * IApiClient contract — without importing client-core (zero-dep invariant).
-     * (CLIENT-SDK-SPEC §12.)
+     * (the client SDK contract.)
      */
     public function test_generator_emits_iapiclient_passthroughs_without_importing_contract(): void
     {
@@ -862,7 +862,7 @@ class ClientGeneratorV4Test extends TestCase
             // Infra-probe passthroughs present (structural IApiClient conformance).
             $this->assertStringContainsString('get<R = unknown>(path: string', $clientTs, 'generated client must expose get() passthrough');
             $this->assertStringContainsString('post<R = unknown>(path: string', $clientTs, 'generated client must expose post() passthrough');
-            // T3 (tenant-scoped, non-admin) escape hatch is TENANT-AWARE (CLIENT-SDK-SPEC
+            // T3 (tenant-scoped, non-admin) escape hatch is TENANT-AWARE (the client SDK contract
             // §12): get/post route the logical
             // `/portal/...` path through escapePath() so the CLIENT applies the active
             // tenant prefix. (Admin/T2 clients use a plain passthrough — asserted in
@@ -885,7 +885,7 @@ class ClientGeneratorV4Test extends TestCase
      * wired only get/post to the escape-hatch surface. Services calling PUT/DELETE/PATCH
      * routes via the escape hatch (rather than typed api.<group>.<action>() methods) hit
      * a TypeScript compile error — those methods simply did not exist on ApiClient.
-     * CLIENT-SDK-SPEC §12 / fix in v4.3.1.
+     * the client SDK contract / fix in v4.3.1.
      */
     public function test_generator_emits_put_patch_delete_escape_hatch_methods_t3_portal(): void
     {
@@ -895,7 +895,7 @@ class ClientGeneratorV4Test extends TestCase
             $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
             $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
 
-            // All five escape-hatch methods must be present (CLIENT-SDK-SPEC §12 / v4.3.1).
+            // All five escape-hatch methods must be present (the client SDK contract / v4.3.1).
             $this->assertStringContainsString('put<R = unknown>(path: string, body?: unknown): Promise<R>',    $clientTs, 'T3 portal client must expose put() escape hatch (v4.3.1)');
             $this->assertStringContainsString('patch<R = unknown>(path: string, body?: unknown): Promise<R>',  $clientTs, 'T3 portal client must expose patch() escape hatch (v4.3.1)');
             $this->assertStringContainsString('delete<R = unknown>(path: string, body?: unknown): Promise<R>', $clientTs, 'T3 portal client must expose delete() escape hatch (v4.3.1)');
@@ -1014,11 +1014,11 @@ class ClientGeneratorV4Test extends TestCase
     }
 
     // =========================================================================
-    // v4.7 — T3 tenant-prefix hard-error guard (production incident on a downstream platform)
+    // v4.7 — T3 tenant-prefix hard-error guard (production failure on a downstream platform)
     // =========================================================================
 
     /**
-     * Regression test for a real production incident: a downstream platform
+     * Regression test for a real production failure: a downstream platform
      * whose real tenancy is T2 (JWT-tenant — tenant_id resolved server-side from the
      * token, never in the URL) had its routes.php declared WITHOUT any
      * /{service}/tenant/{tenantId} prefix. Regenerating the client with the T3
@@ -1044,7 +1044,7 @@ class ClientGeneratorV4Test extends TestCase
             $this->assertNotEquals(0, $exitCode,
                 'Generator must abort (non-zero exit) when T3 mode is used against routes that ' .
                 'lack the /{service}/tenant/{tenantId} prefix — writing a client here silently ' .
-                'ships a doubled-prefix 404ing URL (the production incident this guard was added for).');
+                'ships a doubled-prefix 404ing URL (the production failure this guard was added for).');
 
             $this->assertFileDoesNotExist($outputDir . '/portal/src/client.ts',
                 'No client.ts should be written when the T3 tenant-prefix guard rejects the routes.');
@@ -1107,7 +1107,7 @@ class ClientGeneratorV4Test extends TestCase
     /**
      * Returns path to a temporary fixture routes.php shaped like a T2 (JWT-tenant)
      * platform: portal routes declared FLAT, with no /tenant/{tenantId} URL segment
-     * anywhere — mirrors the affected platform's actual routes.php from the incident.
+     * anywhere — mirrors the affected platform's actual routes.php from the failure.
      */
     private function fixtureRoutesFlatNoTenantPrefix(): string
     {
@@ -1688,7 +1688,7 @@ PHP
 
     /**
      * Regression test for the double-slash URL bug: `environment.apiServer.host`
-     * is written with a trailing slash fleet-wide (CLIENT-SDK-SPEC convention),
+     * is written with a trailing slash platform-wide (the client SDK contract),
      * and call-site paths (both typed generated methods and hand-written
      * `ApiService.get('/products', …)` escape-hatch wrappers) are written with a
      * leading slash. A raw `this.baseUrl + path` concat produces
@@ -1853,7 +1853,7 @@ PHP,
 
         file_put_contents($file, <<<'PHP'
 <?php
-// Fixture routes.php for CLIENT-SDK-SPEC v4.0 generator tests
+// Fixture routes.php for the client SDK contract v4.0 generator tests
 
 return [
     'GET' => [

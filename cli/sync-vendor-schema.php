@@ -9,15 +9,14 @@
  * `gateway:register-main` / `gateway:migrate-main` only ever read the platform's
  * OWN committed src/postgresql/ tree — they have no path into vendor/ — so a
  * platform could upgrade past the version that introduces a feature/module and
- * never discover it exists (see stonescriptphp-server's
- * IMPROVEMENT-SUGGESTIONS-2026-07.md for the incident this closes).
+ * never discover it exists.
  *
  * This script scans EVERY installed progalaxyelabs/* package (via
  * vendor/composer/installed.json), not just the framework, and stages (copies,
  * never applies) every Schema/ folder it finds into src/postgresql/vendor/postgresql/
  * — a build artifact, not hand-edited, regenerated fresh on every run so it
  * always reflects whatever packages/versions are currently installed. Run by
- * stonescriptphp-server's post-install-cmd/post-update-cmd, same as the existing
+ * the server skeleton's post-install-cmd/post-update-cmd, same as the existing
  * `stone` CLI copy.
  *
  * Ordered modules (Schema/main/NNN_*.pgsql) are staged into the `migrations/`

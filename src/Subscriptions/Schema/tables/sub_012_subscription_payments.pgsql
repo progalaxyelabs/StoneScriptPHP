@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS subscription_payments (
 CREATE INDEX IF NOT EXISTS idx_subscription_payments_sub ON subscription_payments(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_payments_gateway ON subscription_payments(gateway_payment_id);
 
--- IDEMPOTENCY FIX (task: pay-primitive + sub_activate double-apply race,
+-- IDEMPOTENCY FIX (pay-primitive + sub_activate double-apply race,
 -- 2026-09-17): the plain index above was NON-unique — nothing in the schema
 -- prevented two rows recording the SAME gateway_payment_id. Combined with
 -- sub_activate()'s old unlocked check-then-act body, a retried/concurrent
@@ -39,9 +39,9 @@ CREATE INDEX IF NOT EXISTS idx_subscription_payments_gateway ON subscription_pay
 --
 -- 2026-09-21 RECONCILIATION (independent code review before this pass
 -- shipped): the first draft of this index keyed on (payment_gateway,
--- gateway_payment_id). One of our own production apps had ALREADY
+-- gateway_payment_id). A deployed app had ALREADY
 -- independently converged on a (platform_code, gateway_payment_id) key via
--- its own earlier hotpatch, deployed before this framework-source fix
+-- an earlier hotpatch, deployed before this framework-source fix
 -- landed. Keying on payment_gateway added no real specificity (it is a
 -- near-constant default) while risking two DIFFERENT unique constraints
 -- coexisting on future installs that migrate from a hotpatched state —

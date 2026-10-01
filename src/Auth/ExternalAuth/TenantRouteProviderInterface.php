@@ -21,11 +21,11 @@ use StoneScriptPHP\Routing\Router;
  *
  * `RequireApiTokenMiddleware`'s tenant-agnostic exemption list is derived from
  * `ExternalAuthRoutes::protectedPaths()` (see that method's docblock and the
- * 2026-07-05 fleet incident it fixes: a bare `RequireApiTokenMiddleware` 403s any
+ * 2026-07-05 regression it fixes: a bare `RequireApiTokenMiddleware` 403s any
  * authenticated-but-tenant-less request, including these tier-2 routes, unless
  * they're explicitly exempted). If route REGISTRATION and exemption-list
  * COMPUTATION ever live in different places, they can silently drift apart —
- * a route added to one and not the other reopens that exact incident. Bundling
+ * a route added to one and not the other reopens that exact regression. Bundling
  * both `register()` and `protectedPaths()` into one interface makes that
  * drift structurally impossible: a plugin author replacing
  * `DefaultTenantRouteProvider` must implement both together, in the same

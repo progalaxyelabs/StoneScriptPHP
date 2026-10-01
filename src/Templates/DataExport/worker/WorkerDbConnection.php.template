@@ -29,14 +29,14 @@ use PDO;
  *
  * ── Multiple databases, one server (db-per-tenant support, fixed after
  * ── independent review) ────────────────────────────────────────────────
- * On a fleet that provisions ONE Postgres DATABASE PER TENANT
+ * On a platforms that provisions ONE Postgres DATABASE PER TENANT
  * ({platform}_{tenant} — see ExportWorker's tenancy_mode handling), a
  * tenant-scope job must query THAT tenant's own database, never the
  * account/main one DB_NAME points at. get() now accepts an optional
  * database-name override and caches one PDO connection PER database name
  * (same host/port/user/password for all of them — this class assumes
  * every tenant database lives on the SAME Postgres server as DB_HOST/
- * DB_PORT; a fleet that also shards ACROSS SERVERS per tenant needs a
+ * DB_PORT; a platforms that also shards ACROSS SERVERS per tenant needs a
  * further per-host override, which is a straightforward extension of this
  * same cache-by-key pattern but is out of scope for what this generator can
  * assume about an arbitrary platform's infrastructure).

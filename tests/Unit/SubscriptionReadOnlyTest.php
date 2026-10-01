@@ -481,13 +481,51 @@ final class SubscriptionReadOnlyTest extends TestCase
         }
     }
 
+    public function test_traversal_and_encoded_separators_never_match_allow_list(): void
+    {
+        $mw = $this->mw(self::expiredTrial(), ['allow' => ['POST /t/{id}/account/delete']]);
+        $bad = ['/account/../bills', '/account/./delete', '/auth/..%2fbills', '/auth/%2e%2e/bills', '/auth/%2E%2E/bills',
+                '/subscription/a%2Fb', '/subscription/a%5cb', '/subscription/a%5Cb', '/export/%2e/x', '/export/..',
+                '/t/1/account/delete/..', '/auth\\x'];
+        foreach ($bad as $p) {
+            $this->assertSame(423, $this->call($mw, 'POST', $p)->httpStatusCode, $p);
+        }
+        // Sanity: the clean forms still pass.
+        foreach (['/auth/login', '/subscription/checkout', '/t/1/account/delete'] as $p) {
+            $this->assertSame('passed', $this->call($mw, 'POST', $p)->message, $p);
+        }
+    }
+
+    public function test_suspended_refunded_chargeback_are_never_active(): void
+    {
+        foreach (['suspended', 'refunded', 'chargeback'] as $st) {
+            $row = ['status' => $st, 'is_trial' => false, 'is_active' => true, 'expires_at' => '2030-01-01T00:00:00Z'];
+            $mw = $this->mw($row);
+            $res = $this->call($mw, 'POST', '/bills');
+            $this->assertSame(423, $res->httpStatusCode, $st);
+            $this->assertSame('READ_ONLY_PLAN_ENDED', $res->data['error_code']);
+            $this->assertNull($res->data['ended_at'], "$st: ended_at must never be a future date");
+            $this->assertSame('read_only; reason=plan_ended', $mw->headers['X-Subscription-State']);
+        }
+        // Past expiry keeps its real ended_at.
+        $row = ['status' => 'suspended', 'is_trial' => false, 'expires_at' => '2026-09-01T00:00:00Z'];
+        $this->assertSame('2026-09-01T00:00:00Z', $this->call($this->mw($row), 'POST', '/bills')->data['ended_at']);
+        // trial / active / cancelled follow expires_at.
+        foreach (['trial', 'active', 'cancelled'] as $st) {
+            $row = ['status' => $st, 'expires_at' => '2030-01-01T00:00:00Z'];
+            $this->assertSame('passed', $this->call($this->mw($row), 'POST', '/bills')->message, $st);
+        }
+    }
+
     public function test_sql_functions_agree_cancelled_is_active_until_expiry(): void
     {
         $dir = __DIR__ . '/../../src/Subscriptions/Schema/functions/';
         foreach (['sub_get_status.pgsql', 'sub_activate.pgsql'] as $f) {
             $this->assertStringNotContainsString("NOT IN ('cancelled')", (string) file_get_contents($dir . $f), $f);
+            $this->assertStringContainsString("NOT IN ('suspended', 'refunded', 'chargeback')", (string) file_get_contents($dir . $f), $f);
         }
-        $this->assertStringContainsString('v_is_active := v_sub.expires_at > NOW();', (string) file_get_contents($dir . 'sub_get_status.pgsql'));
+        $this->assertStringContainsString("v_is_active := v_sub.expires_at > NOW() AND v_sub.status NOT IN ('suspended', 'refunded', 'chargeback');", (string) file_get_contents($dir . 'sub_get_status.pgsql'));
+        $this->assertStringContainsString("v_sub.status IN ('active', 'cancelled') THEN", (string) file_get_contents($dir . 'sub_activate.pgsql'));
     }
 
     // ---- CORS ----------------------------------------------------------

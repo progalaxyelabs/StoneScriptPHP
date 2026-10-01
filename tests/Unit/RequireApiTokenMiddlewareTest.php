@@ -169,7 +169,7 @@ class RequireApiTokenMiddlewareTest extends TestCase
 
     // ── Tenant-agnostic (tier-2) path exemption — 2026-07-05 regression fix ──────
     //
-    // Regression coverage for the real fleet incident: RequireApiTokenMiddleware, wired
+    // Regression coverage for the real platforms failure: RequireApiTokenMiddleware, wired
     // globally with an empty exemption list, 403'd ExternalAuthRoutes' own tier-2
     // routes (provision-tenant, select-tenant, etc.) the moment JwtAuthMiddleware
     // started reliably populating jwt_claims for them. See framework-spec.md §5.5

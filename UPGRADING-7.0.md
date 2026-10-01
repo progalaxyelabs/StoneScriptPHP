@@ -96,7 +96,7 @@ those routes unauthenticated.
 
 ## Expected one-time effects
 
-- **Forced re-login fleet-wide.** Refresh is now gated on a stored row; all
+- **Forced re-login platform-wide.** Refresh is now gated on a stored row; all
   previously-issued (rowless) refresh tokens are rejected once. Identity refresh
   tokens, never persisted before, must be written to the store at mint time.
 - Strict token typing means an identity token can no longer be used on a card route

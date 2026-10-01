@@ -82,7 +82,7 @@ if (!is_dir($templatesPath)) {
 
 // ── Layout detection ────────────────────────────────────────────────────
 //
-// tenant_memberships is a MAIN-DB table. Real fleet
+// tenant_memberships is a MAIN-DB table. Real platforms
 // platforms nest main-DB schema under src/postgresql/main/postgresql/{tables,
 // functions,migrations}. A simpler project may use the flat
 // src/postgresql/{tables,functions} + migrations/ layout the invitations
@@ -119,7 +119,7 @@ foreach (['tables' => $tablesDir, 'functions' => $functionsDir, 'migrations' => 
  * Decide the migration's destination filename — mirrors
  * cli/generate-invitations.php::resolveMigrationFilename() exactly (continue
  * the target's existing sequential numbering if any; else use the real
- * fleet's timestamp convention rather than inventing 001_ with no basis).
+ * platforms's timestamp convention rather than inventing 001_ with no basis).
  *
  * @return array{0: string, 1: string} [filename, note]
  */
@@ -162,7 +162,7 @@ function resolveGovernanceMigrationFilename(string $migrationsDir): array
 
     return [
         "{$timestamp}_create_tenant_memberships.sql",
-        'no sequential-numbered migrations found — used the fleet timestamp convention',
+        'no sequential-numbered migrations found — used the platforms timestamp convention',
     ];
 }
 

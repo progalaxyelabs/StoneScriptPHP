@@ -8,7 +8,9 @@ BEGIN
     SELECT * INTO v_sub FROM subscriptions WHERE tenant_id = p_tenant_id;
     IF NOT FOUND THEN RETURN NULL; END IF;
     -- Cancel-at-period-end: a cancelled subscription stays active until expires_at (paid through that date).
-    v_is_active := v_sub.expires_at > NOW();
+    -- Rule: `trial`, `active` and `cancelled` follow expires_at; `suspended`, `refunded` and
+    -- `chargeback` are NEVER active, whatever expires_at says. Keep in sync with SubscriptionState.php.
+    v_is_active := v_sub.expires_at > NOW() AND v_sub.status NOT IN ('suspended', 'refunded', 'chargeback');
     v_days_remaining := GREATEST(0, EXTRACT(DAY FROM (v_sub.expires_at - NOW()))::INTEGER);
     RETURN json_build_object(
         'id', v_sub.id, 'platform_code', v_sub.platform_code,

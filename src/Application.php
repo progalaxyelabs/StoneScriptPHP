@@ -70,7 +70,7 @@ use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
  *       // Prefer this over manually constructing `new RequireApiTokenMiddleware()` in
  *       // 'middleware' -- the manual form has no exemption list and WILL 403 every
  *       // one of those routes the moment JwtAuthMiddleware populates jwt_claims for
- *       // them (see class docblock -- this was a real fleet incident, 2026-07-05).
+ *       // them (see class docblock -- an earlier release hit exactly this).
  *       // RENAMED from 'require_card' -> 'require_api_token' (Passport/Card ->
  *       // Auth/API-token terminology rename). Platforms still passing the old
  *       // 'require_card' key will silently no-op (the key is simply unread) --
@@ -128,7 +128,7 @@ class Application
         $authMode           = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
 
         // Phase 1 plugin seam (§ PluginInterface). `$config['plugins']` is `?? []` for
-        // every platform today — none of the 11 fleet platforms pass this key yet, so
+        // every platform today — no platform passes this key yet, so
         // $plugins is always empty and nothing below this point changes behavior.
         // Invalid entries (not a PluginInterface instance) are dropped, not fatal —
         // a malformed plugins.php must not take down the whole platform at boot.
@@ -241,7 +241,7 @@ class Application
         // backward compat with platforms that still wire RequireApiTokenMiddleware manually
         // (or a custom equivalent) via 'middleware' above.
         //
-        // REGRESSION THIS FIXES (2026-07-05, real fleet incident): RequireApiTokenMiddleware,
+        // REGRESSION THIS FIXES (2026-07-05): RequireApiTokenMiddleware,
         // used bare (`new RequireApiTokenMiddleware()`, the previously-documented usage), has
         // zero path awareness — it 403s ANY authenticated-but-tenantless request, which
         // includes ExternalAuthRoutes' own tier-2 routes (provision-tenant, select-tenant,
@@ -513,7 +513,7 @@ class Application
                 . "service's network address (e.g. http://auth:3139 inside Docker), or pass "
                 . "auth.server.url explicitly in the config array passed to Application::run(). "
                 . "There is no default — silently falling back to localhost was the root cause of "
-                . "a fleet-wide auth outage (auth calls failing with 'Failed to connect to localhost "
+                . "an auth outage across every platform using it (auth calls failing with 'Failed to connect to localhost "
                 . "port 3139')."
             );
         }

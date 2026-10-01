@@ -205,7 +205,7 @@ Recommended order, ranked by leverage-per-effort (highest first):
   value object at the `dispatch()` boundary only — internal pipeline array
   shape (`MiddlewareInterface::handle(array $request, ...)`) deliberately left
   untouched, to avoid rippling into every middleware class across the 11-platform
-  fleet. `dispatch()` destructures the object into the same array immediately;
+  platforms. `dispatch()` destructures the object into the same array immediately;
   everything downstream is unaware anything changed. See T1-1's row above and
   `src/Routing/IncomingRequest.php`.
 - ~~**T2-1 fake shape:**~~ **Resolved (v5.12.0):** a flat map,

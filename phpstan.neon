@@ -1,6 +1,6 @@
 # StoneScriptPHP framework — own static analysis config.
 #
-# Level 5 matches the fleet standard. This includes the framework's own
+# Level 5 matches the platforms standard. This includes the framework's own
 # advisory secret/config rule (rules.neon) so we dog-food it.
 #
 # The advisory RawEnvAccessRule (identifier: stonescriptphp.rawEnvAccess) is

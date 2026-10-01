@@ -5,7 +5,7 @@ namespace StoneScriptPHP\Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Vendor schema sync tests (IMPROVEMENT-SUGGESTIONS-2026-07.md).
+ * Vendor schema sync tests (the improvement notes).
  *
  * Verifies syncVendorSchema() correctly stages opt-in framework schema
  * (e.g. RequestLogging's Schema/{tables,functions}/) from a vendor tree into

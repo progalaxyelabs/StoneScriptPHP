@@ -10,7 +10,7 @@ use StoneScriptPHP\TenantDatabaseUnavailableException;
 use StoneScriptDB\GatewayException;
 
 /**
- * Feature guard for TESTABILITY-SPEC.md T2-1: Database::fake() lets a
+ * Feature guard for the testability notes T2-1: Database::fake() lets a
  * business-logic test stub Database::fn()'s responses without a live
  * gateway/Postgres. Every existing production call path (Database::fn()
  * with no fake registered) is unaffected — proven by

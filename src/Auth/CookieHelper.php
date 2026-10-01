@@ -59,7 +59,7 @@ class CookieHelper
      * @param array|null $cookies Optional cookie map to read from instead of
      *   $_COOKIE — the seam that lets this be unit tested (and, via a route's
      *   request context 'cookies' key, tested end-to-end) without a live
-     *   HTTP request. See TESTABILITY-SPEC.md T1-1. Defaults to $_COOKIE for
+     *   HTTP request. See the testability notes T1-1. Defaults to $_COOKIE for
      *   full backward compatibility with existing call sites.
      * @return string|null The refresh token, or null if not found
      */
@@ -127,7 +127,7 @@ class CookieHelper
      * Get CSRF token from cookie.
      *
      * @param array|null $cookies Optional cookie map to read from instead of
-     *   $_COOKIE — see getRefreshToken() docblock / TESTABILITY-SPEC.md T1-1.
+     *   $_COOKIE — see getRefreshToken() docblock / the testability notes T1-1.
      * @return string|null The CSRF token, or null if not found
      */
     public static function getCsrfToken(?array $cookies = null): ?string

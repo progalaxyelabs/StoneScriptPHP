@@ -30,7 +30,7 @@ class GenerateTenantGovernanceCommandTest extends TestCase
 
     /**
      * @param bool $nested  Seed the nested main-DB layout
-     *   (src/postgresql/main/postgresql/*) a real fleet platform uses, plus a
+     *   (src/postgresql/main/postgresql/*) a real platform uses, plus a
      *   prior numbered migration so sequential numbering is exercised. When
      *   false, no schema dirs exist at all → flat layout + timestamp naming.
      */

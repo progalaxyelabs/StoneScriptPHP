@@ -7,7 +7,7 @@ namespace StoneScriptPHP\Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * v9.6.0 (CLIENT-SDK-SPEC §10 amendment) — request-DTO reflection + the
+ * v9.6.0 (the client SDK contract) — request-DTO reflection + the
  * opt-in strict typed-contract gate.
  *
  * Covers:

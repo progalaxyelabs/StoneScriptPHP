@@ -68,7 +68,7 @@ return [
     ],
 
     // ── Tenant database routing (fixed after independent review) ───────────
-    // The fleet has TWO real tenancy shapes and this generator cannot know
+    // The platforms has TWO real tenancy shapes and this generator cannot know
     // which one a given platform uses:
     //   'single'        — every tenant's rows live in the SAME database as
     //                      account data (DB_NAME). This is the default.
@@ -122,7 +122,7 @@ return [
     // Postgres-side bounds on the export's open transaction (fixed after
     // independent review — an unbounded open transaction while streaming a
     // multi-million-row table can block autovacuum from reclaiming dead
-    // tuples fleet-wide, on any database sharing that Postgres server).
+    // tuples platform-wide, on any database sharing that Postgres server).
     // statement_timeout bounds any SINGLE DECLARE/FETCH statement;
     // idle_in_transaction_session_timeout bounds how long the transaction
     // may sit idle BETWEEN FETCHes (the window where PHP is writing the

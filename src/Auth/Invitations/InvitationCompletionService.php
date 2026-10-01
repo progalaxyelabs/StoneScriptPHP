@@ -291,7 +291,7 @@ class InvitationCompletionService
 
         // Step 9: T2 mints a local API token (same pattern as
         // ProvisionTenantRoute::mintProvisionApiToken()); T3 passes through the
-        // identity token + explicit tenant_id, matching AUTH-SPEC §6b's
+        // identity token + explicit tenant_id, matching the auth contract's
         // existing T3 response shape unchanged.
         // NOTE: the 'card' config key and 'mode'=>'card' response value below are
         // preserved as-is — see this method's docblock NOTE for why.

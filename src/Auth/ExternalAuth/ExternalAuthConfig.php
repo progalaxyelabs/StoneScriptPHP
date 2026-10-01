@@ -162,7 +162,7 @@ class ExternalAuthConfig
     {
         $env = \StoneScriptPHP\Env::get_instance();
 
-        // AUTH-SPEC §S1: canonical prefix is /api/auth.
+        // the auth contract: canonical prefix is /api/auth.
         // Legacy default was /auth — kept as compat routes when legacyCompat=true.
         $this->prefix = rtrim($options['prefix'] ?? '/api/auth', '/');
         $this->legacyCompat = $options['legacy_compat'] ?? true;

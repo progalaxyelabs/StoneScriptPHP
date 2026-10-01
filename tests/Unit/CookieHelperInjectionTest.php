@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Auth\CookieHelper;
 
 /**
- * Regression/feature guard for TESTABILITY-SPEC.md T1-1: CookieHelper's
+ * Regression/feature guard for the testability notes T1-1: CookieHelper's
  * read methods (getRefreshToken/getCsrfToken) accept an optional cookie map
  * instead of always reading $_COOKIE directly, so cookie-based auth flows
  * (refresh-token cookie mode, CSRF double-submit) can be unit tested without

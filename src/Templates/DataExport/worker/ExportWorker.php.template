@@ -39,7 +39,7 @@ use App\Database\Functions\ReapStaleExportJobsParams;
  *     'single' or 'db_per_tenant', and if 'db_per_tenant', REQUIRES
  *     config('resolve_tenant_database') to return a real database name —
  *     never falls back to the default database. Querying the WRONG
- *     database on a db-per-tenant fleet would return an empty (or another
+ *     database on a db-per-tenant platforms would return an empty (or another
  *     tenant's) result set and still report 'succeeded' — nothing about an
  *     empty file looks like a bug from the outside, so this fails the job
  *     instead of guessing.
@@ -222,7 +222,7 @@ final class ExportWorker
         // Account-scope jobs always use the default database. Tenant-scope
         // jobs REQUIRE an explicit tenancy_mode — never guess between
         // "shared DB" and "DB-per-tenant", because guessing wrong on a
-        // db_per_tenant fleet queries an empty/wrong database and the job
+        // db_per_tenant platforms queries an empty/wrong database and the job
         // would otherwise still report 'succeeded'.
         $databaseNameOverride = null;
         if ($scope === 'tenant') {

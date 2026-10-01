@@ -4,7 +4,7 @@
  * API Client Generator — v4.10
  *
  * Generates per-service TypeScript client packages from PHP routes.
- * Implements CLIENT-SDK-SPEC §0 Amendments A1–A6 (approved 2026-06-14).
+ * Implements the client SDK contract (approved 2026-06-14).
  *
  * v4.10 (framework v9.6.0 — request-DTO reflection + opt-in strict gate):
  *   - `request:` route declaration mirrors `response:` exactly — reflects a
@@ -17,7 +17,7 @@
  *     fallback into a listed WARNING (default, unchanged) or a hard
  *     exit(1) (opt-in). See CHANGELOG.md v9.6.0 for the full rationale.
  *
- * v4.7 (T3 tenant-prefix guard — production incident on a downstream platform):
+ * v4.7 (T3 tenant-prefix guard — fixes a real downstream failure):
  *   - Added assertT3RoutesCarryTenantPrefix(), called once per T3-tenant-scoped
  *     service before URL templates are built.
  *   - Root cause: T3 mode strips a literal `/{service}/tenant/{tenantId}` prefix
@@ -43,7 +43,7 @@
  *     These directories are not referenced by any Angular frontend and have no
  *     package-lock.json (they were never npm-installed in that nested form). They
  *     accumulated in repos and caused deploy-manager lint failures ("Missing
- *     package-lock.json" for ~100 dirs fleet-wide). The cleanup step removes them
+ *     package-lock.json" for ~100 dirs across many repos). The cleanup step removes them
  *     automatically on the next `php stone generate client` run so platforms do not
  *     need manual deletion.
  *   - Safe: only directories inside a flat service package dir (client/{service}/)
@@ -77,7 +77,7 @@
  *     → package name `exampleapp-api-portal-client`
  *   - The `--service=` filter remains for single-package generation.
  *
- * v4.3 (typed returns, CLIENT-SDK-SPEC §10): a route may declare a response DTO via
+ * v4.3 (typed returns, the client SDK contract): a route may declare a response DTO via
  *   `'response' => SomeDto::class` (+ optional `'collection' => true`). The generator
  *   reflects the DTO's public typed properties into a TS interface in types.ts and
  *   types the method `Promise<Dto>` / `Promise<Dto[]>`. Routes with no `response`
@@ -143,9 +143,9 @@ $serviceFilter  = null;          // null = all services; string = one service on
 $language       = 'typescript';  // Only TypeScript supported in v4.0
 $scopeArg       = null;          // OPTIONAL positional (deprecated — accepted but no longer used for naming)
 
-// v9.6.0 (Phase 3, CLIENT-SDK-SPEC §10 amendment) — opt-in hard gate for typed
+// v9.6.0 (Phase 3, the client SDK contract) — opt-in hard gate for typed
 // contracts. Default OFF (today's warn-and-fall-back-to-unknown behavior,
-// unchanged) so this ships to the whole fleet via composer without breaking
+// unchanged) so this ships to every platform via composer without breaking
 // platforms that haven't typed their routes yet. A platform
 // turns it on per-generation via `--strict-types`, or persistently via
 // STONE_CLIENT_GEN_STRICT_TYPES=1 in its own environment/.env (read here via
@@ -166,7 +166,7 @@ if (array_intersect(['--help', '-h', 'help'], $argv)) {
 API Client Generator v4.10
 ==========================
 
-Generates per-service TypeScript client packages (CLIENT-SDK-SPEC §0 A1-A6).
+Generates per-service TypeScript client packages (the client SDK contract).
 Package name for each service package is derived as {composer-name}-{service}-client.
 
 Usage: php stone generate client [options]
@@ -414,7 +414,7 @@ Add group: '<concept>' to the route definition. Example:
 
   \$router->get('/items', ListItemsRoute::class, group: 'inventory');
 
-Generation aborted. Every includable route must have a group: declaration (CLIENT-SDK-SPEC §0 A2).
+Generation aborted. Every includable route must have a group: declaration (the client SDK contract).
 ERR
         );
         exit(1);
@@ -422,7 +422,7 @@ ERR
 }
 
 /**
- * v9.6.0 (Phase 3, CLIENT-SDK-SPEC §10 amendment). Report every way an
+ * v9.6.0 (Phase 3, the client SDK contract). Report every way an
  * includable route falls short of a FULL typed contract: a missing
  * `response:` DTO, or (for a body-carrying verb) a missing `request:` DTO.
  * Pure — returns human-readable violation strings, does not print or exit;
@@ -455,7 +455,7 @@ function typedContractViolations(array $route): array
  * tenant is selected — e.g. provision-tenant, select-tenant) or `public`
  * (no token at all) can never legitimately carry a `/{service}/tenant/{id}`
  * URL segment, no matter what `service` value it happens to be tagged with
- * (real fleet convention: these land under `service: 'infra'` purely
+ * (common convention: these land under `service: 'infra'` purely
  * because they don't belong to a specific business service — see A3's
  * exclusion carve-out in exclusionReason()). This is the single shared
  * predicate both the T3-prefix guard (assertT3RoutesCarryTenantPrefix()) and
@@ -473,7 +473,7 @@ function routeIsTenantUrlExempt(array $route): bool
 }
 
 /**
- * v4.7 hard-error guard (production incident on a downstream T2 platform).
+ * v4.7 hard-error guard (fixes a real downstream T2 failure).
  *
  * T3 (URL-tenant) mode builds every tenant-scoped business-method URL by
  * STRIPPING the exact `/{service}/tenant/{tenantId}` prefix off the route path
@@ -546,7 +546,7 @@ $list
 
 T3 mode builds every tenant-scoped method URL by stripping that exact prefix and prepending the
 runtime tenant accessor (this.t). A route missing the prefix produces a DOUBLED, 404ing URL at
-runtime (this.t + the unstripped path) — this is the production incident that motivated this guard:
+runtime (this.t + the unstripped path) — this is the failure that motivated this guard:
 GET /portal/tenant/{id}/portal/projects instead of GET /portal/projects.
 
 If tenant_id is resolved server-side from the JWT (not the URL) for this platform, regenerate with
@@ -722,7 +722,7 @@ function templateNeedsIdParam(string $path, string $serviceName, bool $isTenantS
 function verbatimHttpTs(): string
 {
     return <<<'TS'
-// src/http.ts — emitted verbatim by php stone generate client (CLIENT-SDK-SPEC §5)
+// src/http.ts — emitted verbatim by php stone generate client (the client SDK contract)
 // DO NOT EDIT MANUALLY.
 
 import { TokenStore } from './tokens';
@@ -856,9 +856,9 @@ export class MinimalHttp {
   constructor(
     private readonly baseUrl: string,
     private readonly tokens: TokenStore,
-    // Default same-origin refresh endpoint, AUTH-SPEC §4a: POST /api/auth/refresh.
+    // Default same-origin refresh endpoint, the auth contract: POST /api/auth/refresh.
     // Used ONLY when no refresh handler is injected (self-contained / T2 same-origin).
-    // Do not change without updating AUTH-SPEC §token-contract.
+    // Do not change without updating the auth contract.
     private readonly refreshEndpoint: string = '/api/auth/refresh',
     // Support link surfaced on the final error-ladder rung (§5 step 3), e.g.
     // a wa.me/… WhatsApp link. Platform config, never hardcoded here.
@@ -866,7 +866,7 @@ export class MinimalHttp {
   ) {}
 
   /**
-   * Inject a refresh strategy (CLIENT-SDK-SPEC §12/§14). When set, the 401 path
+   * Inject a refresh strategy (the client SDK contract). When set, the 401 path
    * delegates to this instead of the built-in same-origin POST. The client still
    * owns token storage, attachment, and 401-detect+retry — only the refresh
    * transport is injected. Pass null to restore the built-in default.
@@ -914,8 +914,8 @@ export class MinimalHttp {
   /**
    * Join a base URL and a path into a single, correctly-separated URL.
    *
-   * `environment.apiServer.host` is written with a trailing slash across the
-   * fleet (CLIENT-SDK-SPEC convention) and call-site paths are written with a
+   * `environment.apiServer.host` is written with a trailing slash by
+   * convention and call-site paths are written with a
    * leading slash (both typed generated methods and hand-written escape-hatch
    * callers like `ApiService.get('/products', …)`). A raw `base + path`
    * concat therefore produces a double slash (`https://api.example.com//products`)
@@ -1045,7 +1045,7 @@ export class MinimalHttp {
           }
 
           // 5xx/network/timeout DURING the heal (e.g. a transient gateway
-          // pool-eviction, #7423). KEEP the session — never logout, never
+          // pool-eviction). KEEP the session — never logout, never
           // clear tokens. Feed the central §5 error ladder like any other
           // server error. No auto-retry-on-5xx.
           this.consecutiveFailures++;
@@ -1300,7 +1300,7 @@ TS;
 function verbatimTokensTs(): string
 {
     return <<<'TS'
-// src/tokens.ts — emitted verbatim by php stone generate client (CLIENT-SDK-SPEC §6)
+// src/tokens.ts — emitted verbatim by php stone generate client (the client SDK contract)
 // DO NOT EDIT MANUALLY.
 //
 // 2026-07-06 storage redesign: this TokenStore is used ONLY for calling THIS
@@ -1345,7 +1345,7 @@ function verbatimTokensTs(): string
 // present). Inert and correct regardless of which mode a given platform
 // runs, without this file needing to know which one it is.
 //
-// Key names are owned by AUTH-SPEC §token-contract. Do not rename.
+// Key names are owned by the auth contract. Do not rename.
 const ACCESS_KEY      = 'ssp_api_access_token';
 const REFRESH_KEY     = 'ssp_api_refresh_token';
 const AUTH_ACCESS_KEY = 'ssp_auth_access_token';
@@ -1430,7 +1430,7 @@ TS;
 function verbatimErrorsTs(): string
 {
     return <<<'TS'
-// src/errors.ts — emitted verbatim by php stone generate client (CLIENT-SDK-SPEC §11)
+// src/errors.ts — emitted verbatim by php stone generate client (the client SDK contract)
 // DO NOT EDIT MANUALLY.
 
 export class ApiError extends Error {
@@ -1641,7 +1641,7 @@ TS;
         ? "\n  private _tenantId: string | number | null = null;"
         : '';
 
-    // Escape-hatch behaviour (CLIENT-SDK-SPEC §12/§433). Only tenant-scoped
+    // Escape-hatch behaviour (the client SDK contract). Only tenant-scoped
     // (T3 non-admin) clients rewrite logical `/portal/...` paths to carry the active
     // tenant prefix (via escapePath() + the `t` getter). Admin and T2 clients are NOT
     // tenant-scoped (A6): their escape hatch passes paths through verbatim, with NO
@@ -1653,7 +1653,7 @@ TS;
         $bodyEscapeArg = 'this.escapePath(path)';
         $escapePathMethod = "\n"
             . "  /**\n"
-            . "   * Tenant-aware escape-hatch path resolver (CLIENT-SDK-SPEC §12). Logical\n"
+            . "   * Tenant-aware escape-hatch path resolver (the client SDK contract). Logical\n"
             . "   * `/portal/...` paths receive the active tenant prefix from the CLIENT; the\n"
             . "   * platform passes only the logical path and never builds /portal/tenant/{id}/…\n"
             . "   * itself (§433). Non-/portal paths (infra/auth) pass through untouched.\n"
@@ -1662,7 +1662,7 @@ TS;
             . "    return path.startsWith('/portal/') ? `\${this.t}\${path.substring(7)}` : path;\n"
             . "  }\n";
         $hatchDoc = "  /**\n"
-            . "   * Escape hatch for endpoints with no typed business method (CLIENT-SDK-SPEC §12/§433).\n"
+            . "   * Escape hatch for endpoints with no typed business method (the client SDK contract).\n"
             . "   * Two legitimate uses:\n"
             . "   *   1. Cross-cutting infra/auth probes (e.g. /api/devices/register, /subscription/status) —\n"
             . "   *      non-/portal paths pass through verbatim.\n"
@@ -1680,7 +1680,7 @@ TS;
         $bodyEscapeArg = 'path';
         $escapePathMethod = '';
         $hatchDoc = "  /**\n"
-            . "   * Escape hatch for endpoints with no typed business method (CLIENT-SDK-SPEC §12/§433).\n"
+            . "   * Escape hatch for endpoints with no typed business method (the client SDK contract).\n"
             . "   * Use for cross-cutting infra/auth probes (e.g. /api/devices/register,\n"
             . "   * /subscription/status). This client is NOT tenant-scoped, so paths pass through\n"
             . "   * verbatim (no tenant-prefix rewriting).\n"
@@ -1698,7 +1698,7 @@ TS;
  * Tenancy mode: {$tenancyMode}
  *
  * DO NOT EDIT MANUALLY — Regenerate with: php stone generate client
- * CLIENT-SDK-SPEC §0 A1–A6 (approved 2026-06-14)
+ * the client SDK contract (approved 2026-06-14)
  */
 
 import { MinimalHttp, HttpParams, RefreshHandler, ErrorHandlers, Notifier, ReauthRequiredHandler, SubscriptionNoticeListener } from './http';
@@ -1746,7 +1746,7 @@ export class ApiClient {{$tenantIdField}
 {$escapePathMethod}
 
   /**
-   * Inject the refresh strategy (CLIENT-SDK-SPEC §12/§14). ngx wires this to the
+   * Inject the refresh strategy (the client SDK contract). ngx wires this to the
    * auth-client's refresh so external-auth / T3 platforms refresh against their
    * central accounts server while this client keeps ownership of token storage,
    * attachment, and 401-detect+retry. Pass null to use the built-in same-origin
@@ -1853,10 +1853,10 @@ function buildGroupMethods(
         // with a non-tail {id} (e.g. /routes/{id}/start) also needs the id param.
         $needsIdParam = templateNeedsIdParam($path, $serviceName, $routeIsTenantScoped);
 
-        // Resolve typed return (CLIENT-SDK-SPEC §10). null → ApiResponse fallback.
+        // Resolve typed return (the client SDK contract). null → ApiResponse fallback.
         $responseTs = routeResponseTsType($route);
 
-        // Resolve typed request body (v9.6.0, CLIENT-SDK-SPEC §10 amendment).
+        // Resolve typed request body (v9.6.0, the client SDK contract).
         // null → T.ApiRequestBody fallback. Meaningless on GET (buildMethodTs
         // only consumes it inside the body-verb branch) — computed unconditionally
         // for simplicity, same pattern as $responseTs above.
@@ -1937,7 +1937,7 @@ function buildUrlTemplate(string $path, bool $isTenantScoped, string $serviceNam
  * previous parameter was named $tailId and used hasTailId() — which only
  * detected TAIL params, missing /routes/{id}/start shapes (v4.6.0 fix).
  *
- * Typed returns (CLIENT-SDK-SPEC §10, v4.3.0): when $responseTs is non-null
+ * Typed returns (the client SDK contract, v4.3.0): when $responseTs is non-null
  * (the route declared `response:`), the http generic + Promise are typed to that
  * DTO type (e.g. `Promise<T.Warehouse[]>` / `this.http.get<T.Warehouse[]>(...)`).
  * When null, the method keeps the `T.ApiResponse` (= unknown) fallback.
@@ -2022,7 +2022,7 @@ TS;
     }
 
     if ($bodyVerb !== null) {
-        // v9.6.0 (CLIENT-SDK-SPEC §10 amendment): a route may declare
+        // v9.6.0 (the client SDK contract): a route may declare
         // `request: SomeDto::class` to type the body parameter instead of the
         // generic `T.ApiRequestBody` fallback. Mirrors the `response:` DTO
         // reflection this generator already does — see reflectDto()/
@@ -2051,7 +2051,7 @@ TS;
 }
 
 // ============================================================================
-// Typed-return DTO reflection (CLIENT-SDK-SPEC §10) — v4.3.0
+// Typed-return DTO reflection (the client SDK contract) — v4.3.0
 //
 // For any route declaring `response: SomeDto::class`, the generator reflects the
 // DTO's PUBLIC TYPED properties into a TypeScript interface and types the method
@@ -2336,7 +2336,7 @@ function generateTypesTs(): string
  * DO NOT EDIT MANUALLY — Regenerate with: php stone generate client
  *
  * Platform-specific DTOs are generated from PHP DTO classes declared via a route
- * `response:` slot (CLIENT-SDK-SPEC §10). Routes without a `response:` keep the
+ * `response:` slot (the client SDK contract). Routes without a `response:` keep the
  * generic `ApiResponse` (= unknown) fallback.
  * The types below are the minimum baseline required by the generated ApiClient.
  */
@@ -2345,7 +2345,7 @@ function generateTypesTs(): string
  * Generic API response data payload (replace with specific types per endpoint).
  * Typed as `unknown` so consumers narrow with a single `as X` cast — the previous
  * `Record<string, unknown> | unknown[] | null` union broke strict narrowing (the
- * `unknown[]` member) and forced `as unknown as X` double-casts. (CLIENT-SDK-SPEC §6)
+ * `unknown[]` member) and forced `as unknown as X` double-casts. (the client SDK contract)
  */
 export type ApiResponse = unknown;
 
@@ -2642,7 +2642,7 @@ foreach ($allRoutes as $route) {
 // unset, no --strict-types) = WARNING, generation proceeds with the existing
 // ApiResponse/ApiRequestBody (= unknown) fallback — byte-identical to pre-v9.6.0
 // behavior for every platform that hasn't opted in yet. Strict mode = hard
-// failure, exit(1), nothing written — see CLIENT-SDK-SPEC §10 amendment.
+// failure, exit(1), nothing written — see the client SDK contract.
 if (!empty($typedContractIssues)) {
     if ($strictTypedContracts) {
         fwrite(STDERR, "\n[stone generate client] ERROR: --strict-types (or STONE_CLIENT_GEN_STRICT_TYPES) is enabled and " . count($typedContractIssues) . " route(s) lack a full typed contract:\n\n");

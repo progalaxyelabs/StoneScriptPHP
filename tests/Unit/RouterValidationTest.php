@@ -16,7 +16,7 @@ use StoneScriptPHP\IRouteHandler;
  * 400 AT THE EDGE — before the handler runs and before NULLs reach the SQL
  * functions (where they surfaced as 500s). Prior to the fix, executeHandler()
  * populated properties and called process() without ever invoking
- * validation_rules(), so declared validation was dead code fleet-wide.
+ * validation_rules(), so declared validation was dead code platform-wide.
  */
 
 /** Mimics a required-field dropdown route: p_dropdown_type is required. */

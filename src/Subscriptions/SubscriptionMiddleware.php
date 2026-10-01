@@ -38,6 +38,7 @@ use StoneScriptPHP\Routing\MiddlewareInterface;
  *  - `{param}` segments match exactly ONE non-empty path segment, like the Router:
  *    `POST /portal/tenant/{tenantId}/account/delete`.
  *  - a leading `/api` segment of the request path is ignored when matching.
+ *  - a path with a `.`/`..` segment or an encoded `%2e`/`%2f`/`%5c` never matches (fails closed).
  * EVERY prefix entry in the defaults is unprotected for all methods; a platform's
  * own deletion and renewal/payment routes MUST be on the list (see README).
  *
@@ -261,6 +262,11 @@ class SubscriptionMiddleware implements MiddlewareInterface
      */
     private function matchesAny(string $path, array $entries, bool $componentPrefix = true): bool
     {
+        // Fail closed on traversal / encoded-separator tricks: such a path can reach a
+        // different route than the one the allow-list entry names.
+        if (self::isSuspiciousPath($path)) {
+            return false;
+        }
         $candidates = [$path];
         $stripped = preg_replace('#^/api(?=/|$)#', '', $path);
         if ($stripped !== null && $stripped !== $path) {
@@ -276,6 +282,20 @@ class SubscriptionMiddleware implements MiddlewareInterface
                 if (preg_match($regex, $p) === 1) {
                     return true;
                 }
+            }
+        }
+        return false;
+    }
+
+    /** Any `.` / `..` segment, or an encoded dot/slash/backslash (%2e, %2f, %5c, any case), or a raw backslash. */
+    private static function isSuspiciousPath(string $path): bool
+    {
+        if (preg_match('/%2e|%2f|%5c/i', $path) === 1 || str_contains($path, '\\')) {
+            return true;
+        }
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '.' || $segment === '..') {
+                return true;
             }
         }
         return false;

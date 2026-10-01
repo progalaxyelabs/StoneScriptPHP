@@ -6,7 +6,7 @@ namespace StoneScriptPHP\Auth\ExternalAuth\Dto;
 
 /**
  * Response contract for GET {prefix}/memberships — shape of the external
- * auth service's memberships-list payload (AUTH-SPEC §5d:
+ * auth service's memberships-list payload (the auth contract:
  * `{ "success": true, "memberships": [...] }`).
  *
  * @package StoneScriptPHP\Auth\ExternalAuth\Dto

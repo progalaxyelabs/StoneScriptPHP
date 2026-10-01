@@ -9,7 +9,7 @@ namespace StoneScriptPHP\Routing;
  *
  * Used internally by the Router to store normalized route configuration.
  *
- * ## v4.0 fields (CLIENT-SDK-SPEC §0 A2)
+ * ## v4.0 fields (the client SDK contract)
  *
  * - `service`   — the first URL segment partition key (`portal`, `admin`, `public`).
  *                 Reserved values `infra` and `webhook` cause the route to be excluded
@@ -68,7 +68,7 @@ class RouteEntry
         public readonly ?string $param = null,
 
         /**
-         * Response DTO class name for typed-return generation (CLIENT-SDK-SPEC §10).
+         * Response DTO class name for typed-return generation (the client SDK contract).
          * When set to a DTO FQCN (e.g. `App\Models\Warehouse::class`), the generator
          * reflects the DTO's public typed properties into a TypeScript interface and
          * types the generated method `Promise<Dto>` (or `Promise<Dto[]>` with
@@ -86,7 +86,7 @@ class RouteEntry
 
         /**
          * Request body DTO class name for typed-request generation (v9.6.0,
-         * mirrors `$response` — CLIENT-SDK-SPEC §10 amendment). When set to a
+         * mirrors `$response` — the client SDK contract). When set to a
          * DTO FQCN, the generator reflects the DTO's public typed properties
          * into a TypeScript interface and types the generated method's body
          * parameter as `Dto` instead of the untyped `T.ApiRequestBody`

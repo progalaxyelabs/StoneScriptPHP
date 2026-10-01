@@ -189,7 +189,7 @@ $parsed_input_params = substr($content, $input_open_pos + 1, $input_close_pos - 
 // DEFAULT-bearing (nullable) SQL parameter into a garbage-typed or
 // wrong-named PHP property -- exactly the "generator silently emits the
 // wrong nullability" bug class this guard exists to make impossible. This is
-// not hypothetical: a real production .pgsql function in the fleet has an
+// not hypothetical: a real production .pgsql function in the platforms has an
 // explicit comment recording that its author discovered this the hard way
 // and had to relocate an explanatory comment OUTSIDE the parameter list to
 // avoid corrupting the model generator.

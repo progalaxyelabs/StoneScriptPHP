@@ -37,7 +37,7 @@ use StoneScriptPHP\Auth\ExternalAuth\Dto\ProfileResponseDto;
  * Registers framework-level proxy routes for external auth services.
  * Replaces 18+ duplicate proxy routes that each platform previously maintained.
  *
- * AUTH-SPEC §S1: canonical prefix is `/api/auth`. Default changed from `/auth` to
+ * the auth contract: canonical prefix is `/api/auth`. Default changed from `/auth` to
  * `/api/auth` in v3.26.0. When `legacy_compat` is true (the default), all routes
  * are ALSO registered under the old `/auth` prefix so existing deployments keep
  * working during the migration window. Set `'legacy_compat' => false` once all
@@ -46,7 +46,7 @@ use StoneScriptPHP\Auth\ExternalAuth\Dto\ProfileResponseDto;
  * Usage in your index.php:
  *
  *   ExternalAuthRoutes::register($router, [
- *       'prefix' => '/api/auth',      // canonical — AUTH-SPEC §S1
+ *       'prefix' => '/api/auth',      // canonical — the auth contract
  *       'legacy_compat' => true,      // also answer /auth/* during transition (default: true)
  *       'registration' => ['mode' => 'tenant'],
  *       'after_register' => fn($result, $input) => log_info('New registration'),
@@ -90,7 +90,7 @@ class ExternalAuthRoutes
         // Register routes under the canonical prefix
         self::registerForPrefix($router, $config->prefix, $client, $config, $provisioner, $rolesResolver, $tenantsResolver);
 
-        // AUTH-SPEC §S1 legacy compat: also register under /auth if the canonical
+        // the auth contract legacy compat: also register under /auth if the canonical
         // prefix differs from /auth. This keeps existing clients working during
         // the transition window. Skip when prefix is already /auth (no double-register).
         if ($config->legacyCompat && $config->prefix !== self::LEGACY_PREFIX) {
@@ -375,7 +375,7 @@ class ExternalAuthRoutes
 
         $paths = self::computePublicPaths($config->prefix, $config);
 
-        // AUTH-SPEC §S1 legacy compat: include /auth/* paths in the exclusion list
+        // the auth contract legacy compat: include /auth/* paths in the exclusion list
         // so the JWT middleware does not block requests to the old prefix.
         if ($config->legacyCompat && $config->prefix !== self::LEGACY_PREFIX) {
             $paths = array_merge($paths, self::computePublicPaths(self::LEGACY_PREFIX, $config));
@@ -485,7 +485,7 @@ class ExternalAuthRoutes
         // merged below via $config->tenantRouteProvider->protectedPaths(). Kept in
         // the SAME class as their registration (see TenantRouteProviderInterface)
         // so this exemption list can never drift out of sync with what's actually
-        // registered — the root cause of the 2026-07-05 fleet incident.
+        // registered — the root cause of an earlier regression (2026-07-05).
         // (invite used to live here too — removed 2026-07-21.)
         if ($config->isEnabled('change_password')) {
             $paths[] = "$prefix/change-password";
@@ -528,7 +528,7 @@ class ExternalAuthRoutes
      */
     public static function getRouteDefinitions(array $options = []): array
     {
-        // AUTH-SPEC §S1: default changed from /auth to /api/auth (matches ExternalAuthConfig).
+        // the auth contract: default changed from /auth to /api/auth (matches ExternalAuthConfig).
         $prefix = rtrim($options['prefix'] ?? '/api/auth', '/');
 
         // Feature toggle defaults (must match ExternalAuthConfig::__construct)

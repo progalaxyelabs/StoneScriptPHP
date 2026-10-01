@@ -74,7 +74,7 @@ abstract class TenantProvisioner
      * Tenant-record registration step (no-op).
      *
      * The auth server has NO `/api/internal/create-tenant` endpoint — it never did
-     * (AUTH-SPEC §5a leaves the mechanism unspecified; the auth server exposes
+     * (the auth contract leaves the mechanism unspecified; the auth server exposes
      * `POST /api/internal/create-membership`, which calls `auth_register_account` and
      * creates BOTH the tenant record AND the owner membership in one call). That
      * create-membership call is already made by ProvisionTenantRoute (step 4, via
@@ -143,7 +143,7 @@ abstract class TenantProvisioner
      * IMPORTANT: gateway v4.1.0+ protects POST /admin/database/create with
      * `platform_token_middleware` — it requires a per-platform scoped bearer token
      * (ssdb_pt_...), NOT the shared admin token. Sending the admin token here gets a
-     * `403 unknown token` from the gateway (fleet-wide new-tenant-signup blocker fixed
+     * `403 unknown token` from the gateway (platform-wide new-tenant-signup blocker fixed
      * in 7.1.3 — see getPlatformToken()). This mirrors the CLI's
      * resolveGatewayPlatformToken()/stepCreateDatabase() in cli/helpers/gateway-common.php,
      * which deploy-manager's register-tenant/migrate-all-tenants steps already use

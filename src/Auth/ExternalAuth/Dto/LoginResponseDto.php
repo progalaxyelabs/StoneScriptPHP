@@ -25,7 +25,7 @@ namespace StoneScriptPHP\Auth\ExternalAuth\Dto;
  *  - `exists === false` (and nothing else set) → identity-not-found variant
  *    (`/api/identity/login` only, not `/api/auth/login`)
  *  - `success === false` + `confirm_handle` set → OAuth-no-existing-account
- *    variant (OAuth signin, no existing account — AUTH-SPEC §3b P2)
+ *    variant (OAuth signin, no existing account — the auth contract P2)
  *  - `oauth_pending === true` → the OAuth connection needs
  *    POST /api/oauth/promote (`oauth_state`) to commit, or
  *    DELETE /api/oauth/abandon to discard.

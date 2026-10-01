@@ -98,7 +98,7 @@ class GenerateAuditCommandTest extends TestCase
         // Immutability enforcement moved to the gateway's gated audit-owner
         // role-split (audit_provision) — this migration no longer REVOKEs
         // from current_user (that would self-revoke the single connecting
-        // role on a flag-off/today's-default fleet). See
+        // role on a flag-off/today's-default platforms). See
         // audit/protected.json + stonescriptdb-gateway's src/audit_provision.
         $this->assertStringNotContainsString("REVOKE UPDATE, DELETE, TRUNCATE ON _audit_log", $sql);
         // Default table set, each guarded by to_regclass so partial rollout

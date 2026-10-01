@@ -8,7 +8,7 @@ namespace StoneScriptPHP\Routing;
  * Immutable value object for injecting a request into Router::dispatch()
  * without touching PHP superglobals.
  *
- * See TESTABILITY-SPEC.md, requirement T1-1. This is the seam that lets a
+ * See the testability notes. This is the seam that lets a
  * route-level test exercise the full middleware pipeline + handler dispatch
  * (method matching, header-driven middleware like JwtAuthMiddleware, request
  * body shape, response shape) without mutating $_SERVER/$_GET/$_POST or

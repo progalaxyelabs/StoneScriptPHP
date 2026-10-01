@@ -11,7 +11,7 @@ use StoneScriptPHP\Routing\Router;
  * Router {curly} parameter matching (v4.0.1).
  *
  * Regression guard for the journey-seam bug that shipped in v4.0.0: the client
- * generator (CLIENT-SDK-SPEC §0) emits {curly} placeholders, but the ACTIVE
+ * generator (the client SDK contract) emits {curly} placeholders, but the ACTIVE
  * runtime Router (StoneScriptPHP\Routing\Router) only matched legacy ":colon"
  * params — so generated tenant-scoped URLs (/portal/tenant/{tenantId}/...)
  * never matched at runtime. These tests pin the runtime side of the contract:

@@ -77,7 +77,7 @@ class SubscriptionRoutes
         $prefix = $config->prefix;
 
         // Public routes (no JWT required)
-        // service:'webhook' — client-generation exclusion (CLIENT-SDK-SPEC §0
+        // service:'webhook' — client-generation exclusion (the client SDK contract
         // A3): a payment callback is never called by the generated Angular
         // client, so it's excluded from the emitted package outright rather
         // than typed for a consumer that will never invoke it.

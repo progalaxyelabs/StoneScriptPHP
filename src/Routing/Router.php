@@ -100,7 +100,7 @@ class Router
     /**
      * Register a GET route.
      *
-     * v4.0 named parameters (CLIENT-SDK-SPEC §0 A2):
+     * v4.0 named parameters (the client SDK contract):
      *   group:     domain-concept grouping for the generated client (MANDATORY on includable routes)
      *   action:    optional explicit method name override (kebab→camelCase)
      *   streaming: when true, exclude from generated client (A1)
@@ -306,7 +306,7 @@ class Router
      *
      * The previously-supported 'public'/'protected'-sectioned format (removed
      * in v6.0.0 — it was never adopted by any real platform; every one of the
-     * 11 fleet platforms already used the flat format above) is detected and
+     * 11 platforms already used the flat format above) is detected and
      * rejected with a clear migration error below, rather than silently
      * registering routes that will never match a real request (their HTTP
      * method keys would be the strings "public"/"protected", not GET/POST/etc).
@@ -405,7 +405,7 @@ class Router
      * @param IncomingRequest|null $incoming When provided, method/path/headers/
      *   query/body/cookies are read from this object instead of PHP
      *   superglobals — the seam that makes route-level testing possible
-     *   (TESTABILITY-SPEC.md T1-1). When null (the default — every current
+     *   (the testability notes T1-1). When null (the default — every current
      *   production call site), behavior is unchanged: reads
      *   $_SERVER/$_GET/$_POST/php://input/getallheaders()/$_COOKIE exactly as
      *   before.
@@ -554,7 +554,7 @@ class Router
     {
         // {curly}-ONLY param syntax (v4.0.1). The legacy ":colon" syntax is no
         // longer supported — runtime matching now agrees with the client
-        // generator (CLIENT-SDK-SPEC §0), which emits {curly} placeholders.
+        // generator (the client SDK contract), which emits {curly} placeholders.
         // preg_quote first so any other regex-special chars in the path are
         // safely escaped, then turn each {param} into a named capture group.
         $regex = preg_quote($pattern, '#');

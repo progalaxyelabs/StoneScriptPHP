@@ -219,7 +219,7 @@ function resolveSoftDeleteMigrationFilename(string $migrationsDir): array
 
     return [
         "{$timestamp}_create_soft_delete.sql",
-        'no sequential-numbered migrations found — used the fleet timestamp convention',
+        'no sequential-numbered migrations found — used the platforms timestamp convention',
     ];
 }
 

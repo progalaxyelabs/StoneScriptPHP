@@ -12,7 +12,7 @@ use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\IRouteHandler;
 
 /**
- * Regression/feature guard for TESTABILITY-SPEC.md T1-1: Router::dispatch()
+ * Regression/feature guard for the testability notes T1-1: Router::dispatch()
  * accepts an optional IncomingRequest so route-level tests (method matching,
  * header-driven middleware, request body shape) can run without touching PHP
  * superglobals or php://input, and without a live HTTP server.
@@ -129,7 +129,7 @@ class RouterIncomingRequestTest extends TestCase
         // NOTE: error404() only sets the status via the global http_response_code()
         // side effect, not on the ApiResponse object itself (unlike the validation
         // 400 path, which does populate ->httpStatusCode) — this asymmetry is a
-        // known Tier-1 gap tracked as TESTABILITY-SPEC.md T1-2 (ResponseWriter),
+        // known Tier-1 gap tracked as the testability notes T1-2 (ResponseWriter),
         // not something this test works around by pretending otherwise.
         $this->assertSame(404, http_response_code(), '404 must be set via http_response_code(), even though ApiResponse->httpStatusCode is null for this path');
     }

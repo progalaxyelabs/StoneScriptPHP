@@ -74,7 +74,7 @@ the customer's data accessible instead of locking them out:
 | Request | Result |
 |---|---|
 | `GET` / `HEAD` / `OPTIONS` | allowed |
-| writes on the allow-list (`/health`, `/auth`, `/subscription`, `/export`, `/internal`, `/account/subscription`, `DELETE /account`, `POST /account/delete`, `POST /account/cancel-deletion` + your `write_allow_list`) | allowed |
+| writes on the allow-list (`/health`, `/auth`, `/subscription`, `/export`, `/internal`, `/account/subscription`, `DELETE /account`, `POST /account/delete`, `POST /account/cancel-deletion`, `POST /account/password`, `POST /account/password-reset/` + your `write_allow_list`) | allowed |
 | any other write | **HTTP 423**, `data.error_code` = `READ_ONLY_TRIAL_EXPIRED` / `READ_ONLY_PLAN_ENDED` / `READ_ONLY_NO_SUBSCRIPTION` |
 
 Every authenticated response carries `X-Subscription-State` (`ok`, `trial_ending; ends_at=..; days=..`,
@@ -107,6 +107,10 @@ renewal or payment routes live elsewhere (e.g. tenant-scoped), list them, or an 
 Forms: `/p` (exact or sub-path), `/p/` (prefix), `METHOD /p` (that method, exact path),
 `{param}` (one non-empty segment, like the Router).
 A `cancelled` subscription stays active until its `expires_at` (cancel-at-period-end).
+Active-state rule (SQL `sub_get_status` and `SubscriptionState` agree): `trial`, `active` and `cancelled`
+follow `expires_at`; `suspended`, `refunded` and `chargeback` are never active. Renewing before expiry
+(`sub_activate`) stacks onto the remaining time for `active` and `cancelled` subscriptions.
+Paths with a `.`/`..` segment or an encoded `%2e`/`%2f`/`%5c` never match the allow-list.
 In `block` mode the state header says `blocked`, not `read_only`.
 
 **Behaviour change in v10:** earlier versions returned HTTP 402 on every call. Set

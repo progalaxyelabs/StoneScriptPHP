@@ -38,7 +38,7 @@ class JwtHandler implements JwtHandlerInterface
         $issuedAt = time();
         $expire = $issuedAt + ($expiryDays * 24 * 60 * 60);
 
-        // AUTH-SPEC §4: custom claims at top level alongside standard JWT claims.
+        // the auth contract: custom claims at top level alongside standard JWT claims.
         $data = array_merge([
             'iat' => $issuedAt,
             'exp' => $expire,
@@ -57,7 +57,7 @@ class JwtHandler implements JwtHandlerInterface
     {
         try {
             $decoded = JWT::decode($token, new Key($this->getSecretKey(), self::ALGORITHM));
-            // AUTH-SPEC §4: claims are at top level. Return all claims minus
+            // the auth contract: claims are at top level. Return all claims minus
             // the standard JWT fields that are framework internals (iat, exp, etc.).
             $claims = (array) $decoded;
             unset($claims['iat'], $claims['exp'], $claims['aud'], $claims['nbf']);

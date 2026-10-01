@@ -78,7 +78,7 @@ if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
     echo "  · FROM inside EXECUTE format(…) dynamic SQL is not checked.\n";
     echo "  · Data-modifying CTEs: WITH x AS (INSERT INTO t …) — the target table t is\n";
     echo "    not checked (no SELECT precedes FROM at that depth). Zero occurrences in\n";
-    echo "    the current fleet; flag manually if you add one.\n\n";
+    echo "    the current platforms; flag manually if you add one.\n\n";
     echo "Phase 2 — Column name integrity (tokenizer + scope tree, per-schema):\n";
     echo "  Checks qualified refs (alias.column / table.column) against column lists\n";
     echo "  parsed from the scoped table definitions for that schema.\n\n";

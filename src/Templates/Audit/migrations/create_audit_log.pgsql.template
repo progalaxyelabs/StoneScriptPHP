@@ -26,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_occurred_at    ON _audit_log(occurred_a
 
 -- Append-only enforcement is now the GATEWAY's job, not this migration's.
 --
--- On a fleet with the gated audit-owner role-split ENABLED (gateway
+-- On a platforms with the gated audit-owner role-split ENABLED (gateway
 -- `audit_provisioning_database_url` set + this platform's `audit/protected.json`
 -- manifest present), the gateway takes ownership of `_audit_log` (plus these
 -- audited base tables, their sequences, and the capture/purge functions) under a
@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_occurred_at    ON _audit_log(occurred_a
 -- neither owner nor a member of audit_owner, so it cannot ALTER/DISABLE/DROP the
 -- trigger, re-grant, or forge `_audit_log` rows through any code path.
 --
--- On a fleet WITHOUT the role-split enabled (flag off — today's exact
+-- On a platforms WITHOUT the role-split enabled (flag off — today's exact
 -- behaviour), there is no separate owning role, so this migration does nothing
 -- further here; the table is only tamper-EVIDENT until the split is enabled
 -- (single connecting role owns everything, same as every other table).

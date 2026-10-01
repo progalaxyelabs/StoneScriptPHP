@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
 
 /**
- * ExternalAuthConfig unit tests — AUTH-SPEC §S1 prefix migration
+ * ExternalAuthConfig unit tests — the auth contract prefix migration
  *
  * Covers the v3.26.0 changes:
  * - Default prefix changed from /auth to /api/auth
@@ -81,7 +81,7 @@ class ExternalAuthConfigTest extends TestCase
     {
         $config = new ExternalAuthConfig([]);
         $this->assertSame('/api/auth', $config->prefix,
-            'AUTH-SPEC §S1: default prefix must be /api/auth (not /auth)');
+            'the auth contract: default prefix must be /api/auth (not /auth)');
     }
 
     public function test_explicit_prefix_is_honoured(): void
@@ -195,7 +195,7 @@ class ExternalAuthConfigTest extends TestCase
 
         // Login route must be under /api/auth
         $this->assertArrayHasKey('/api/auth/login', $routes['POST'],
-            'getRouteDefinitions must use /api/auth as default prefix (AUTH-SPEC §S1)');
+            'getRouteDefinitions must use /api/auth as default prefix (the auth contract)');
 
         $this->assertArrayNotHasKey('/auth/login', $routes['POST'],
             'getRouteDefinitions must NOT produce /auth/login with default options');

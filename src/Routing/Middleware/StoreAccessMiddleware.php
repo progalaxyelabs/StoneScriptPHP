@@ -9,13 +9,13 @@ use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\Database;
 
 /**
- * StoreAccessMiddleware — T3 url-tenant access control (AUTH-SPEC §T3).
+ * StoreAccessMiddleware — T3 url-tenant access control (the auth contract).
  *
  * Validates that the authenticated identity has an active membership in the
  * tenant identified by the canonical {tenantId} URL segment by calling the auth
  * service over HTTP — no local mirror table, no cross-DB query.
  *
- * Canonical tenant-scoped URL shape (CLIENT-SDK-SPEC §0):
+ * Canonical tenant-scoped URL shape (the client SDK contract):
  *   /{service}/tenant/{tenantId}/...
  * The tenant param is named `tenantId` (v4.0.1 — formerly the platform-specific
  * `:storeId`). Only routes whose pattern matches this canonical second-segment
@@ -207,7 +207,7 @@ class StoreAccessMiddleware implements MiddlewareInterface
         // The auth server returns its native flat shape
         // {"memberships":[...]}. Older/enveloped responses use
         // {"status":"ok","data":{"memberships":[...]}}. Accept either so the middleware
-        // doesn't 500 on the live auth contract (AUTH-SPEC §6 — /api/auth/memberships
+        // doesn't 500 on the live auth contract (the auth contract — /api/auth/memberships
         // is a flat {memberships}).
         if ($httpCode >= 200 && $httpCode < 300) {
             if (isset($decoded['memberships']) && is_array($decoded['memberships'])) {

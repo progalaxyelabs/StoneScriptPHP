@@ -21,7 +21,7 @@ use StoneScriptPHP\Tenancy\TenantProvisioner;
  * (or hit 409-already-exists, treated as idempotent success) while being marked
  * db_status='active' with no real per-tenant database backing it ("ghost tenants").
  *
- * BUG #2 (fleet-wide signup 403 — fixed in 7.1.3): gateway v4.1.0+ wraps
+ * BUG #2 (platform-wide signup 403 — fixed in 7.1.3): gateway v4.1.0+ wraps
  * POST /admin/database/create with `platform_token_middleware`, which requires a
  * per-platform scoped bearer token (ssdb_pt_...) — NOT the shared admin token.
  * TenantProvisioner was still sending $this->adminToken as the Authorization bearer,

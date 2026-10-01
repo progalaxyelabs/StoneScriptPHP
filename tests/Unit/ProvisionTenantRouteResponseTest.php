@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\ApiResponse;
 
 /**
- * Unit tests for ProvisionTenantRoute response envelope (AUTH-SPEC §5a).
+ * Unit tests for ProvisionTenantRoute response envelope (the auth contract).
  *
  * Tests the shape and correctness of the 201 response returned by
  * ProvisionTenantRoute after a successful tenant provisioning + membership creation.
@@ -103,7 +103,7 @@ class ProvisionTenantRouteResponseTest extends TestCase
         );
 
         $this->assertSame(201, $response->httpStatusCode,
-            'Provision-tenant first-create must return HTTP 201 per AUTH-SPEC §5a');
+            'Provision-tenant first-create must return HTTP 201 per the auth contract');
     }
 
     public function test_response_status_is_ok(): void
@@ -270,7 +270,7 @@ class ProvisionTenantRouteResponseTest extends TestCase
 
     public function test_response_has_all_required_top_level_keys(): void
     {
-        // AUTH-SPEC §5a: access_token, refresh_token, token_type, expires_in,
+        // the auth contract: access_token, refresh_token, token_type, expires_in,
         // tenant, identity, membership
         $response = $this->buildResponse(
             $this->makeProvisionData(),
@@ -280,7 +280,7 @@ class ProvisionTenantRouteResponseTest extends TestCase
 
         foreach (['access_token', 'refresh_token', 'token_type', 'expires_in', 'tenant', 'identity', 'membership'] as $key) {
             $this->assertArrayHasKey($key, $response->data,
-                "AUTH-SPEC §5a requires '{$key}' in provision-tenant response");
+                "the auth contract requires '{$key}' in provision-tenant response");
         }
     }
 

@@ -126,7 +126,7 @@ class RefreshTokenMiddlewareTest extends TestCase
     {
         // Signature + exp valid, but no DB row was ever stored → reject (the gap the
         // stateless path cannot close). This is also the "old rowless refresh token"
-        // case that forces the one-time fleet re-login.
+        // case that forces the one-time platforms re-login.
         $token = $this->mint(['type' => TokenClaims::TYPE_REFRESH, 'purpose' => TokenClaims::PURPOSE_AUTHENTICATION]);
 
         $r = $this->runMw($this->authnRefreshRoute(), ['refresh_token' => $token]);

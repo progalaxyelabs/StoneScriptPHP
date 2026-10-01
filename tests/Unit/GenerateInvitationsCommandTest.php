@@ -213,7 +213,7 @@ class GenerateInvitationsCommandTest extends TestCase
      * DEVIATION FROM THE ORIGINAL DESIGN (documented in
      * cli/generate-invitations.php's resolveMigrationFilename() docblock
      * too): a target with no sequential-numbered migrations falls back to
-     * the real fleet's timestamp-based naming convention instead of
+     * the real platforms's timestamp-based naming convention instead of
      * inventing `001_...` with no basis.
      */
     public function test_falls_back_to_timestamp_migration_naming_with_no_prior_migrations(): void

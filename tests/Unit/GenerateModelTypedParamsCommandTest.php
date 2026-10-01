@@ -154,7 +154,7 @@ final class GenerateModelTypedParamsCommandTest extends TestCase
      * parens must not be silently parsed into a corrupted (and possibly
      * wrongly-non-nullable) parameter -- the generator must refuse instead.
      *
-     * This reproduces a real gotcha discovered in a fleet platform's own SQL:
+     * This reproduces a real gotcha discovered in a platform's own SQL:
      * a maintainer had to move an explanatory comment OUTSIDE the parameter
      * list specifically because an inline comment there broke the model
      * generator. That footgun should no longer be possible to trip silently.

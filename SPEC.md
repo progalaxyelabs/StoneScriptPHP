@@ -158,7 +158,7 @@ All responses MUST be `Content-Type: application/json`. The framework sets this 
 
 ### Route Registration
 
-**One format, as of v6.0.0** (see `ROUTING-CONSOLIDATION-PLAN.md`) — a flat array keyed by HTTP method, defined in `src/config/routes.php`. This is the only format `Routing\Router::loadRoutes()` accepts, and the only one any real platform in the fleet has ever used.
+**One format, as of v6.0.0** (see `ROUTING-CONSOLIDATION-PLAN.md`) — a flat array keyed by HTTP method, defined in `src/config/routes.php`. This is the only format `Routing\Router::loadRoutes()` accepts, and the only one any real platform in the platforms has ever used.
 
 A route's value is either:
 - a bare handler class reference (`HealthRoute::class`) — service defaults to `'shared'`, protected by default (JWT required), no `group`
@@ -746,7 +746,7 @@ StoneScriptPHP follows [Semantic Versioning](https://semver.org/):
 
 ### Gap 5: Router Doesn't Support PUT/PATCH/DELETE — RESOLVED (v6.0.0)
 
-This gap was exclusively about the legacy `src/Router.php` (`GetRequestParser`/`PostRequestParser`, no `Put`/`Patch`/`Delete` equivalents), which had zero real-platform usage and was deleted entirely in v6.0.0's routing consolidation (see `ROUTING-CONSOLIDATION-PLAN.md`). The current `Routing\Router` (the only router since the fleet standardized on it) was never affected by this limitation: `loadRoutes()`/`addRoute()` accept any HTTP method string generically, and `getInput()` already reads a JSON body for `POST`/`PUT`/`PATCH`. No fix needed — the gap no longer applies to any code that exists.
+This gap was exclusively about the legacy `src/Router.php` (`GetRequestParser`/`PostRequestParser`, no `Put`/`Patch`/`Delete` equivalents), which had zero real-platform usage and was deleted entirely in v6.0.0's routing consolidation (see `ROUTING-CONSOLIDATION-PLAN.md`). The current `Routing\Router` (the only router since the platforms standardized on it) was never affected by this limitation: `loadRoutes()`/`addRoute()` accept any HTTP method string generically, and `getInput()` already reads a JSON body for `POST`/`PUT`/`PATCH`. No fix needed — the gap no longer applies to any code that exists.
 
 ---
 

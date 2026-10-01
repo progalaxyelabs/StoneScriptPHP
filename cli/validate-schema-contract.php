@@ -167,7 +167,7 @@ function fetch_live_function_signature($conn, string $fnName): array|string
     if (count($rows) === 0) {
         return [];
     }
-    // Framework convention (documented in real fleet SQL) is one overload per
+    // Framework convention (documented in real platforms SQL) is one overload per
     // function name; if more than one exists, take the most recently created
     // (highest oid) but flag it via a warning the caller can surface.
     $row = $rows[0];

@@ -22,13 +22,13 @@ use StoneScriptPHP\Tenancy\TenantProvisioner;
  *      UNCONDITIONALLY before idempotency_key was ever checked — a retry
  *      physically provisioned a new, orphaned tenant database every time.
  *      Fixed via findExistingTenantId() + the existing-tenant guard.
- *   #3 tenant_name: only store_name existed, contradicting AUTH-SPEC's own
+ *   #3 tenant_name: only store_name existed, contradicting the auth contract's own
  *      canonical field name — a spec-compliant client silently got a blank
  *      tenant name (reflection-based property injection drops unmatched
  *      keys with no error). Fixed by making tenant_name the only accepted
  *      field name (store_name later removed entirely).
  *   #5 oauth_state: missing entirely — a downstream platform needed it for
- *      its OAuth-signup-then-provision handoff (AUTH-SPEC §3d) and had to
+ *      its OAuth-signup-then-provision handoff (the auth contract) and had to
  *      reimplement provision-tenant from scratch in part because of this.
  *      Fixed via ExternalAuthServiceClient::promoteOAuthConnection().
  *
