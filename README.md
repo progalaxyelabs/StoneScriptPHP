@@ -66,6 +66,33 @@ $client->createMembership([
 backend automation only — for frontend login and token handling, use the Angular
 client (`ngx-stonescriptphp-client`) instead.
 
+## Subscription enforcement: read-only by default (v10)
+
+When a tenant's subscription or trial is expired, inactive, or missing, the framework keeps
+the customer's data accessible instead of locking them out:
+
+| Request | Result |
+|---|---|
+| `GET` / `HEAD` / `OPTIONS` | allowed |
+| writes on the allow-list (`/auth`, `/account` incl. deletion, `/subscription`, `/export`, `/internal`, `/health` + your `write_allow_list`) | allowed |
+| any other write | **HTTP 423**, `data.error_code` = `READ_ONLY_TRIAL_EXPIRED` / `READ_ONLY_PLAN_ENDED` / `READ_ONLY_NO_SUBSCRIPTION` |
+
+Every authenticated response carries `X-Subscription-State` (`ok`, `trial_ending; ends_at=..; days=..`,
+`plan_ending; ...`, `read_only; ended_at=..; reason=..`) so a client can show a warning banner with
+no extra call (default window: 7 days).
+
+```php
+'subscription' => [
+    'expired_mode'         => 'read_only',        // default. 'block' = legacy 402 lockout
+    'write_allow_list'     => ['/devices/pair'],  // extra writes allowed while read-only
+    'warning_days'         => 7,
+    'missing_subscription' => 'read_only',        // or 'allow'
+],
+```
+
+**Behaviour change in v10:** earlier versions returned HTTP 402 on every call. Set
+`'expired_mode' => 'block'` to keep that. See the CHANGELOG for details.
+
 ## Contributing to the framework
 
 ```bash

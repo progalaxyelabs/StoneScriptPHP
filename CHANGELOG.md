@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0]
+
+### BREAKING (behaviour change, default) — expired subscriptions are READ-ONLY, not locked out
+
+`SubscriptionMiddleware` no longer answers **HTTP 402** to every request of a tenant whose
+subscription/trial has expired. The new default (`expired_mode => 'read_only'`):
+
+- **GET / HEAD / OPTIONS pass** — customers can always view and export their own data.
+- **Every other method is refused with HTTP 423** (`status: "error"`), with a stable
+  machine-readable payload in `data`: `error_code` (`READ_ONLY_TRIAL_EXPIRED`,
+  `READ_ONLY_PLAN_ENDED` or `READ_ONLY_NO_SUBSCRIPTION`), `subscription_state`, `reason`,
+  `status`, `is_trial`, `ended_at` (ISO-8601 UTC).
+- **Write allow-list** (always writable): `/auth`, `/account` (incl. account deletion/cancel —
+  data-erasure rights), `/subscription`, `/export`, `/internal`, `/health`. Add more through
+  `write_allow_list` (extras only; the defaults cannot be removed). Entries may be method-scoped
+  (`'POST /devices/pair'`). A leading `/api` path segment is ignored when matching.
+- **Advance warning / state header**: every authenticated, non-exempt response carries
+  `X-Subscription-State`: `ok` | `trial_ending; ends_at=<iso>; days=<n>` |
+  `plan_ending; ends_at=<iso>; days=<n>` | `read_only; ended_at=<iso>; reason=<reason>`.
+  The warning window is `warning_days` (default 7). `CorsMiddleware` now sends
+  `Access-Control-Expose-Headers: X-Subscription-State` by default (new 6th constructor arg
+  `$exposedHeaders`).
+- **No subscription row** is treated like an expired subscription (read-only) instead of 402;
+  `missing_subscription => 'allow'` opts out. DB/gateway errors still **fail open**.
+
+**Restore the old behaviour** with `'subscription' => ['expired_mode' => 'block']`
+(402 `SUBSCRIPTION_EXPIRED`, legacy exempt paths). In block mode the 402 body is now produced
+through the normal `ApiResponse` envelope, so `error_code` sits in `data.error_code`
+(previously top-level `error_code`).
+
+`SubscriptionMiddleware`'s constructor changed (named args: `expiredMode`, `exemptPaths`,
+`writeAllowList`, `warningDays`, `missingSubscription`, plus `statusProvider`/`clock` test seams)
+and `Application::run()` now builds it from the `subscription` config
+(`SubscriptionMiddleware::fromConfig()`); previously config was ignored. `exempt_paths` default
+is now mode-dependent. New: `SubscriptionState` value object. Apps that registered
+`new SubscriptionMiddleware([...paths])` positionally must switch to `exemptPaths:`.
+
+**Why a major version:** the change is more permissive on the wire, but a documented default
+response (402 on every call) changes to different statuses (200/423) and a new header, and
+clients that key off 402 will change behaviour. Apps on `^9` must not receive that silently
+through `composer update`; adopting 10.x is an explicit decision, and `expired_mode => 'block'`
+is the one-line escape hatch.
+
 ## [9.19.0]
 
 ### Changed

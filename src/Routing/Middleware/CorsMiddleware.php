@@ -12,6 +12,7 @@ class CorsMiddleware implements MiddlewareInterface
     private array $allowedHeaders;
     private bool $allowCredentials;
     private int $maxAge;
+    private array $exposedHeaders;
 
     /**
      * @param array $allowedOrigins Array of allowed origins (e.g., ['https://example.com'])
@@ -19,13 +20,16 @@ class CorsMiddleware implements MiddlewareInterface
      * @param array $allowedHeaders Array of allowed headers (default: common headers)
      * @param bool $allowCredentials Whether to allow credentials (default: true)
      * @param int $maxAge Max age for preflight cache in seconds (default: 900)
+     * @param array $exposedHeaders Response headers browsers may read (default: X-Subscription-State,
+     *                              the subscription read-only/warning signal)
      */
     public function __construct(
         array $allowedOrigins = [],
         array $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         array $allowedHeaders = ['Alt-Used', 'Content-Type', 'Authorization'],
         bool $allowCredentials = true,
-        int $maxAge = 900
+        int $maxAge = 900,
+        array $exposedHeaders = ['X-Subscription-State']
     ) {
         // Deliberately NOT a wildcard-match-all: '*' is stripped (with a loud
         // warning, not a silent no-op) rather than special-cased to mean "match
@@ -54,6 +58,7 @@ class CorsMiddleware implements MiddlewareInterface
         $this->allowedHeaders = $allowedHeaders;
         $this->allowCredentials = $allowCredentials;
         $this->maxAge = $maxAge;
+        $this->exposedHeaders = $exposedHeaders;
     }
 
     /**
@@ -91,6 +96,9 @@ class CorsMiddleware implements MiddlewareInterface
         }
 
         header('Access-Control-Max-Age: ' . $this->maxAge);
+        if ($this->exposedHeaders !== []) {
+            header('Access-Control-Expose-Headers: ' . implode(', ', $this->exposedHeaders));
+        }
         header('Vary: Origin');
 
         // Handle preflight OPTIONS request

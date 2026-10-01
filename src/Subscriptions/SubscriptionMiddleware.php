@@ -9,58 +9,132 @@ use StoneScriptPHP\Database;
 use StoneScriptPHP\Routing\MiddlewareInterface;
 
 /**
- * Subscription enforcement middleware.
+ * Subscription enforcement middleware (v10: read-only by default).
  *
- * Checks subscription status from the platform's main database.
- * Blocks tenants with expired or inactive subscriptions with HTTP 402 Payment Required.
+ * Reads the tenant's status from the platform's main database via
+ * `sub_get_status()` and applies one of two enforcement modes when the
+ * subscription (or trial) is expired / inactive:
  *
- * Fail-closed for missing tenants: if sub_get_status() returns NULL (no subscription row),
- * returns 402. Only fail-open on DB errors/exceptions — to avoid blocking users
- * due to transient infrastructure issues.
+ *  - `read_only` (DEFAULT) — GET/HEAD/OPTIONS pass; every other method is
+ *    refused with HTTP 423 and a stable `data.error_code`
+ *    (READ_ONLY_TRIAL_EXPIRED | READ_ONLY_PLAN_ENDED | READ_ONLY_NO_SUBSCRIPTION),
+ *    except for paths on the write allow-list (auth, account deletion/cancel,
+ *    subscription routes, ... — see DEFAULT_WRITE_ALLOW_LIST). A customer's
+ *    data is never held hostage and the right to erasure always works.
+ *  - `block` — the legacy lockout: every non-exempt path gets HTTP 402.
  *
- * Must be registered AFTER JwtAuthMiddleware (or equivalent) so that the auth() context
- * is available with a resolved tenant_id.
+ * Every authenticated, non-exempt response also carries an
+ * `X-Subscription-State` header so clients can show a banner without an
+ * extra call:
+ *     ok
+ *     trial_ending; ends_at=2026-10-10T00:00:00Z; days=3
+ *     plan_ending;  ends_at=...; days=N
+ *     read_only; ended_at=2026-09-10T00:00:00Z; reason=trial_expired
  *
- * Usage:
+ * Failure policy:
+ *  - DB/gateway error → fail OPEN (no header, request proceeds).
+ *  - No subscription row → treated like an expired subscription (read-only,
+ *    or 402 in `block` mode): reads still work, writes are refused. Opt out
+ *    with `missing_subscription => 'allow'`.
  *
- *   $router->addMiddleware(new SubscriptionMiddleware(
- *       exempt_paths: ['/health', '/auth/', '/subscription/status', '/account/', '/export'],
- *   ));
- *
- *   // Or via SubscriptionRoutes config:
- *   $middleware = new SubscriptionMiddleware(
- *       exempt_paths: $config->exemptPaths,
- *   );
+ * Must be registered AFTER JwtAuthMiddleware so auth() has a tenant_id.
  *
  * @package StoneScriptPHP\Subscriptions
  */
 class SubscriptionMiddleware implements MiddlewareInterface
 {
-    /** Path prefixes and exact paths that bypass subscription enforcement. */
+    public const MODE_READ_ONLY = 'read_only';
+    public const MODE_BLOCK     = 'block';
+
+    public const HEADER_NAME = 'X-Subscription-State';
+
+    /** Always-writable paths in read_only mode; config can add to, never remove from, these. */
+    public const DEFAULT_WRITE_ALLOW_LIST = [
+        '/health',
+        '/auth',
+        '/account',
+        '/subscription',
+        '/export',
+        '/internal',
+    ];
+
+    /** Exempt (no lookup, no header) defaults per mode. */
+    public const DEFAULT_EXEMPT_READ_ONLY = ['/health', '/auth/'];
+    public const DEFAULT_EXEMPT_BLOCK     = ['/health', '/auth/', '/subscription/status', '/account/', '/export'];
+
+    private string $expiredMode;
     private array $exemptPaths;
+    private array $writeAllowList;
+    private int $warningDays;
+    private bool $allowMissingSubscription;
+    /** @var callable(string): ?array */
+    private $statusProvider;
+    /** @var callable(): \DateTimeImmutable */
+    private $clock;
+    private bool $customProviderGiven;
 
     /**
-     * @param array $exemptPaths Path prefixes / exact paths exempt from enforcement.
-     *                           Trailing slash = prefix match (e.g. '/auth/' matches '/auth/login').
-     *                           No trailing slash = exact match or path-component prefix.
+     * @param string        $expiredMode              'read_only' (default) or 'block' (legacy 402 lockout).
+     * @param array|null    $exemptPaths              Skip enforcement AND the header entirely. Trailing slash =
+     *                                                prefix match; no slash = exact or path-component prefix.
+     *                                                null = mode default.
+     * @param array         $writeAllowList           EXTRA write-allowed paths, merged with DEFAULT_WRITE_ALLOW_LIST.
+     *                                                An entry may be prefixed with a method ("POST /devices/pair").
+     * @param int           $warningDays              Days before expiry the warning state starts (default 7).
+     * @param string        $missingSubscription      'read_only' (default; follows expiredMode) or 'allow'.
+     * @param callable|null $statusProvider           fn(string $tenantId): ?array — decoded sub_get_status row, null
+     *                                                for no row; throw to signal a lookup failure (fail open).
+     *                                                Default queries the main DB through the gateway.
+     * @param callable|null $clock                    fn(): DateTimeImmutable (test seam).
      */
     public function __construct(
-        array $exemptPaths = [
-            '/health',
-            '/auth/',
-            '/subscription/status',
-            '/account/',
-            '/export',
-        ]
+        string $expiredMode = self::MODE_READ_ONLY,
+        ?array $exemptPaths = null,
+        array $writeAllowList = [],
+        int $warningDays = 7,
+        string $missingSubscription = 'read_only',
+        ?callable $statusProvider = null,
+        ?callable $clock = null,
     ) {
-        $this->exemptPaths = $exemptPaths;
+        if (!in_array($expiredMode, [self::MODE_READ_ONLY, self::MODE_BLOCK], true)) {
+            throw new \InvalidArgumentException(
+                "SubscriptionMiddleware: expired_mode must be 'read_only' or 'block', got '{$expiredMode}'"
+            );
+        }
+        if (!in_array($missingSubscription, ['read_only', 'allow'], true)) {
+            throw new \InvalidArgumentException(
+                "SubscriptionMiddleware: missing_subscription must be 'read_only' or 'allow', got '{$missingSubscription}'"
+            );
+        }
+
+        $this->expiredMode              = $expiredMode;
+        $this->exemptPaths              = $exemptPaths
+            ?? ($expiredMode === self::MODE_BLOCK ? self::DEFAULT_EXEMPT_BLOCK : self::DEFAULT_EXEMPT_READ_ONLY);
+        $this->writeAllowList           = array_values(array_unique(array_merge(self::DEFAULT_WRITE_ALLOW_LIST, $writeAllowList)));
+        $this->warningDays              = $warningDays;
+        $this->allowMissingSubscription = $missingSubscription === 'allow';
+        $this->customProviderGiven      = $statusProvider !== null;
+        $this->statusProvider           = $statusProvider ?? fn(string $t): ?array => $this->queryGateway($t);
+        $this->clock                    = $clock ?? fn(): \DateTimeImmutable => new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+    }
+
+    /** Build from the `subscription` application config (see SubscriptionConfig). */
+    public static function fromConfig(SubscriptionConfig $config): self
+    {
+        return new self(
+            expiredMode: $config->expiredMode,
+            exemptPaths: $config->exemptPaths,
+            writeAllowList: $config->writeAllowList,
+            warningDays: $config->warningDays,
+            missingSubscription: $config->missingSubscription,
+        );
     }
 
     public function handle(array $request, callable $next): ?ApiResponse
     {
         $path = $this->extractPath();
 
-        if ($this->isExemptPath($path)) {
+        if ($this->matchesAny($path, $this->exemptPaths)) {
             return $next($request);
         }
 
@@ -70,114 +144,146 @@ class SubscriptionMiddleware implements MiddlewareInterface
             return $next($request);
         }
 
-        // DB_MODE=direct/pgandroid: subscription billing is a gateway-mode-only
-        // concept (checkSubscription() calls Database::getGatewayClient(), which
-        // throws outside gateway mode — already fails safely OPEN via the
-        // catch below, but paying for a guaranteed-fail call + exception on
-        // every single authenticated request is wasteful, and semantically a
-        // non-gateway deployment has no SaaS billing relationship to check
-        // against in the first place. Found 2026-08-01 by the android-server
-        // manual-build-v2 pass — same root cause as GatewayTenantMiddleware's
-        // fix (see Database::isGatewayMode()'s docblock).
-        if (!Database::isGatewayMode()) {
+        // Billing is a gateway-mode-only concept; a custom statusProvider
+        // (tests, or an app with its own source) bypasses the check.
+        if (!$this->customProviderGiven && !Database::isGatewayMode()) {
             return $next($request);
         }
 
-        $result = $this->checkSubscription((string) $user->tenant_id);
+        $tenantId = (string) $user->tenant_id;
 
-        if ($result === null) {
-            // DB query failed — fail open to avoid blocking users during infrastructure issues
-            log_debug('SubscriptionMiddleware: query failed, failing open for tenant=' . $user->tenant_id);
+        try {
+            $row = ($this->statusProvider)($tenantId);
+        } catch (\Throwable $e) {
+            // Fail OPEN on lookup errors — never block users on infra trouble.
+            error_log('[SubscriptionMiddleware] lookup failed for tenant=' . $tenantId . ': ' . $e->getMessage());
             return $next($request);
         }
 
-        if ($result === false) {
-            // No subscription row found or subscription inactive — fail closed
-            error_log('[SubscriptionMiddleware] Blocked tenant=' . $user->tenant_id . ' — subscription expired or not found');
-            http_response_code(402);
-            header('Content-Type: application/json');
-            echo json_encode([
-                'status'     => 'error',
-                'message'    => 'Your subscription has expired. Please renew to continue using this service.',
-                'error_code' => 'SUBSCRIPTION_EXPIRED',
-            ]);
-            exit;
+        if ($row === null && $this->allowMissingSubscription) {
+            return $next($request);
         }
 
-        return $next($request);
+        $state = SubscriptionState::fromRow($row, ($this->clock)(), $this->warningDays);
+        $this->sendHeader(self::HEADER_NAME, $state->toHeaderValue());
+
+        if (!$state->isReadOnly()) {
+            return $next($request);
+        }
+
+        // ----- expired / inactive / no row -----
+        if ($this->expiredMode === self::MODE_BLOCK) {
+            error_log('[SubscriptionMiddleware] Blocked tenant=' . $tenantId . ' — ' . ($state->reason ?? 'inactive'));
+            return new ApiResponse(
+                'error',
+                'Your subscription has expired. Please renew to continue using this service.',
+                ['error_code' => 'SUBSCRIPTION_EXPIRED'],
+                402,
+            );
+        }
+
+        $method = strtoupper((string) ($request['method'] ?? ($_SERVER['REQUEST_METHOD'] ?? 'GET')));
+        if (in_array($method, ['GET', 'HEAD', 'OPTIONS'], true) || $this->isWriteAllowed($method, $path)) {
+            return $next($request);
+        }
+
+        return new ApiResponse(
+            'error',
+            'This account is read-only because its subscription has ended. You can still view your data.',
+            $state->toRefusalData(),
+            423,
+        );
+    }
+
+    /** Overridable seam so tests can capture headers (header() is a no-op once PHPUnit output started). */
+    protected function sendHeader(string $name, string $value): void
+    {
+        if (!headers_sent()) {
+            header($name . ': ' . $value);
+        }
+    }
+
+    private function isWriteAllowed(string $method, string $path): bool
+    {
+        foreach ($this->writeAllowList as $entry) {
+            $entry = trim((string) $entry);
+            if (preg_match('/^([A-Za-z]+)\s+(\/.*)$/', $entry, $m)) {
+                if (strtoupper($m[1]) !== $method) {
+                    continue;
+                }
+                $entry = $m[2];
+            }
+            if ($this->matchesAny($path, [$entry])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * Query main DB for subscription status via sub_get_status().
-     *
-     * @param string $tenantId
-     * @return bool|null true = active, false = expired/blocked/not found, null = query failed (fail open)
+     * Match $path (and $path with a leading /api segment stripped, so config
+     * written without the prefix works for both) against prefix/exact entries.
      */
-    private function checkSubscription(string $tenantId): ?bool
+    private function matchesAny(string $path, array $entries): bool
     {
-        try {
-            // Always query the main DB (tenant_id = null)
-            $gw = Database::getGatewayClient();
-            $prevTenant = $gw->getTenantId();
-            $gw->setTenantId(null);
-
-            try {
-                $result = Database::fn('sub_get_status', [$tenantId]);
-            } finally {
-                $gw->setTenantId($prevTenant);
-            }
-
-            $data = $result[0] ?? null;
-            if (is_object($data)) {
-                $data = (array) $data;
-            }
-            // Gateway pre-decodes JSON — handle both string and array forms
-            if (isset($data['sub_get_status'])) {
-                $data = is_string($data['sub_get_status'])
-                    ? json_decode($data['sub_get_status'], true)
-                    : $data['sub_get_status'];
-            }
-
-            if (!$data) {
-                // No subscription row — fail closed (tenant should have been provisioned)
-                error_log('[SubscriptionMiddleware] No subscription found for tenant_id=' . $tenantId);
-                return false;
-            }
-
-            return (bool) ($data['is_active'] ?? false);
-        } catch (\Exception $e) {
-            error_log('[SubscriptionMiddleware] Error for tenant=' . $tenantId . ': ' . $e->getMessage());
-            return null; // fail open on exceptions
+        $candidates = [$path];
+        $stripped = preg_replace('#^/api(?=/|$)#', '', $path);
+        if ($stripped !== null && $stripped !== $path) {
+            $candidates[] = $stripped === '' ? '/' : $stripped;
         }
+
+        foreach ($candidates as $p) {
+            foreach ($entries as $entry) {
+                if (str_ends_with($entry, '/')) {
+                    if ($p === rtrim($entry, '/') || str_starts_with($p, $entry)) {
+                        return true;
+                    }
+                } elseif ($p === $entry || str_starts_with($p, $entry . '/')) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Default provider: main-DB `sub_get_status()` through the gateway.
+     *
+     * @return array|null decoded row, null when the tenant has no subscription row
+     * @throws \Throwable on lookup failure (caller fails open)
+     */
+    private function queryGateway(string $tenantId): ?array
+    {
+        $gw = Database::getGatewayClient();
+        $prevTenant = $gw->getTenantId();
+        $gw->setTenantId(null); // always the main DB
+
+        try {
+            $result = Database::fn('sub_get_status', [$tenantId]);
+        } finally {
+            $gw->setTenantId($prevTenant);
+        }
+
+        $data = $result[0] ?? null;
+        if (is_object($data)) {
+            $data = (array) $data;
+        }
+        // Gateway pre-decodes JSON — handle both string and array forms
+        if (is_array($data) && array_key_exists('sub_get_status', $data)) {
+            $data = is_string($data['sub_get_status'])
+                ? json_decode($data['sub_get_status'], true)
+                : $data['sub_get_status'];
+        }
+        if (is_object($data)) {
+            $data = (array) $data;
+        }
+
+        return is_array($data) && $data !== [] ? $data : null;
     }
 
     private function extractPath(): string
     {
         $uri = $_SERVER['REQUEST_URI'] ?? '/';
         return parse_url($uri, PHP_URL_PATH) ?? '/';
-    }
-
-    /**
-     * Returns true if $path matches any exempt prefix or exact path.
-     *
-     * Trailing slash in exempt paths = prefix match (e.g. '/auth/' matches '/auth/login').
-     * No trailing slash = exact match OR path-component prefix (e.g. '/export' matches '/export/csv').
-     */
-    private function isExemptPath(string $path): bool
-    {
-        foreach ($this->exemptPaths as $exempt) {
-            if (str_ends_with($exempt, '/')) {
-                $prefix = rtrim($exempt, '/');
-                if ($path === $prefix || str_starts_with($path, $exempt)) {
-                    return true;
-                }
-            } else {
-                if ($path === $exempt || str_starts_with($path, $exempt . '/')) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 }

@@ -20,6 +20,7 @@ use StoneScriptPHP\Auth\AuthRoutes;
 use StoneScriptPHP\Auth\AuthContext;
 use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthRoutes;
 use StoneScriptPHP\Auth\BuiltinOAuth\GoogleOAuthRoutes;
+use StoneScriptPHP\Subscriptions\SubscriptionConfig;
 use StoneScriptPHP\Subscriptions\SubscriptionMiddleware;
 use StoneScriptPHP\Subscriptions\SubscriptionRoutes;
 use StoneScriptPHP\Routing\Middleware\StoreAccessMiddleware;
@@ -213,7 +214,7 @@ class Application
         // Add SubscriptionMiddleware if subscription config is present.
         // Runs after StoreAccessMiddleware so tenant context is already set (T3).
         if ($subscriptionEnabled) {
-            $router->use(new SubscriptionMiddleware());
+            $router->use(SubscriptionMiddleware::fromConfig(new SubscriptionConfig($subscriptionConfig)));
         }
 
         // Add custom middleware

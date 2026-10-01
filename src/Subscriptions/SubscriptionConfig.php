@@ -23,6 +23,10 @@ use StoneScriptPHP\Billing\Contracts\PaymentProvider;
  *                                                     // Razorpay driver — see Billing/README.md)
  *       'admin_api_key' => 'secret-key',             // enables admin activate
  *       'prefix' => '/subscription',                 // optional, default: /subscription
+ *       'expired_mode' => 'read_only',               // default; 'block' = legacy 402 lockout
+ *       'write_allow_list' => ['/devices/pair'],     // extra writes allowed while read-only
+ *       'warning_days' => 7,                         // X-Subscription-State warning window
+ *       'missing_subscription' => 'read_only',       // or 'allow'
  *   ]);
  *
  * @package StoneScriptPHP\Subscriptions
@@ -54,6 +58,18 @@ class SubscriptionConfig
     /** Path prefixes / exact paths that bypass SubscriptionMiddleware enforcement */
     public readonly array $exemptPaths;
 
+    /** 'read_only' (default, HTTP 423 on writes) or 'block' (legacy HTTP 402 lockout) */
+    public readonly string $expiredMode;
+
+    /** EXTRA paths whose writes stay allowed in read_only mode (merged with the safe defaults) */
+    public readonly array $writeAllowList;
+
+    /** Days before expiry at which the X-Subscription-State warning starts */
+    public readonly int $warningDays;
+
+    /** 'read_only' (default) or 'allow' — what to do for a tenant with no subscription row */
+    public readonly string $missingSubscription;
+
     /** @var array<string, bool> Feature toggles */
     private array $features;
 
@@ -75,13 +91,17 @@ class SubscriptionConfig
         $this->adminApiKey = $options['admin_api_key']
             ?? ($env->ADMIN_API_KEY ?? null);
 
-        $this->exemptPaths = $options['exempt_paths'] ?? [
-            '/health',
-            '/auth/',
-            '/subscription/status',
-            '/account/',
-            '/export',
-        ];
+        $this->expiredMode = (string) ($options['expired_mode'] ?? SubscriptionMiddleware::MODE_READ_ONLY);
+        $this->writeAllowList = array_values((array) ($options['write_allow_list'] ?? []));
+        $this->warningDays = (int) ($options['warning_days'] ?? 7);
+        $this->missingSubscription = (string) ($options['missing_subscription'] ?? 'read_only');
+
+        // Mode-dependent defaults (see SubscriptionMiddleware::DEFAULT_EXEMPT_*).
+        $this->exemptPaths = $options['exempt_paths'] ?? (
+            $this->expiredMode === SubscriptionMiddleware::MODE_BLOCK
+                ? SubscriptionMiddleware::DEFAULT_EXEMPT_BLOCK
+                : SubscriptionMiddleware::DEFAULT_EXEMPT_READ_ONLY
+        );
 
         // Feature toggles — razorpay_webhook and admin_activate are opt-in
         $this->features = [
