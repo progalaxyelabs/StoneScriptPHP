@@ -50,6 +50,16 @@ clients that key off 402 will change behaviour. Apps on `^9` must not receive th
 through `composer update`; adopting 10.x is an explicit decision, and `expired_mode => 'block'`
 is the one-line escape hatch.
 
+### Added — `php stone generate client` emits HTTP 423 / read-only handling
+
+Regenerated clients (`src/errors.ts`, `src/http.ts`, `src/client.ts`, `src/index.ts`) now:
+- throw a typed **`ReadOnlyError`** (`errorCode`, `endedAt`, `reason`, `isTrial`; `httpStatus` 423) for
+  `423` + `data.error_code` `READ_ONLY_*`, via `isReadOnlyError(e)` or a per-call `e423` handler;
+  never a token refresh, never the default toast, never counted by the error ladder;
+- parse the `X-Subscription-State` header on every response and publish a `SubscriptionNotice`
+  to `ApiClient.setSubscriptionNoticeListener(fn)` (ngx-stonescriptphp-client wires this for you).
+Regenerate every platform client after upgrading (`php stone generate client --tenancy=...`).
+
 ## [9.19.0]
 
 ### Changed

@@ -726,7 +726,7 @@ function verbatimHttpTs(): string
 // DO NOT EDIT MANUALLY.
 
 import { TokenStore } from './tokens';
-import { ApiError }   from './errors';
+import { ApiError, ReadOnlyError, ReadOnlyErrorCode, SubscriptionNotice, parseSubscriptionStateHeader } from './errors';
 
 export interface HttpParams {
   [key: string]: string | number | boolean | null | undefined;
@@ -834,7 +834,13 @@ export type Notifier = (message: string, kind: 'error' | 'warn' | 'info') => voi
  * MinimalHttp itself never clears tokens or redirects. */
 export type ReauthRequiredHandler = () => void;
 
+/** Receives the subscription state (parsed `X-Subscription-State` header, or the
+ * HTTP 423 payload) after responses, so an app can show a trial-ending / read-only
+ * banner without an extra call. Fired only when the server sent the signal. */
+export type SubscriptionNoticeListener = (notice: SubscriptionNotice) => void;
+
 export class MinimalHttp {
+  private subscriptionNoticeListener: SubscriptionNoticeListener | null = null;
   private refreshHandler: RefreshHandler | null = null;
   private notifier: Notifier | null = null;
   private reauthRequiredHandler: ReauthRequiredHandler | null = null;
@@ -877,6 +883,11 @@ export class MinimalHttp {
   /** Inject the terminal reauth handler (§6 modal trigger). Pass null to clear. */
   setReauthRequiredHandler(handler: ReauthRequiredHandler | null): void {
     this.reauthRequiredHandler = handler;
+  }
+
+  /** Inject the subscription-notice listener. Pass null to clear. */
+  setSubscriptionNoticeListener(listener: SubscriptionNoticeListener | null): void {
+    this.subscriptionNoticeListener = listener;
   }
 
   async get<T = unknown>(path: string, params?: HttpParams, options?: HttpRequestOptions, handlers?: ErrorHandlers<T>): Promise<T> {
@@ -1058,6 +1069,11 @@ export class MinimalHttp {
     // after a successful fetch assignment).
     const response = res as Response;
 
+    // Subscription state signal (framework SubscriptionMiddleware). Published
+    // for every response that carries it, success or error, before parsing.
+    const headerNotice = parseSubscriptionStateHeader(response.headers?.get?.('X-Subscription-State'));
+    if (headerNotice) this.publishNotice(headerNotice);
+
     let data: unknown;
     try {
       data = await response.json();
@@ -1083,6 +1099,32 @@ export class MinimalHttp {
       return envelope['data'] as T;
     }
 
+    // HTTP 423 + READ_ONLY_* — the account is read-only. A distinct, typed
+    // ReadOnlyError: not a token-refresh case, not a toast, not a failure-ladder
+    // step. The caller (or its `e423` handler) branches on it explicitly.
+    if (response.status === 423) {
+      const d = (envelope?.['data'] ?? {}) as Record<string, unknown>;
+      const rawCode = typeof d['error_code'] === 'string' ? d['error_code'] as string : '';
+      if (rawCode.startsWith('READ_ONLY_')) {
+        const endedAt = typeof d['ended_at'] === 'string' ? d['ended_at'] as string : null;
+        const reason  = typeof d['reason'] === 'string' ? d['reason'] as string : null;
+        if (!headerNotice) {
+          this.publishNotice({ state: 'read_only', endsAt: null, endedAt, daysRemaining: 0, reason });
+        }
+        return await this.handleError(
+          new ReadOnlyError(
+            (envelope?.['message'] as string) ?? 'This account is read-only.',
+            envelope,
+            rawCode as ReadOnlyErrorCode,
+            endedAt,
+            reason,
+            d['is_trial'] === true,
+          ),
+          handlers,
+        );
+      }
+    }
+
     // status !== 'ok' OR non-2xx → reject with a classified ApiError. Never
     // return `data` on this path.
     const message = (envelope?.['message'] as string) ?? 'Request failed';
@@ -1106,8 +1148,19 @@ export class MinimalHttp {
     throw err;
   }
 
+  private publishNotice(notice: SubscriptionNotice): void {
+    try {
+      this.subscriptionNoticeListener?.(notice);
+    } catch {
+      // A faulty listener must never break an API call.
+    }
+  }
+
   /** Central status → default message (§5). Non-technical copy, never "HTTP 500". */
   private surfaceDefault(err: ApiError): void {
+    // Read-only refusals are a normal, expected state (see ReadOnlyError) — the
+    // caller handles them; never toast and never count toward the error ladder.
+    if (err instanceof ReadOnlyError) return;
     const s = err.httpStatus;
     let message: string;
     let kind: 'error' | 'warn' | 'info' = 'error';
@@ -1391,6 +1444,90 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
 }
+
+/**
+ * Stable machine-readable codes the framework's SubscriptionMiddleware puts in
+ * `data.error_code` of an HTTP 423 refusal (subscription ended -> read-only).
+ */
+export type ReadOnlyErrorCode =
+  | 'READ_ONLY_TRIAL_EXPIRED'
+  | 'READ_ONLY_PLAN_ENDED'
+  | 'READ_ONLY_NO_SUBSCRIPTION';
+
+/**
+ * HTTP 423: the account is READ-ONLY (expired / ended / missing subscription).
+ * Not an auth failure (no token refresh), not a generic failure (no toast). The
+ * caller branches on it explicitly, e.g. keep the form and show a "view only"
+ * notice:
+ *
+ *   try { await api.bills.create(b); }
+ *   catch (e) { if (isReadOnlyError(e)) { showViewOnly(e.endedAt); return; } throw e; }
+ *
+ * Or per call: `{ e423: (err) => ... }` — the handler receives this ReadOnlyError.
+ */
+export class ReadOnlyError extends ApiError {
+  constructor(
+    message: string,
+    response: unknown,
+    /** Same value as `code`, typed. */
+    public readonly errorCode: ReadOnlyErrorCode,
+    /** ISO-8601 UTC instant the subscription/trial ended, when known. */
+    public readonly endedAt: string | null,
+    /** 'trial_expired' | 'plan_ended' | 'no_subscription' */
+    public readonly reason: string | null,
+    public readonly isTrial: boolean,
+  ) {
+    super(message, 423, response, errorCode);
+    this.name = 'ReadOnlyError';
+  }
+}
+
+/** Duck-typed so it also works across package/bundle boundaries. */
+export function isReadOnlyError(e: unknown): e is ReadOnlyError {
+  return !!e && typeof e === 'object'
+    && (e as { name?: unknown }).name === 'ReadOnlyError'
+    && (e as { httpStatus?: unknown }).httpStatus === 423;
+}
+
+export type SubscriptionNoticeState = 'ok' | 'trial_ending' | 'plan_ending' | 'read_only';
+
+/** Parsed `X-Subscription-State` response header (or the 423 payload). */
+export interface SubscriptionNotice {
+  state: SubscriptionNoticeState;
+  /** ISO-8601 UTC; set for trial_ending / plan_ending. */
+  endsAt: string | null;
+  /** ISO-8601 UTC; set for read_only when known. */
+  endedAt: string | null;
+  daysRemaining: number | null;
+  /** read_only only: 'trial_expired' | 'plan_ended' | 'no_subscription'. */
+  reason: string | null;
+}
+
+/**
+ * Parse `ok` | `trial_ending; ends_at=..; days=..` | `plan_ending; ...` |
+ * `read_only; ended_at=..; reason=..`. Returns null for a missing/unknown value.
+ */
+export function parseSubscriptionStateHeader(value: string | null | undefined): SubscriptionNotice | null {
+  if (!value) return null;
+  const parts = value.split(';').map((p) => p.trim()).filter((p) => p.length > 0);
+  const state = parts[0];
+  if (state !== 'ok' && state !== 'trial_ending' && state !== 'plan_ending' && state !== 'read_only') {
+    return null;
+  }
+  const kv: Record<string, string> = {};
+  for (const p of parts.slice(1)) {
+    const i = p.indexOf('=');
+    if (i > 0) kv[p.slice(0, i).trim()] = p.slice(i + 1).trim();
+  }
+  const days = kv['days'] !== undefined ? Number(kv['days']) : NaN;
+  return {
+    state,
+    endsAt: kv['ends_at'] ?? null,
+    endedAt: kv['ended_at'] ?? null,
+    daysRemaining: Number.isFinite(days) ? days : null,
+    reason: kv['reason'] ?? null,
+  };
+}
 TS;
 }
 
@@ -1563,7 +1700,7 @@ TS;
  * CLIENT-SDK-SPEC §0 A1–A6 (approved 2026-06-14)
  */
 
-import { MinimalHttp, HttpParams, RefreshHandler, ErrorHandlers, Notifier, ReauthRequiredHandler } from './http';
+import { MinimalHttp, HttpParams, RefreshHandler, ErrorHandlers, Notifier, ReauthRequiredHandler, SubscriptionNoticeListener } from './http';
 import { TokenStore }              from './tokens';
 import * as T                      from './types';
 
@@ -1628,6 +1765,12 @@ export class ApiClient {{$tenantIdField}
   /** Inject the terminal reauth-required handler (§6 modal trigger). */
   setReauthRequiredHandler(handler: ReauthRequiredHandler | null): this {
     this.http.setReauthRequiredHandler(handler);
+    return this;
+  }
+
+  /** Inject the subscription-notice listener (X-Subscription-State / HTTP 423 read-only). */
+  setSubscriptionNoticeListener(listener: SubscriptionNoticeListener | null): this {
+    this.http.setSubscriptionNoticeListener(listener);
     return this;
   }
 {$tenantCode}{$streamingNotice}{$groupBlocks}}
@@ -2296,7 +2439,9 @@ function generateIndexTs(): string
 export { ApiClient }    from './client';
 export { TokenStore }   from './tokens';
 export { MinimalHttp }  from './http';
-export { ApiError }     from './errors';
+export { ApiError, ReadOnlyError, isReadOnlyError, parseSubscriptionStateHeader } from './errors';
+export type { ReadOnlyErrorCode, SubscriptionNotice, SubscriptionNoticeState } from './errors';
+export type { SubscriptionNoticeListener } from './http';
 export * as T           from './types';
 TS;
 }
