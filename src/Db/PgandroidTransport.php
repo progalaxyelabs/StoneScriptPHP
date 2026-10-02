@@ -27,6 +27,22 @@ use Throwable;
  * loud the first time Database::fn() is called (not at boot, matching how
  * DirectTransport only validates the pdo_pgsql extension lazily too).
  *
+ * PINNED BRIDGE VALUE-TYPING CONTRACT (the native layer, libpgandroid's
+ * pgandroid_proto_to_json(), implements this; verified by its host test):
+ * result values MUST arrive TYPED BY POSTGRES COLUMN TYPE OID, exactly as the
+ * gateway's /call decoder (stonescriptdb-gateway src/schema/pg_value.rs) does,
+ * so route code sees the same PHP types on-device and in the cloud:
+ *
+ *     bool -> true/false · int2/4/8 -> int · float4/8/numeric -> float ·
+ *     json/jsonb -> decoded array · arrays -> arrays · NULL -> null ·
+ *     text/uuid/date/timestamp/... -> string
+ *
+ * This class deliberately does NOT coerce: it cannot know a column's type
+ * from the decoded JSON, and a naive (bool)"f" is TRUE in PHP. Typing at the
+ * driver, by OID, is the only correct place — fixing it per-route (or per
+ * (bool) cast) leaves every future route silently wrong. A bridge that hands
+ * back every value as a string ("t"/"f") is a contract violation.
+ *
  * PINNED BRIDGE ERROR-SIGNALING CONTRACT (the libphpandroid C++ host must
  * implement this exact half; PHP-side classification lives in
  * isConnectionFailure()/extractSqlstate() below, reusing DirectTransport's

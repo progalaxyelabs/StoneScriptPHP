@@ -270,4 +270,31 @@ class PgandroidTransportTest extends TestCase
         $this->assertSame('f', $rows[0]['is_deleted']);
         $this->assertNotSame(true, $rows[0]['is_deleted'], 'PHP truthy-string footgun: "f" must never become boolean true here.');
     }
+
+    /**
+     * VALUE-TYPING CONTRACT round-trip (the offline ship-blocker): a typed
+     * bridge result -- exactly what libpgandroid's OID-aware serialiser emits
+     * for `SELECT false AS is_complete, NULL::text AS establishment_type, ...`
+     * -- must reach the caller with native PHP types intact: bool true/false,
+     * NULL, int, float, decoded json, arrays. `=== false` is the whole point.
+     */
+    public function test_typed_bridge_result_round_trips_bool_null_int_float_json_array(): void
+    {
+        $nativeJson = '[{"is_complete":false,"disabled":true,"establishment_type":null,'
+            . '"qty":42,"mrp":12.5,"custom_data":{"gstin":"29ABC","n":[1,2]},"ids":[1,2,3],"flags":[true,null]}]';
+
+        $transport = new PgandroidTransport(fn (): string => $nativeJson);
+        $row = $transport->callFunction('get_onboarding_status', [])[0];
+
+        $this->assertSame(false, $row['is_complete']);
+        $this->assertSame(true, $row['disabled']);
+        $this->assertNull($row['establishment_type']);
+        $this->assertSame(42, $row['qty']);
+        $this->assertSame(12.5, $row['mrp']);
+        $this->assertSame(['gstin' => '29ABC', 'n' => [1, 2]], $row['custom_data']);
+        $this->assertSame([1, 2, 3], $row['ids']);
+        $this->assertSame([true, null], $row['flags']);
+        // The footgun this contract exists to prevent:
+        $this->assertFalse((bool) $row['is_complete']);
+    }
 }
