@@ -50,10 +50,10 @@ namespace StoneScriptPHP\Http;
  * Validation of trust entries
  * ---------------------------
  * `*`, `/0` and any prefix shorter than public IPv4 /12 or IPv6 /32 are REJECTED.
- * A trust entry names proxies, not other people's networks. /12 is the broadest
- * public IPv4 block a CDN publishes (Cloudflare's smallest published range is
- * /12), so a floor of /12 admits every real CDN list while refusing public /8s
- * and /9-/11s that no proxy fleet owns; /32 is a typical IPv6 ISP/organisation
+ * A trust entry names proxies, not other people's networks. The widest range any
+ * major CDN publishes is /13 (Cloudflare, verified 2026-10-10); a /12 floor leaves
+ * one bit of margin, so a public entry shorter than /12 cannot be a proxy fleet
+ * (public /8s to /11s are refused); /32 is a typical IPv6 ISP/organisation
  * allocation. Private-space blocks (10/8, fc00::/7, fe80::/10, ...) are exempt
  * because they are not internet-routable. IPv4-mapped IPv6 entries are
  * normalised to IPv4.
