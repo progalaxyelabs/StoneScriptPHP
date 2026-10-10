@@ -372,7 +372,7 @@ final class ClientIpTest extends TestCase
 
     public function test_prefix_floor(): void
     {
-        // public IPv4 >= /12 (CDN-published minimum), IPv6 >= /32, private blocks exempt
+        // public IPv4 >= /12 (floor: widest CDN range is /13, so /12 leaves a bit of margin), IPv6 >= /32, private blocks exempt
         $this->setEnv('TRUSTED_PROXIES', '10.0.0.0/8 11.0.0.0/8 16.0.0.0/11 17.0.0.0/12 104.16.0.0/12 100.64.0.0/10 127.0.0.0/8 2001:db8::/32 2001::/16 fc00::/7');
         $this->assertSame(
             ['10.0.0.0/8', '17.0.0.0/12', '104.16.0.0/12', '100.64.0.0/10', '127.0.0.0/8', '2001:db8::/32', 'fc00::/7'],
@@ -473,6 +473,15 @@ final class ClientIpTest extends TestCase
     }
 
     // ---- review #2 -------------------------------------------------------------
+
+    public function test_expand_memo_key_cannot_collide(): void
+    {
+        $server = ['REMOTE_ADDR' => '10.0.0.6', 'HTTP_X_FORWARDED_FOR' => '203.0.113.9'];
+        // first: two valid entries (memoised)
+        $this->assertSame('203.0.113.9', ClientIp::resolve($server, ['10.0.0.5', '10.0.0.6']));
+        // one invalid entry that merely LOOKS like the joined key must not reuse that memo
+        $this->assertSame('10.0.0.6', ClientIp::resolve($server, ["10.0.0.5\n10.0.0.6"]));
+    }
 
     public function test_whitelist_matches_ipv4_mapped_spelling(): void
     {

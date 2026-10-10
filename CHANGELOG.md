@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > and PHP (container behind a host proxy, load balancer, CDN, Traefik).** A proxied platform that upgrades
 > without it sees the proxy address for every visitor; all visitors share one rate-limit bucket and the whole
 > site starts answering **HTTP 429**. That is an availability outage. Platforms with nginx/fastcgi directly on
-> the internet need no change. See `docs/CLIENT-IP-AND-NGINX-STANDARD.md`.
+> the internet need no `TRUSTED_PROXIES`, **but the edge nginx must still blank the forwarding headers while
+> any app behind it is pre-11**. See `docs/CLIENT-IP-AND-NGINX-STANDARD.md`.
 
 `client_ip()` used to return the **leftmost** `X-Forwarded-For` entry (then `X-Real-IP`), both fully
 client-controlled, so every IP-keyed protection (RateLimiter, RateLimitMiddleware, CsrfTokenHandler,
@@ -23,7 +24,7 @@ HCaptchaVerifier/Middleware, ProofOfWorkMiddleware, RefreshRoute, analytics, Log
 with a forged header. Now:
 
 - New `StoneScriptPHP\Http\ClientIp` (`current()`, `resolve($server, $proxies)`, `rateKey()`, `networkPrefix()`,
-  `isInternal()`, `configure()`, `trustedProxies()`). `client_ip()` delegates to it.
+  `canonical()`, `isInternal()`, `configure()`, `trustedProxies()`). `client_ip()` delegates to it.
 - Default = `REMOTE_ADDR` only. `X-Forwarded-For` is read **only** when the peer is in the trusted-proxy list,
   walked right to left, first untrusted hop wins; malformed hop => peer. `X-Real-IP` is never read.
   Hops may be `ip`, `ipv4:port`, `[ipv6]`, `[ipv6]:port`. Output is canonical (lowercase compressed IPv6;
@@ -31,7 +32,7 @@ with a forged header. Now:
 - Config: `TRUSTED_PROXIES` (read through `Env::secret()`: `.env`, env, `_FILE`, `/run/secrets`; resolved lazily
   after `.env` is loaded; immune to php-fpm `clear_env` except for raw env, see the doc) or `trusted_proxies` in the
   `Application::run()` config. Precedence: config > `TRUSTED_PROXIES` > legacy `trust_proxy`.
-- Trust entries: `*`, `/0` and prefixes shorter than public IPv4 /12 (the widest range any major CDN publishes is /13, Cloudflare, verified 2026-10-10; /12 leaves one bit of margin) or IPv6 /32 are
+- Trust entries: `*`, `/0` and prefixes shorter than public IPv4 /12 (Cloudflare's widest published range is /13 and AWS CloudFront's is /14, verified 2026-10-10; we know of no wider CDN range; /12 leaves one bit of margin) or IPv6 /32 are
   rejected (private-space blocks such as `10.0.0.0/8` and `fc00::/7` are exempt); IPv4-mapped IPv6 entries are normalised
   to IPv4. The list is memoised per PHP process (also fine for Swoole/RoadRunner/FrankenPHP workers; changes need a restart).
   An unreadable `Env` is logged (throttled) and trusts no proxy.

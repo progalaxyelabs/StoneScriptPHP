@@ -50,9 +50,9 @@ namespace StoneScriptPHP\Http;
  * Validation of trust entries
  * ---------------------------
  * `*`, `/0` and any prefix shorter than public IPv4 /12 or IPv6 /32 are REJECTED.
- * A trust entry names proxies, not other people's networks. The widest range any
- * major CDN publishes is /13 (Cloudflare, verified 2026-10-10); a /12 floor leaves
- * one bit of margin, so a public entry shorter than /12 cannot be a proxy fleet
+ * A trust entry names proxies, not other people's networks. Cloudflare's widest
+ * published range is /13 and AWS CloudFront's is /14 (verified 2026-10-10); we know
+ * of no wider CDN range. A /12 floor leaves one bit of margin, so a public entry shorter than /12 cannot be a proxy fleet
  * (public /8s to /11s are refused); /32 is a typical IPv6 ISP/organisation
  * allocation. Private-space blocks (10/8, fc00::/7, fe80::/10, ...) are exempt
  * because they are not internet-routable. IPv4-mapped IPv6 entries are
@@ -463,7 +463,7 @@ final class ClientIp
      */
     private static function expandMemo(array $entries): array
     {
-        $key = implode("\n", array_map('strval', $entries));
+        $key = (string) json_encode(array_map('strval', $entries));
         if (self::$expandMemo === null || self::$expandMemo['key'] !== $key) {
             self::$expandMemo = ['key' => $key, 'list' => self::expand($entries)];
         }

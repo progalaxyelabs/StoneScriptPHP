@@ -11,8 +11,9 @@ share one rate-limit bucket: after the first few requests the whole site answers
 availability outage, not a cosmetic change. The framework logs a hint (`TRUSTED_PROXIES is not set`),
 but only after the fact.
 
-1. Do you terminate TLS in nginx on the same host as php-fpm, with nothing in front? Then do nothing
-   (leave `TRUSTED_PROXIES` unset). `REMOTE_ADDR` is the visitor.
+1. Do you terminate TLS in nginx on the same host as php-fpm, with nothing in front? No
+   `TRUSTED_PROXIES` is needed (leave it unset; `REMOTE_ADDR` is the visitor), **but the edge nginx must still blank
+   the forwarding headers while any app behind it is pre-11** (section 3a.2).
 2. Anything in front? Set `TRUSTED_PROXIES` to that proxy (explicit CIDR) **before** deploying.
 3. Search your code for `HTTP_X_FORWARDED_FOR`, `HTTP_X_REAL_IP`, `trust_proxy`, `TRUST_PROXY`; replace
    with `client_ip()` / `TRUSTED_PROXIES`.
@@ -58,8 +59,8 @@ cannot be read at all, the framework logs it (once a minute) and trusts no proxy
 
 ### Validation
 `*`, `/0` and any prefix shorter than **public IPv4 /12** or **IPv6 /32** are rejected and logged. Rationale: a
-trust entry names proxies, not other people's networks. The widest range any major CDN publishes is /13
-(Cloudflare, verified 2026-10-10); a /12 floor leaves one bit of margin, so a public entry shorter than /12
+trust entry names proxies, not other people's networks. Cloudflare's widest published range is /13 and AWS
+CloudFront's is /14 (verified 2026-10-10); we know of no wider CDN range. A /12 floor leaves one bit of margin, so a public entry shorter than /12
 cannot be a proxy fleet (public /8s to /11s are refused); /32 is a typical IPv6 ISP/organisation allocation. Blocks inside private
 space (`10.0.0.0/8`, `fc00::/7`, `fe80::/10`, ...) are exempt from the floor because they are not
 internet-routable. IPv4-mapped IPv6 entries (`::ffff:10.0.0.5`) are normalised to IPv4 so they can match.
@@ -121,6 +122,10 @@ Two topologies. Each has one job.
    With framework 11 the PHP side no longer depends on these (it ignores the header unless the peer is a trusted
    proxy), so after all applications are on 11 the fastcgi lines become defence in depth. Until then they are the
    protection.
+   Inheritance caveat: `fastcgi_param` directives are inherited from the enclosing level only if the current
+   level defines none of its own. A `location` that sets its own `fastcgi_param` lines (or its own
+   `include fastcgi_params;`) without including the snippet that holds the blanking **loses the blanking**.
+   Every PHP location must include the snippet (or repeat the two lines); check with a forged-header request.
 3. **Never put the fastcgi blanking lines (or `= $remote_addr` variants) in a snippet that an inner nginx (3b)
    includes**: they would erase the very header the framework needs, and every visitor would collapse into the
    outer proxy's rate-limit bucket.
