@@ -115,18 +115,8 @@ class RateLimitMiddleware implements MiddlewareInterface
      */
     private function getIdentifier(): string
     {
-        // Try to get real IP (considering proxies)
-        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ??
-              $_SERVER['HTTP_X_REAL_IP'] ??
-              $_SERVER['REMOTE_ADDR'] ??
-              'unknown';
-
-        // If multiple IPs, take the first one
-        if (strpos($ip, ',') !== false) {
-            $ip = explode(',', $ip)[0];
-        }
-
-        return trim($ip);
+        // Spoof-safe client IP (trusted-proxy aware), IPv6 collapsed to its /64.
+        return \StoneScriptPHP\Http\ClientIp::rateKey(client_ip());
     }
 
     /**

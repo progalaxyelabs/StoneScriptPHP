@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.0.0]
+
+### BREAKING (security default) - `client_ip()` is spoof-safe and trusted-proxy aware
+
+`client_ip()` used to return the **leftmost** `X-Forwarded-For` entry (then `X-Real-IP`), both fully
+client-controlled, so every IP-keyed protection (RateLimiter, RateLimitMiddleware, CsrfTokenHandler,
+HCaptchaVerifier/Middleware, ProofOfWorkMiddleware, RefreshRoute, analytics, Logger) could be bypassed
+with a forged header. Now:
+
+- New `StoneScriptPHP\Http\ClientIp` (`current()`, `resolve($server, $proxies)`, `rateKey()`, `isInternal()`,
+  `configure()`, `trustedProxies()`). `client_ip()` delegates to it.
+- Default = `REMOTE_ADDR` only. `X-Forwarded-For` is read **only** when the peer is in the trusted-proxy list,
+  walked right to left, first untrusted hop wins; malformed chain => peer. `X-Real-IP` is never read.
+- Config: `TRUSTED_PROXIES` env (comma list of IP/CIDR/`private`) or `trusted_proxies` in `Application::run()`
+  config. `*`, `/0` and malformed entries are rejected.
+- `RateLimiter` / `RateLimitMiddleware` bucket on `ClientIp::rateKey()` (IPv6 collapsed to /64,
+  IPv4-mapped IPv6 as IPv4). `RateLimitMiddleware` previously had its own leftmost-XFF logic.
+- `RequestLogger` now logs the same IP the limiters see. `trust_proxy` / `TRUST_PROXY` is deprecated and mapped
+  to `TRUSTED_PROXIES=private` (X-Real-IP is no longer honoured); `RequestLogger::resolveClientIp()` kept as a shim.
+- One-minute-throttled log hint when a private peer sends `X-Forwarded-For` and no proxies are configured.
+- Docs: `docs/CLIENT-IP-AND-NGINX-STANDARD.md`.
+
+**Why major:** behaviour change of a default. Platforms that sit directly behind nginx/fastcgi are correct with no
+change. Platforms behind a proxy (container behind a host proxy, Traefik, a load balancer) must set
+`TRUSTED_PROXIES`, otherwise all visitors share the proxy's address (safe, but one rate-limit bucket).
+Platforms that read `HTTP_X_FORWARDED_FOR` / `HTTP_X_REAL_IP` themselves must switch to `client_ip()`.
+Platform-local copies of a trusted-proxy `ClientIp` helper can be deleted (same algorithm, same `rateKey`).
+
 ## [10.0.0]
 
 ### BREAKING (behaviour change, default) — expired subscriptions are READ-ONLY, not locked out

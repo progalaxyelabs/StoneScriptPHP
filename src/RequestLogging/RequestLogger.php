@@ -151,39 +151,29 @@ class RequestLogger
     // -------------------------------------------------------------------------
 
     /**
-     * Defensive client-IP derivation.
+     * Client-IP derivation.
      *
-     * trust_proxy = true  → X-Real-IP (set by edge proxy); falls back to the
-     *                        rightmost entry in X-Forwarded-For, then REMOTE_ADDR.
-     * trust_proxy = false → REMOTE_ADDR only (safe for standalone installs where
-     *                        XFF headers can be spoofed by the client).
-     *
-     * §4.
+     * @deprecated Use StoneScriptPHP\Http\ClientIp::current(). Kept for BC:
+     *   trust_proxy=false -> REMOTE_ADDR only;
+     *   trust_proxy=true  -> ClientIp::resolve() with the configured
+     *                        TRUSTED_PROXIES, or the `private` ranges if none.
+     * X-Real-IP is no longer honoured: it is a single client-forgeable header.
      */
     public static function resolveClientIp(bool $trustProxy): string
     {
         if (!$trustProxy) {
             return $_SERVER['REMOTE_ADDR'] ?? '';
         }
+        $proxies = \StoneScriptPHP\Http\ClientIp::trustedProxies();
+        $ip = \StoneScriptPHP\Http\ClientIp::resolve($_SERVER, $proxies !== [] ? $proxies : ['private']);
+        return $ip === 'unknown' ? '' : $ip;
+    }
 
-        // X-Real-IP: single trusted IP set by the edge proxy (Nginx / Traefik)
-        $realIp = trim($_SERVER['HTTP_X_REAL_IP'] ?? '');
-        if ($realIp !== '') {
-            return $realIp;
-        }
-
-        // X-Forwarded-For: "client, proxy1, proxy2"
-        // Rightmost entry is added by the most-recently-trusted proxy.
-        $xff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
-        if ($xff !== '') {
-            $parts = array_map('trim', explode(',', $xff));
-            $rightmost = end($parts);
-            if ($rightmost !== false && $rightmost !== '') {
-                return $rightmost;
-            }
-        }
-
-        return $_SERVER['REMOTE_ADDR'] ?? '';
+    /** Same spoof-safe IP the rate limiters see; '' when unavailable. */
+    private static function loggedClientIp(): string
+    {
+        $ip = \StoneScriptPHP\Http\ClientIp::current();
+        return $ip === 'unknown' ? '' : $ip;
     }
 
     // -------------------------------------------------------------------------
@@ -297,7 +287,7 @@ class RequestLogger
             'path'          => substr((string) $path, 0, 2048),
             'status'        => $status,
             'duration_ms'   => $durationMs,
-            'client_ip'     => self::resolveClientIp(self::$trustProxy),
+            'client_ip'     => self::loggedClientIp(),
             'identity_id'   => $identityId,
             'tenant_id'     => $tenantId,
             'role'          => $role !== null ? substr($role, 0, 100) : null,

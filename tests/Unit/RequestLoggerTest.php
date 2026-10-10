@@ -30,6 +30,7 @@ class RequestLoggerTest extends TestCase
     protected function setUp(): void
     {
         RequestLogger::reset();
+        \StoneScriptPHP\Http\ClientIp::reset();
         RequestContext::reset();
         AuthContext::clear();
 
@@ -50,6 +51,7 @@ class RequestLoggerTest extends TestCase
     protected function tearDown(): void
     {
         RequestLogger::reset();
+        \StoneScriptPHP\Http\ClientIp::reset();
         RequestContext::reset();
         AuthContext::clear();
 
@@ -341,17 +343,18 @@ class RequestLoggerTest extends TestCase
     // §10 — client_ip with trust_proxy ON (X-Real-Ip)
     // -------------------------------------------------------------------------
 
-    public function test_client_ip_uses_x_real_ip_when_trust_proxy_on(): void
+    public function test_legacy_trust_proxy_no_longer_honours_x_real_ip(): void
     {
-        $_SERVER['HTTP_X_REAL_IP']    = '203.0.113.42';
-        $_SERVER['REMOTE_ADDR']       = '10.0.0.99'; // should be ignored
+        unset($_SERVER['HTTP_X_FORWARDED_FOR']);
+        $_SERVER['HTTP_X_REAL_IP']    = '203.0.113.42'; // single forgeable header: ignored
+        $_SERVER['REMOTE_ADDR']       = '10.0.0.99';
 
         $ip = RequestLogger::resolveClientIp(true);
 
-        $this->assertSame('203.0.113.42', $ip);
+        $this->assertSame('10.0.0.99', $ip);
     }
 
-    public function test_client_ip_falls_back_to_xff_rightmost_when_no_real_ip(): void
+    public function test_legacy_trust_proxy_walks_xff_right_to_left_skipping_private_proxies(): void
     {
         unset($_SERVER['HTTP_X_REAL_IP']);
         $_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.1, 10.0.0.2, 10.0.0.3';
@@ -359,7 +362,7 @@ class RequestLoggerTest extends TestCase
 
         $ip = RequestLogger::resolveClientIp(true);
 
-        $this->assertSame('10.0.0.3', $ip, 'Rightmost XFF entry expected');
+        $this->assertSame('203.0.113.1', $ip, 'First untrusted hop from the right expected');
     }
 
     public function test_client_ip_falls_back_to_remote_addr_when_trust_proxy_on_but_no_headers(): void

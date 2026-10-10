@@ -101,6 +101,9 @@ class Application
 
         // §1 — arm the request logger FIRST, before any middleware / router wiring,
         // so the shutdown function fires even if run() throws mid-pipeline.
+        // Trusted-proxy list for client_ip() (TRUSTED_PROXIES env / 'trusted_proxies' config).
+        \StoneScriptPHP\Http\ClientIp::bootstrap($config);
+
         RequestLogger::arm($config, self::$startTime);
 
         // Define STDIN, STDOUT, STDERR for PHP-FPM compatibility (CLI has them by default)

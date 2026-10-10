@@ -206,7 +206,7 @@ class RateLimiter
      */
     private function getClientIdentifier(): string
     {
-        $ip = client_ip();
+        $ip = \StoneScriptPHP\Http\ClientIp::rateKey(client_ip());
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
 
         return hash('sha256', $ip . '|' . $userAgent);

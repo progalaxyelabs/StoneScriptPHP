@@ -104,33 +104,19 @@ function init_env()
 }
 
 /**
- * Get the real client IP address.
+ * Get the client IP address, safely.
  *
- * Reads X-Forwarded-For first (set by Traefik / any reverse proxy),
- * then X-Real-IP, then falls back to REMOTE_ADDR.
- * When X-Forwarded-For contains a comma-separated list the leftmost
- * address is the original client; everything to the right is added by
- * intermediate proxies.
+ * Returns REMOTE_ADDR unless that peer is a configured trusted proxy
+ * (TRUSTED_PROXIES env / `trusted_proxies` config), in which case
+ * X-Forwarded-For is walked right-to-left and the first untrusted hop is
+ * returned. A client-supplied X-Forwarded-For / X-Real-IP can never change the
+ * result on its own. See StoneScriptPHP\Http\ClientIp.
  *
  * @return string IP address, or 'unknown' if none is available.
  */
 function client_ip(): string
 {
-    $forwarded = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null;
-    if ($forwarded !== null && $forwarded !== '') {
-        // Take the first (leftmost) address — that is the original client.
-        $ip = trim(explode(',', $forwarded)[0]);
-        if ($ip !== '') {
-            return $ip;
-        }
-    }
-
-    $realIp = $_SERVER['HTTP_X_REAL_IP'] ?? null;
-    if ($realIp !== null && $realIp !== '') {
-        return trim($realIp);
-    }
-
-    return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    return \StoneScriptPHP\Http\ClientIp::current();
 }
 
 function cache(): \StoneScriptPHP\Cache
