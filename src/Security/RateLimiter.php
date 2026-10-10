@@ -164,7 +164,9 @@ class RateLimiter
      */
     public function addToWhitelist(string $identifier): void
     {
-        $this->whitelist[] = $identifier;
+        // An IP is whitelisted as its exact canonical address (never widened to a /64:
+        // a whitelist must stay narrow). Non-IP identifiers (hashes) are kept verbatim.
+        $this->whitelist[] = $this->canonicalIp($identifier) ?? $identifier;
     }
 
     /**
@@ -172,7 +174,11 @@ class RateLimiter
      */
     public function addToBlacklist(string $identifier, int $durationSeconds = 86400): void
     {
-        $this->blacklist[$identifier] = time() + $durationSeconds;
+        // An IP is blacklisted as its rate key: IPv4 as is, IPv6 as its whole /64
+        // (a client holds a /64 and could otherwise rotate past the entry).
+        // Non-IP identifiers (client-identifier hashes) are kept verbatim.
+        $ip = $this->canonicalIp($identifier);
+        $this->blacklist[$ip !== null ? \StoneScriptPHP\Http\ClientIp::rateKey($ip) : $identifier] = time() + $durationSeconds;
 
         log_warning("Client blacklisted for $durationSeconds seconds", [
             'identifier' => substr($identifier, 0, 16) . '...',
@@ -180,13 +186,20 @@ class RateLimiter
         ]);
     }
 
+    /** Canonical spelling of $value if it is an IP address, else null. */
+    private function canonicalIp(string $value): ?string
+    {
+        $bin = filter_var($value, FILTER_VALIDATE_IP) !== false ? @inet_pton($value) : false;
+        return $bin === false ? null : (string) inet_ntop($bin);
+    }
+
     /**
      * Check if identifier is whitelisted
      */
     private function isWhitelisted(string $identifier): bool
     {
-        return in_array($identifier, $this->whitelist) ||
-               in_array(client_ip(), $this->whitelist);
+        return in_array($identifier, $this->whitelist, true) ||
+               in_array(client_ip(), $this->whitelist, true);
     }
 
     /**
@@ -198,7 +211,7 @@ class RateLimiter
         $this->blacklist = array_filter($this->blacklist, fn($expiry) => $expiry > time());
 
         return isset($this->blacklist[$identifier]) ||
-               isset($this->blacklist[client_ip()]);
+               isset($this->blacklist[\StoneScriptPHP\Http\ClientIp::rateKey(client_ip())]);
     }
 
     /**

@@ -25,23 +25,63 @@ namespace StoneScriptPHP\Http;
  *
  * Configuration (the trusted-proxy list)
  * --------------------------------------
- *  - `TRUSTED_PROXIES` env var: comma/space separated list of IPs, CIDRs or the
- *    keyword `private` (loopback + RFC1918 + CGNAT + IPv6 ULA/link-local).
- *  - or `trusted_proxies` (array|string) in the Application::run() config,
- *    which wins over the env var.
+ *  - `TRUSTED_PROXIES` (read through StoneScriptPHP\Env::secret(), so it honours
+ *    .env, real env, `TRUSTED_PROXIES_FILE` and /run/secrets/trusted_proxies, and
+ *    is immune to php-fpm `clear_env`): comma/space separated IPs, CIDRs or the
+ *    keyword `private`.
+ *  - or `trusted_proxies` (array|string) in the Application::run() config, which
+ *    wins over the env var.
  *  - Empty / unset (the default) = trust nobody = REMOTE_ADDR only.
- *  - `*`, `0.0.0.0/0` and `::/0` are REJECTED (trusting everybody is the bug
- *    this class exists to prevent) and logged.
+ *  - Resolution is LAZY (first use), so it always sees the fully loaded .env.
+ *  - Precedence: configure() > config `trusted_proxies` > TRUSTED_PROXIES >
+ *    legacy trust_proxy/TRUST_PROXY (=> `private`, deprecated). A legacy switch
+ *    never overrides an explicit TRUSTED_PROXIES.
+ *
+ * WARNING about the `private` keyword
+ * -----------------------------------
+ * `private` is only safe when the PHP/nginx backend is reachable ONLY from the
+ * proxy. With published docker ports, the docker userland-proxy (which makes
+ * every public client arrive from the bridge gateway), shared docker bridges, or
+ * any other path that lets a public client reach the backend from a private
+ * source address, `private` makes every public client "trusted" and the
+ * spoofing protection is void. Prefer explicit CIDRs (the specific bridge/VNet
+ * range of YOUR proxy). `private` exists for convenience and legacy mapping.
+ *
+ * Validation of trust entries
+ * ---------------------------
+ * `*`, `/0` and any prefix shorter than IPv4 /8 or IPv6 /32 are REJECTED (a trust
+ * entry names proxies, not a continent; /8 is the smallest legitimate private
+ * block, /32 a typical ISP/organisation allocation). Private-space blocks
+ * (fc00::/7, fe80::/10, ...) are exempt from the floor because they are not
+ * internet-routable. IPv4-mapped IPv6 entries are normalised to IPv4.
+ *
+ * The 'unknown' bucket
+ * --------------------
+ * No usable REMOTE_ADDR (CLI, odd SAPI) yields 'unknown'. All such requests
+ * deliberately share ONE rate-limit bucket (fail closed: they are limited
+ * together rather than bypassing the limit). Over HTTP this indicates a broken
+ * SAPI and is logged (throttled).
  */
 final class ClientIp
 {
     /** @var string[]|null explicit override (configure()); null = read env */
     private static ?array $override = null;
 
-    /** @var array{raw:string,list:string[]}|null parsed-env cache */
-    private static ?array $envCache = null;
+    /** @var string[]|null from Application::run() config key `trusted_proxies` */
+    private static ?array $configProxies = null;
+
+    private static ?bool $configLegacy = null;
+
+    /** @var string[]|null memoised effective list (only cached when env was readable) */
+    private static ?array $effective = null;
 
     private static int $lastHintLog = 0;
+    private static int $lastUnknownLog = 0;
+    private static bool $legacyNoticed = false;
+
+    /** Smallest allowed trust-entry prefix (see class docblock). */
+    private const MIN_BITS_V4 = 8;
+    private const MIN_BITS_V6 = 32;
 
     /** CIDRs behind the `private` keyword. */
     private const PRIVATE_RANGES = [
@@ -49,6 +89,7 @@ final class ClientIp
         '100.64.0.0/10', '169.254.0.0/16',
         '::1/128', 'fc00::/7', 'fe80::/10',
     ];
+
 
     // -------------------------------------------------------------------------
     // Public API
@@ -58,10 +99,13 @@ final class ClientIp
     public static function current(): string
     {
         $proxies = self::trustedProxies();
-        $ip = self::resolve($_SERVER, $proxies);
+        $server = $_SERVER;
+        $ip = self::resolve($server, $proxies);
 
-        if ($proxies === []) {
-            self::maybeHintMisconfig($ip);
+        if ($ip === 'unknown') {
+            self::maybeLogUnknown();
+        } elseif ($proxies === []) {
+            self::maybeHintMisconfig($ip, $server);
         }
         return $ip;
     }
@@ -92,7 +136,7 @@ final class ClientIp
 
         $hops = array_map('trim', explode(',', $xff));
         for ($i = count($hops) - 1; $i >= 0; $i--) {
-            $ip = self::valid($hops[$i]);
+            $ip = self::parseHop($hops[$i]);
             if ($ip === null) {
                 return $peer; // garbage in the chain: do not guess
             }
@@ -133,31 +177,60 @@ final class ClientIp
     }
 
     /**
-     * The effective trusted-proxy list (explicit configure() > env). Entries are
-     * validated; invalid or catch-all entries are dropped (and logged once).
+     * The effective trusted-proxy list, resolved lazily on first use so it sees the
+     * fully loaded .env. Invalid / catch-all entries are dropped (and logged once).
      *
      * @return string[]
      */
     public static function trustedProxies(): array
     {
+        if (self::$effective !== null) {
+            return self::$effective;
+        }
         if (self::$override !== null) {
-            return self::$override;
+            return self::$effective = self::$override;
         }
-        $raw = self::envValue('TRUSTED_PROXIES');
-        if (self::$envCache === null || self::$envCache['raw'] !== $raw) {
-            self::$envCache = ['raw' => $raw, 'list' => self::sanitize(self::split($raw))];
+        if (self::$configProxies !== null) {
+            return self::$effective = self::$configProxies;
         }
-        return self::$envCache['list'];
+
+        $raw = self::env('TRUSTED_PROXIES');
+        if ($raw === null) {
+            return []; // Env not readable yet (boot error): trust nobody, do not cache
+        }
+        if ($raw !== '') {
+            return self::$effective = self::sanitize(self::split($raw)); // explicit: never shadowed
+        }
+
+        $legacy = self::$configLegacy;
+        if ($legacy === null) {
+            $envLegacy = self::env('TRUST_PROXY');
+            if ($envLegacy === null) {
+                return [];
+            }
+            $legacy = $envLegacy !== '' && !in_array(strtolower($envLegacy), ['false', '0', 'no', 'off'], true);
+        }
+        if ($legacy) {
+            if (!self::$legacyNoticed) {
+                self::$legacyNoticed = true;
+                error_log('[StoneScriptPHP] DEPRECATED: trust_proxy / TRUST_PROXY is replaced by TRUSTED_PROXIES. '
+                    . 'Treating it as TRUSTED_PROXIES=private (unsafe if the backend port is reachable by '
+                    . 'anything but the proxy). Set TRUSTED_PROXIES explicitly, preferably to the proxy CIDR.');
+            }
+            return self::$effective = ['private'];
+        }
+        return self::$effective = [];
     }
 
     /**
      * Set the trusted-proxy list explicitly (array or comma-separated string).
-     * Pass null to go back to the TRUSTED_PROXIES env var.
+     * Pass null to go back to config/env resolution.
      *
      * @param string[]|string|null $proxies
      */
     public static function configure(array|string|null $proxies): void
     {
+        self::$effective = null;
         if ($proxies === null) {
             self::$override = null;
             return;
@@ -166,47 +239,58 @@ final class ClientIp
     }
 
     /**
-     * Called by Application::run() with the full app config.
-     *
-     * Order: config['trusted_proxies'] > TRUSTED_PROXIES env. Legacy
-     * `request_logging.trust_proxy` / TRUST_PROXY=true (the old unsafe
-     * "trust X-Real-IP" switch) maps to trusting the `private` ranges only, with
-     * a deprecation notice - so a platform behind a local/private proxy keeps
-     * working, but a public client can no longer forge its IP.
+     * Called by Application::run() with the full app config. Only RECORDS config:
+     * nothing is read from the environment here (that happens lazily, after .env
+     * is loaded), so call order relative to Env can never matter.
      *
      * @param array<string,mixed> $config
      */
     public static function bootstrap(array $config): void
     {
+        self::$effective = null;
+        self::$configProxies = null;
+        self::$configLegacy = null;
+
         if (array_key_exists('trusted_proxies', $config)) {
             $v = $config['trusted_proxies'];
-            self::configure(is_array($v) || is_string($v) ? $v : []);
-            return;
+            self::$configProxies = self::sanitize(
+                is_string($v) ? self::split($v) : (is_array($v) ? array_map('strval', $v) : [])
+            );
         }
-
-        self::configure(null);
-        if (self::trustedProxies() !== []) {
-            return;
-        }
-
         $legacy = $config['request_logging']['trust_proxy'] ?? null;
-        if ($legacy === null) {
-            $env = self::envValue('TRUST_PROXY');
-            $legacy = $env !== '' && !in_array(strtolower($env), ['false', '0', 'no', 'off'], true);
-        }
-        if ((bool) $legacy) {
-            error_log('[StoneScriptPHP] DEPRECATED: trust_proxy / TRUST_PROXY is replaced by TRUSTED_PROXIES. '
-                . 'Treating it as TRUSTED_PROXIES=private. Set TRUSTED_PROXIES explicitly.');
-            self::configure(['private']);
-        }
+        self::$configLegacy = $legacy === null ? null : (bool) $legacy;
     }
 
     /** @internal test hook */
     public static function reset(): void
     {
         self::$override = null;
-        self::$envCache = null;
+        self::$configProxies = null;
+        self::$configLegacy = null;
+        self::$effective = null;
         self::$lastHintLog = 0;
+        self::$lastUnknownLog = 0;
+        self::$legacyNoticed = false;
+    }
+
+    /**
+     * Network prefix used where a fingerprint should survive small address changes
+     * (CSRF): IPv4 -> first three octets ("a.b.c"), IPv6 -> its /64, IPv4-mapped
+     * IPv6 -> as IPv4, anything unusable -> 'unknown'.
+     */
+    public static function networkPrefix(string $ip): string
+    {
+        $bin = @inet_pton($ip);
+        if ($bin === false) {
+            return 'unknown';
+        }
+        if (strlen($bin) === 16 && str_starts_with($bin, str_repeat("\0", 10) . "\xff\xff")) {
+            $bin = substr($bin, 12);
+        }
+        if (strlen($bin) === 4) {
+            return ord($bin[0]) . '.' . ord($bin[1]) . '.' . ord($bin[2]);
+        }
+        return (string) inet_ntop(substr($bin, 0, 8) . str_repeat("\0", 8)) . '/64';
     }
 
     // -------------------------------------------------------------------------
@@ -219,12 +303,13 @@ final class ClientIp
      * signature of "behind a proxy but TRUSTED_PROXIES not set" - every visitor
      * would share one rate-limit bucket. Throttled to once a minute per process.
      */
-    private static function maybeHintMisconfig(string $ip, ?int $now = null): void
+    /** @param array<string,mixed> $server */
+    private static function maybeHintMisconfig(string $ip, array $server, ?int $now = null): void
     {
         if ($ip === 'unknown' || !self::isInternal($ip)) {
             return;
         }
-        if (empty($_SERVER['HTTP_X_FORWARDED_FOR']) && empty($_SERVER['HTTP_X_REAL_IP'])) {
+        if (empty($server['HTTP_X_FORWARDED_FOR']) && empty($server['HTTP_X_REAL_IP'])) {
             return;
         }
         $now ??= time();
@@ -237,10 +322,31 @@ final class ClientIp
             . 'Set TRUSTED_PROXIES to your reverse proxy address/CIDR (or `private`).');
     }
 
-    private static function envValue(string $key): string
+    /**
+     * Read a config value through the framework Env accessor (.env, env,
+     * KEY_FILE, /run/secrets). null = Env could not be built (boot error).
+     */
+    private static function env(string $key): ?string
     {
-        $v = $_ENV[$key] ?? $_SERVER[$key] ?? getenv($key);
-        return is_string($v) ? trim($v) : '';
+        try {
+            return trim((string) \StoneScriptPHP\Env::secret($key));
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private static function maybeLogUnknown(): void
+    {
+        if (PHP_SAPI === 'cli') {
+            return;
+        }
+        $now = time();
+        if (self::$lastUnknownLog !== 0 && $now - self::$lastUnknownLog < 60) {
+            return;
+        }
+        self::$lastUnknownLog = $now;
+        error_log('[StoneScriptPHP] client_ip(): no usable REMOTE_ADDR on an HTTP request; all such requests '
+            . 'share one "unknown" rate-limit bucket (fail closed). Check the web server / SAPI configuration.');
     }
 
     /** @return string[] */
@@ -252,7 +358,7 @@ final class ClientIp
 
     /**
      * @param string[] $entries
-     * @return string[]
+     * @return string[] canonical entries (invalid/catch-all dropped + logged)
      */
     private static function sanitize(array $entries): array
     {
@@ -262,55 +368,109 @@ final class ClientIp
             if ($entry === '') {
                 continue;
             }
-            if (strtolower($entry) === 'private') {
-                $out[] = 'private';
+            $norm = self::normalizeEntry($entry);
+            if ($norm === null) {
+                error_log('[StoneScriptPHP] TRUSTED_PROXIES: ignoring invalid, catch-all or too-broad entry "'
+                    . $entry . '" (min prefix: IPv4 /' . self::MIN_BITS_V4 . ', IPv6 /' . self::MIN_BITS_V6 . ')');
                 continue;
             }
-            if (!self::validEntry($entry)) {
-                error_log('[StoneScriptPHP] TRUSTED_PROXIES: ignoring invalid or catch-all entry "' . $entry . '"');
-                continue;
-            }
-            $out[] = $entry;
+            $out[] = $norm;
         }
         return array_values(array_unique($out));
     }
 
-    private static function validEntry(string $entry): bool
+    /**
+     * Validate and canonicalise one trust entry. Returns null if invalid, a
+     * catch-all, or broader than the prefix floor (unless inside private space).
+     * IPv4-mapped IPv6 entries are converted to IPv4.
+     */
+    private static function normalizeEntry(string $entry): ?string
     {
+        $entry = trim($entry);
+        if (strtolower($entry) === 'private') {
+            return 'private';
+        }
         [$net, $bits] = array_pad(explode('/', $entry, 2), 2, null);
         $bin = @inet_pton($net);
         if ($bin === false) {
-            return false;
+            return null;
         }
-        if ($bits === null) {
-            return true;
+        $max = strlen($bin) * 8;
+        if ($bits !== null && (!ctype_digit($bits) || strlen($bits) > 3)) {
+            return null;
         }
-        if (!ctype_digit($bits)) {
-            return false;
+        $b = $bits === null ? $max : (int) $bits;
+
+        // IPv4-mapped IPv6 entry -> IPv4 (so it can match the normalised peer/hops).
+        if (strlen($bin) === 16 && str_starts_with($bin, str_repeat("\0", 10) . "\xff\xff")) {
+            if ($b < 96) {
+                return null;
+            }
+            $bin = substr($bin, 12);
+            $b -= 96;
+            $max = 32;
         }
-        $b = (int) $bits;
-        // /0 would trust the whole internet.
-        return $b >= 1 && $b <= strlen($bin) * 8;
+        if ($b < 1 || $b > $max) {
+            return null;
+        }
+        $floor = $max === 32 ? self::MIN_BITS_V4 : self::MIN_BITS_V6;
+        $canon = (string) inet_ntop($bin);
+        if ($b < $floor && !self::insidePrivate($canon, $b)) {
+            return null;
+        }
+        return $b === $max ? $canon : $canon . '/' . $b;
+    }
+
+    /** Is network $ip/$bits wholly inside one of the private ranges? */
+    private static function insidePrivate(string $ip, int $bits): bool
+    {
+        foreach (self::PRIVATE_RANGES as $range) {
+            [, $rb] = explode('/', $range, 2);
+            if ($bits >= (int) $rb && self::inCidr($ip, $range)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * @param string[] $entries
-     * @return string[] concrete IP/CIDR entries (keyword expanded)
+     * @return string[] concrete IP/CIDR entries (keyword expanded, invalid dropped)
      */
     private static function expand(array $entries): array
     {
         $out = [];
         foreach ($entries as $e) {
-            if (strtolower(trim($e)) === 'private') {
+            $n = self::normalizeEntry((string) $e);
+            if ($n === null) {
+                continue;
+            }
+            if ($n === 'private') {
                 array_push($out, ...self::PRIVATE_RANGES);
-            } elseif (self::validEntry(trim($e))) {
-                $out[] = trim($e);
+            } else {
+                $out[] = $n;
             }
         }
         return $out;
     }
 
-    /** Validate + normalise (IPv4-mapped IPv6 -> IPv4). */
+    /**
+     * One X-Forwarded-For hop: plain IP, "ipv4:port", "[ipv6]" or "[ipv6]:port"
+     * (some load balancers append ports). Zone ids and anything else => null.
+     */
+    private static function parseHop(string $hop): ?string
+    {
+        $hop = trim($hop);
+        if (preg_match('/^\[([^\]]+)\](?::\d{1,5})?$/', $hop, $m) === 1) {
+            return self::valid($m[1]);
+        }
+        if (preg_match('/^(\d{1,3}(?:\.\d{1,3}){3}):\d{1,5}$/', $hop, $m) === 1) {
+            return self::valid($m[1]);
+        }
+        return self::valid($hop);
+    }
+
+    /** Validate + canonicalise (lowercase compressed IPv6; IPv4-mapped IPv6 -> IPv4). */
     private static function valid(string $ip): ?string
     {
         $ip = trim($ip);
@@ -318,10 +478,13 @@ final class ClientIp
             return null;
         }
         $bin = inet_pton($ip);
-        if ($bin !== false && strlen($bin) === 16 && str_starts_with($bin, str_repeat("\0", 10) . "\xff\xff")) {
-            return (string) inet_ntop(substr($bin, 12));
+        if ($bin === false) {
+            return null;
         }
-        return $ip;
+        if (strlen($bin) === 16 && str_starts_with($bin, str_repeat("\0", 10) . "\xff\xff")) {
+            $bin = substr($bin, 12);
+        }
+        return (string) inet_ntop($bin);
     }
 
     /** @param string[] $list expanded concrete entries */

@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use StoneScriptPHP\Application;
+use StoneScriptPHP\Env;
 use StoneScriptPHP\Http\ClientIp;
+use StoneScriptPHP\RequestLogging\RequestLogger;
 use StoneScriptPHP\Routing\Middleware\RateLimitMiddleware;
 use StoneScriptPHP\Security\RateLimiter;
 
@@ -17,11 +20,24 @@ final class ClientIpTest extends TestCase
     private array $serverBackup = [];
     private array $envBackup = [];
 
+    private function setEnv(string $key, ?string $value): void
+    {
+        if ($value === null) {
+            unset($_ENV[$key]);
+        } else {
+            $_ENV[$key] = $value;
+        }
+        // Fresh Env singleton (no constructor => no required-secret boot checks) + fresh ClientIp cache.
+        $prop = new \ReflectionProperty(Env::class, '_instance');
+        $prop->setValue(null, (new \ReflectionClass(Env::class))->newInstanceWithoutConstructor());
+        ClientIp::reset();
+    }
+
     protected function setUp(): void
     {
         $this->serverBackup = $_SERVER;
         $this->envBackup = $_ENV;
-        ClientIp::reset();
+        $this->setEnv('TRUSTED_PROXIES', null);
         foreach (['HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR', 'TRUSTED_PROXIES', 'TRUST_PROXY'] as $k) {
             unset($_SERVER[$k], $_ENV[$k]);
         }
@@ -32,6 +48,7 @@ final class ClientIpTest extends TestCase
     {
         $_SERVER = $this->serverBackup;
         $_ENV = $this->envBackup;
+        (new \ReflectionProperty(Env::class, '_instance'))->setValue(null, null);
         ClientIp::reset();
     }
 
@@ -185,7 +202,7 @@ final class ClientIpTest extends TestCase
 
     public function test_env_configures_trusted_proxies(): void
     {
-        $_ENV['TRUSTED_PROXIES'] = '10.0.0.5, 192.168.0.0/16';
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.5, 192.168.0.0/16');
         $this->assertSame(['10.0.0.5', '192.168.0.0/16'], ClientIp::trustedProxies());
         $_SERVER['REMOTE_ADDR'] = '10.0.0.5';
         $_SERVER['HTTP_X_FORWARDED_FOR'] = '1.2.3.4, 203.0.113.9';
@@ -194,19 +211,19 @@ final class ClientIpTest extends TestCase
 
     public function test_env_change_is_picked_up(): void
     {
-        $_ENV['TRUSTED_PROXIES'] = '10.0.0.5';
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.5');
         $this->assertSame(['10.0.0.5'], ClientIp::trustedProxies());
-        $_ENV['TRUSTED_PROXIES'] = '10.0.0.6';
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.6');
         $this->assertSame(['10.0.0.6'], ClientIp::trustedProxies());
     }
 
     public function test_catch_all_and_invalid_entries_are_rejected(): void
     {
-        $_ENV['TRUSTED_PROXIES'] = '*, 0.0.0.0/0, ::/0, 10.0.0.0/33, bogus, 10.0.0.9';
+        $this->setEnv('TRUSTED_PROXIES', '*, 0.0.0.0/0, ::/0, 10.0.0.0/33, bogus, 10.0.0.9, 0.0.0.0/1, 8.0.0.0/7, 2001:db8::/31, ::/1');
         $this->assertSame(['10.0.0.9'], ClientIp::trustedProxies());
 
         // "trust everyone" must not enable spoofing
-        $_ENV['TRUSTED_PROXIES'] = '0.0.0.0/0';
+        $this->setEnv('TRUSTED_PROXIES', '0.0.0.0/0');
         $_SERVER['REMOTE_ADDR'] = '198.51.100.7';
         $_SERVER['HTTP_X_FORWARDED_FOR'] = '1.2.3.4';
         $this->assertSame('198.51.100.7', client_ip());
@@ -214,7 +231,7 @@ final class ClientIpTest extends TestCase
 
     public function test_configure_overrides_env_and_null_restores(): void
     {
-        $_ENV['TRUSTED_PROXIES'] = '10.0.0.5';
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.5');
         ClientIp::configure(['10.0.0.6']);
         $this->assertSame(['10.0.0.6'], ClientIp::trustedProxies());
         ClientIp::configure(null);
@@ -223,7 +240,7 @@ final class ClientIpTest extends TestCase
 
     public function test_bootstrap_config_key_wins_over_env(): void
     {
-        $_ENV['TRUSTED_PROXIES'] = '10.0.0.5';
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.5');
         ClientIp::bootstrap(['trusted_proxies' => ['10.9.9.9']]);
         $this->assertSame(['10.9.9.9'], ClientIp::trustedProxies());
         ClientIp::bootstrap(['trusted_proxies' => []]);
@@ -243,18 +260,229 @@ final class ClientIpTest extends TestCase
 
     public function test_bootstrap_legacy_env_and_explicit_list_precedence(): void
     {
-        $_ENV['TRUST_PROXY'] = 'true';
+        $this->setEnv('TRUST_PROXY', 'true');
         ClientIp::bootstrap([]);
         $this->assertSame(['private'], ClientIp::trustedProxies());
 
-        $_ENV['TRUSTED_PROXIES'] = '10.0.0.5';
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.5');
         ClientIp::bootstrap([]);
         $this->assertSame(['10.0.0.5'], ClientIp::trustedProxies(), 'explicit list beats legacy switch');
 
-        unset($_ENV['TRUSTED_PROXIES']);
-        $_ENV['TRUST_PROXY'] = 'false';
+        $this->setEnv('TRUSTED_PROXIES', null);
+        $this->setEnv('TRUST_PROXY', 'false');
         ClientIp::bootstrap([]);
         $this->assertSame([], ClientIp::trustedProxies());
+    }
+
+    // ---- review fixes ----------------------------------------------------------
+
+    public function test_bootstrap_before_late_dotenv_still_sees_trusted_proxies(): void
+    {
+        // bootstrap() runs BEFORE .env is loaded (nothing in env yet) ...
+        ClientIp::bootstrap([]);
+        // ... .env loads afterwards:
+        $this->setEnvKeepConfig('TRUSTED_PROXIES', '10.0.0.5');
+        $_SERVER['REMOTE_ADDR'] = '10.0.0.5';
+        $_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.9';
+        $this->assertSame('203.0.113.9', client_ip());
+    }
+
+    public function test_legacy_switch_never_shadows_explicit_trusted_proxies_loaded_late(): void
+    {
+        ClientIp::bootstrap(['request_logging' => ['trust_proxy' => true]]);
+        $this->setEnvKeepConfig('TRUSTED_PROXIES', '10.0.0.5');
+        $this->assertSame(['10.0.0.5'], ClientIp::trustedProxies());
+
+        // and an explicit-but-all-invalid list does not silently fall back to legacy `private`
+        $this->setEnvKeepConfig('TRUSTED_PROXIES', '0.0.0.0/0');
+        $this->assertSame([], ClientIp::trustedProxies());
+    }
+
+    public function test_application_run_configures_trust(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/robots.txt'; // run() returns right after bootstrap
+        $_SERVER['REMOTE_ADDR'] = '10.0.0.5';
+        $_SERVER['HTTP_X_FORWARDED_FOR'] = '1.1.1.1, 203.0.113.9';
+        ob_start();
+        try {
+            Application::run(['trusted_proxies' => ['10.0.0.5'], 'request_logging' => ['enabled' => false]]);
+        } finally {
+            ob_end_clean();
+            RequestLogger::reset();
+        }
+        $this->assertSame(['10.0.0.5'], ClientIp::trustedProxies());
+        $this->assertSame('203.0.113.9', client_ip());
+    }
+
+    public function test_ipv6_output_is_canonical(): void
+    {
+        $s = ['REMOTE_ADDR' => 'FD00:0:0:0:0:0:0:1', 'HTTP_X_FORWARDED_FOR' => '2001:DB8:0:0:0:0:0:0077'];
+        $this->assertSame('2001:db8::77', ClientIp::resolve($s, ['fd00::/8']));
+        $this->assertSame('fd00::1', ClientIp::resolve(['REMOTE_ADDR' => 'FD00:0:0:0:0:0:0:1'], []));
+    }
+
+    public function test_hop_forms_port_brackets_zone(): void
+    {
+        $p = ['10.0.0.5'];
+        $x = fn(string $xff) => ClientIp::resolve(['REMOTE_ADDR' => '10.0.0.5', 'HTTP_X_FORWARDED_FOR' => $xff], $p);
+        $this->assertSame('203.0.113.9', $x('203.0.113.9:51234'));
+        $this->assertSame('2001:db8::1', $x('[2001:DB8::1]:443'));
+        $this->assertSame('2001:db8::1', $x('[2001:db8::1]'));
+        $this->assertSame('10.0.0.5', $x('fe80::1%eth0'), 'zone id is invalid: do not guess');
+        $this->assertSame('10.0.0.5', $x('203.0.113.9:99999999'), 'bad port: do not guess');
+        $this->assertSame('10.0.0.5', $x('203.0.113.9:80:80'));
+    }
+
+    public function test_duplicate_and_joined_xff_headers(): void
+    {
+        // php-fpm joins repeated header lines with ", " => identical to one header
+        $r = ClientIp::resolve(
+            ['REMOTE_ADDR' => '10.0.0.5', 'HTTP_X_FORWARDED_FOR' => '6.6.6.6, 7.7.7.7, 203.0.113.9, 10.0.0.9'],
+            ['10.0.0.0/24']
+        );
+        $this->assertSame('203.0.113.9', $r);
+    }
+
+    public function test_non_byte_aligned_ipv6_cidrs(): void
+    {
+        $s = fn(string $peer) => ['REMOTE_ADDR' => $peer, 'HTTP_X_FORWARDED_FOR' => '2001:db8::77'];
+        $this->assertSame('2001:db8::77', ClientIp::resolve($s('fc00::1'), ['fc00::/7']));
+        $this->assertSame('2001:db8::77', ClientIp::resolve($s('fdff::1'), ['fc00::/7']));
+        $this->assertSame('fe00::1', ClientIp::resolve($s('fe00::1'), ['fc00::/7']));
+        $this->assertSame('2001:db8::77', ClientIp::resolve($s('fe80::1'), ['fe80::/10']));
+        $this->assertSame('2001:db8::77', ClientIp::resolve($s('febf::1'), ['fe80::/10']));
+        $this->assertSame('fec0::1', ClientIp::resolve($s('fec0::1'), ['fe80::/10']));
+        $this->assertSame(['fc00::/7', 'fe80::/10'], (function () {
+            $this->setEnv('TRUSTED_PROXIES', 'fc00::/7 fe80::/10');
+            return ClientIp::trustedProxies();
+        })(), 'ULA/link-local blocks are exempt from the floor');
+    }
+
+    public function test_private_keyword_covers_cgnat_ula_linklocal_and_not_public(): void
+    {
+        $s = fn(string $peer) => ['REMOTE_ADDR' => $peer, 'HTTP_X_FORWARDED_FOR' => '203.0.113.9'];
+        foreach (['100.64.0.1', '100.127.255.254', 'fd12:3456::1', 'fe80::2', '169.254.1.1', '172.20.0.1', '127.0.0.1', '::1'] as $peer) {
+            $this->assertSame('203.0.113.9', ClientIp::resolve($s($peer), ['private']), $peer);
+        }
+        foreach (['100.128.0.1', '172.32.0.1', '2001:db8::1', '8.8.8.8'] as $peer) {
+            $this->assertSame($peer, ClientIp::resolve($s($peer), ['private']), $peer);
+        }
+    }
+
+    public function test_prefix_floor(): void
+    {
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.0/8 11.0.0.0/8 12.0.0.0/7 100.64.0.0/10 2001:db8::/32 2001::/16 fc00::/7');
+        $this->assertSame(['10.0.0.0/8', '11.0.0.0/8', '100.64.0.0/10', '2001:db8::/32', 'fc00::/7'], ClientIp::trustedProxies());
+    }
+
+    public function test_ipv4_mapped_entries_are_normalised(): void
+    {
+        $this->setEnv('TRUSTED_PROXIES', '::ffff:10.0.0.5, ::ffff:10.1.0.0/112, ::ffff:0.0.0.0/80');
+        $this->assertSame(['10.0.0.5', '10.1.0.0/16'], ClientIp::trustedProxies());
+        $this->assertSame('203.0.113.9', ClientIp::resolve(
+            ['REMOTE_ADDR' => '10.0.0.5', 'HTTP_X_FORWARDED_FOR' => '203.0.113.9'],
+            ClientIp::trustedProxies()
+        ));
+    }
+
+    public function test_env_accessor_honours_secret_file(): void
+    {
+        $f = tempnam(sys_get_temp_dir(), 'ssp_tp_');
+        file_put_contents($f, "10.0.0.5\n");
+        try {
+            $this->setEnv('TRUSTED_PROXIES_FILE', $f);
+            $this->assertSame(['10.0.0.5'], ClientIp::trustedProxies());
+        } finally {
+            unlink($f);
+            unset($_ENV['TRUSTED_PROXIES_FILE']);
+        }
+    }
+
+    public function test_network_prefix(): void
+    {
+        $this->assertSame('203.0.113', ClientIp::networkPrefix('203.0.113.9'));
+        $this->assertSame('203.0.113', ClientIp::networkPrefix('::ffff:203.0.113.9'));
+        $this->assertSame('2001:db8:1:2::/64', ClientIp::networkPrefix('2001:DB8:1:2:aaaa::1'));
+        $this->assertSame('unknown', ClientIp::networkPrefix('unknown'));
+    }
+
+    public function test_unknown_shares_one_bucket(): void
+    {
+        $this->assertSame('unknown', ClientIp::rateKey('unknown'));
+        $this->assertSame('unknown', client_ip());
+    }
+
+    public function test_request_logger_shim(): void
+    {
+        $_SERVER['REMOTE_ADDR'] = '10.0.0.5';
+        $_SERVER['HTTP_X_FORWARDED_FOR'] = '1.1.1.1, 203.0.113.9';
+        $this->assertSame('10.0.0.5', RequestLogger::resolveClientIp(false));
+        // true + nothing configured => `private` only
+        $this->assertSame('203.0.113.9', RequestLogger::resolveClientIp(true));
+        // true + explicit list that does not include the peer => peer
+        $this->setEnv('TRUSTED_PROXIES', '10.9.9.9');
+        $this->assertSame('10.0.0.5', RequestLogger::resolveClientIp(true));
+        // no REMOTE_ADDR => ''
+        unset($_SERVER['REMOTE_ADDR']);
+        $this->assertSame('', RequestLogger::resolveClientIp(true));
+    }
+
+    public function test_csrf_fingerprint_uses_network_prefix(): void
+    {
+        $h = new \StoneScriptPHP\Security\CsrfTokenHandler('k');
+        $m = new \ReflectionMethod($h, 'getClientFingerprint');
+        $_SERVER['HTTP_USER_AGENT'] = 'ua';
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::1';
+        $a = $m->invoke($h);
+        $_SERVER['REMOTE_ADDR'] = '2001:DB8:1:2:ffff::9';
+        $this->assertSame($a, $m->invoke($h), 'same /64 => same fingerprint');
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:1:3::1';
+        $this->assertNotSame($a, $m->invoke($h));
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.9';
+        $v4 = $m->invoke($h);
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.200';
+        $this->assertSame($v4, $m->invoke($h));
+    }
+
+    public function test_rate_limiter_blacklist_covers_ipv6_slash64_and_whitelist_is_exact(): void
+    {
+        $_SERVER['HTTP_USER_AGENT'] = 'ua';
+        $rl = new RateLimiter();
+        $rl->addToBlacklist('2001:DB8:1:2::1');
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:1:2:dead:beef:0:9'; // different host, same /64
+        $this->assertFalse($rl->check('login'));
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:1:3::1';
+        $this->assertTrue($rl->check('login'));
+
+        $rl2 = new RateLimiter();
+        $rl2->addToWhitelist('2001:DB8:1:2::1');
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::1';
+        $this->assertTrue($rl2->check('login', 1, 60));
+        $rl2->record('login');
+        $rl2->record('login');
+        $this->assertTrue($rl2->check('login', 1, 60), 'whitelisted exact address (any spelling)');
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::2'; // neighbour is NOT whitelisted
+        $rl2->record('login');
+        $rl2->record('login');
+        $this->assertFalse($rl2->check('login', 1, 60));
+    }
+
+    /** setEnv() without dropping config recorded by bootstrap() (simulates a late .env load). */
+    private function setEnvKeepConfig(string $key, ?string $value): void
+    {
+        $cfg = new \ReflectionProperty(ClientIp::class, 'configLegacy');
+        $legacy = $cfg->getValue();
+        $prop = new \ReflectionProperty(Env::class, '_instance');
+        if ($value === null) {
+            unset($_ENV[$key]);
+        } else {
+            $_ENV[$key] = $value;
+        }
+        $prop->setValue(null, (new \ReflectionClass(Env::class))->newInstanceWithoutConstructor());
+        $eff = new \ReflectionProperty(ClientIp::class, 'effective');
+        $eff->setValue(null, null);
+        $cfg->setValue(null, $legacy);
     }
 
     // ---- rate key / internal --------------------------------------------------

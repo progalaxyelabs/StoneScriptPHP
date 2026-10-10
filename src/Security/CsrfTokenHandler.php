@@ -166,9 +166,9 @@ class CsrfTokenHandler
         $ip = client_ip();
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
 
-        // Use first 3 octets of IP to handle dynamic IPs from same network
-        $ipParts = explode('.', $ip);
-        $ipPrefix = implode('.', array_slice($ipParts, 0, 3));
+        // Network prefix, so dynamic addresses within one network keep working:
+        // IPv4 first three octets (unchanged), IPv6 the /64, anything unusable 'unknown'.
+        $ipPrefix = \StoneScriptPHP\Http\ClientIp::networkPrefix($ip);
 
         return hash('sha256', $ipPrefix . '|' . $userAgent . '|' . $this->secretKey);
     }

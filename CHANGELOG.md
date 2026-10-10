@@ -11,27 +11,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### BREAKING (security default) - `client_ip()` is spoof-safe and trusted-proxy aware
 
+> **UPGRADE FIRST STEP: set `TRUSTED_PROXIES` before deploying 11.x if anything sits between the internet
+> and PHP (container behind a host proxy, load balancer, CDN, Traefik).** A proxied platform that upgrades
+> without it sees the proxy address for every visitor; all visitors share one rate-limit bucket and the whole
+> site starts answering **HTTP 429**. That is an availability outage. Platforms with nginx/fastcgi directly on
+> the internet need no change. See `docs/CLIENT-IP-AND-NGINX-STANDARD.md`.
+
 `client_ip()` used to return the **leftmost** `X-Forwarded-For` entry (then `X-Real-IP`), both fully
 client-controlled, so every IP-keyed protection (RateLimiter, RateLimitMiddleware, CsrfTokenHandler,
 HCaptchaVerifier/Middleware, ProofOfWorkMiddleware, RefreshRoute, analytics, Logger) could be bypassed
 with a forged header. Now:
 
-- New `StoneScriptPHP\Http\ClientIp` (`current()`, `resolve($server, $proxies)`, `rateKey()`, `isInternal()`,
-  `configure()`, `trustedProxies()`). `client_ip()` delegates to it.
+- New `StoneScriptPHP\Http\ClientIp` (`current()`, `resolve($server, $proxies)`, `rateKey()`, `networkPrefix()`,
+  `isInternal()`, `configure()`, `trustedProxies()`). `client_ip()` delegates to it.
 - Default = `REMOTE_ADDR` only. `X-Forwarded-For` is read **only** when the peer is in the trusted-proxy list,
-  walked right to left, first untrusted hop wins; malformed chain => peer. `X-Real-IP` is never read.
-- Config: `TRUSTED_PROXIES` env (comma list of IP/CIDR/`private`) or `trusted_proxies` in `Application::run()`
-  config. `*`, `/0` and malformed entries are rejected.
-- `RateLimiter` / `RateLimitMiddleware` bucket on `ClientIp::rateKey()` (IPv6 collapsed to /64,
-  IPv4-mapped IPv6 as IPv4). `RateLimitMiddleware` previously had its own leftmost-XFF logic.
-- `RequestLogger` now logs the same IP the limiters see. `trust_proxy` / `TRUST_PROXY` is deprecated and mapped
-  to `TRUSTED_PROXIES=private` (X-Real-IP is no longer honoured); `RequestLogger::resolveClientIp()` kept as a shim.
-- One-minute-throttled log hint when a private peer sends `X-Forwarded-For` and no proxies are configured.
-- Docs: `docs/CLIENT-IP-AND-NGINX-STANDARD.md`.
+  walked right to left, first untrusted hop wins; malformed hop => peer. `X-Real-IP` is never read.
+  Hops may be `ip`, `ipv4:port`, `[ipv6]`, `[ipv6]:port`. Output is canonical (lowercase compressed IPv6;
+  IPv4-mapped IPv6 as IPv4).
+- Config: `TRUSTED_PROXIES` (read through `Env::secret()`: `.env`, env, `_FILE`, `/run/secrets`; resolved lazily
+  after `.env` is loaded; immune to php-fpm `clear_env` except for raw env, see the doc) or `trusted_proxies` in the
+  `Application::run()` config. Precedence: config > `TRUSTED_PROXIES` > legacy `trust_proxy`.
+- Trust entries: `*`, `/0` and prefixes shorter than IPv4 /8 or IPv6 /32 are rejected (private-space blocks such as
+  `fc00::/7` are exempt); IPv4-mapped IPv6 entries are normalised to IPv4.
+- **`private` keyword is unsafe when the backend port is reachable by anything but the proxy** (published docker
+  ports, userland-proxy, shared docker bridges). Use an explicit CIDR of your proxy instead.
+- `RateLimiter` / `RateLimitMiddleware` bucket on `ClientIp::rateKey()` (IPv6 -> /64). Blacklisting an IP covers its
+  /64; whitelisting an IP matches only that exact canonical address. `RateLimitMiddleware` previously had its own
+  leftmost-XFF logic.
+- `CsrfTokenHandler` fingerprint uses `ClientIp::networkPrefix()` (IPv4 /24 as before, IPv6 /64, `unknown`).
+- Requests with no usable `REMOTE_ADDR` resolve to `unknown` and deliberately share ONE rate-limit bucket (fail closed).
+- `RequestLogger` now logs the same IP the limiters see. `trust_proxy` / `TRUST_PROXY` is deprecated and mapped to
+  `TRUSTED_PROXIES=private` (with a notice) only when no explicit `TRUSTED_PROXIES` exists; `X-Real-IP` is no longer
+  honoured. `RequestLogger::resolveClientIp()` is kept as a shim.
+- A throttled log hint appears when a private peer sends `X-Forwarded-For` and no proxies are configured.
+- Docs: `docs/CLIENT-IP-AND-NGINX-STANDARD.md` (upgrade checklist, nginx edge/inner/CDN rules).
 
-**Why major:** behaviour change of a default. Platforms that sit directly behind nginx/fastcgi are correct with no
-change. Platforms behind a proxy (container behind a host proxy, Traefik, a load balancer) must set
-`TRUSTED_PROXIES`, otherwise all visitors share the proxy's address (safe, but one rate-limit bucket).
+**Why major:** behaviour change of a default with an availability failure mode for proxied deployments.
 Platforms that read `HTTP_X_FORWARDED_FOR` / `HTTP_X_REAL_IP` themselves must switch to `client_ip()`.
 Platform-local copies of a trusted-proxy `ClientIp` helper can be deleted (same algorithm, same `rateKey`).
 
