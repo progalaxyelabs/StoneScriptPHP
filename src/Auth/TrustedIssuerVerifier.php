@@ -112,7 +112,7 @@ class TrustedIssuerVerifier
     {
         $issuer = $this->peekIssuer($token);
         if ($issuer === null) {
-            error_log('TrustedIssuerVerifier: token has no readable iss claim — rejected.');
+            log_error('TrustedIssuerVerifier: token has no readable iss claim — rejected.');
             return null;
         }
 
@@ -120,7 +120,7 @@ class TrustedIssuerVerifier
         if ($entry === null) {
             // Mandatory: an untrusted issuer is a hard reject — never fall back to
             // "verify anyway with whatever key we have".
-            error_log("TrustedIssuerVerifier: untrusted issuer '$issuer' — rejected.");
+            log_error("TrustedIssuerVerifier: untrusted issuer '$issuer' — rejected.");
             return null;
         }
 
@@ -131,15 +131,15 @@ class TrustedIssuerVerifier
                 $claims = $this->verifyJwks($token, $issuer, $entry);
             }
         } catch (\Firebase\JWT\ExpiredException $e) {
-            error_log('TrustedIssuerVerifier: token expired — ' . $e->getMessage());
+            log_error('TrustedIssuerVerifier: token expired — ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         } catch (\Firebase\JWT\SignatureInvalidException $e) {
             // This is the issuer-substitution rejection: iss selected a key the
             // token was NOT signed with.
-            error_log("TrustedIssuerVerifier: signature invalid for iss '$issuer' — rejected.");
+            log_error("TrustedIssuerVerifier: signature invalid for iss '$issuer' — rejected.");
             return null;
         } catch (\Throwable $e) {
-            error_log('TrustedIssuerVerifier: verification failed — ' . $e->getMessage());
+            log_error('TrustedIssuerVerifier: verification failed — ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         }
 
@@ -149,7 +149,7 @@ class TrustedIssuerVerifier
 
         // Defence in depth: the decoded iss MUST equal the issuer whose key we used.
         if (($claims['iss'] ?? null) !== $issuer) {
-            error_log('TrustedIssuerVerifier: decoded iss does not match key-selecting iss — rejected.');
+            log_error('TrustedIssuerVerifier: decoded iss does not match key-selecting iss — rejected.');
             return null;
         }
 
@@ -159,7 +159,7 @@ class TrustedIssuerVerifier
             $aud = $claims['aud'] ?? null;
             $ok = is_array($aud) ? in_array($expectedAud, $aud, true) : $aud === $expectedAud;
             if (!$ok) {
-                error_log("TrustedIssuerVerifier: audience mismatch for iss '$issuer' — rejected.");
+                log_error("TrustedIssuerVerifier: audience mismatch for iss '$issuer' — rejected.");
                 return null;
             }
         }

@@ -5,6 +5,7 @@ namespace StoneScriptPHP\Auth\BuiltinOAuth;
 use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Auth\JwtHandlerInterface;
 use StoneScriptPHP\Auth\RsaJwtHandler;
+use StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer;
 
 /**
  * Builtin (standalone, no central auth service) Google OAuth popup flow.
@@ -43,6 +44,17 @@ class GoogleOAuthRoutes
         $userResolver = $options['user_resolver'] ?? null;
         $jwtHandler = $options['jwt_handler'] ?? new RsaJwtHandler();
         $prefix = rtrim($options['prefix'] ?? '', '/');
+        // Persisting issuer: explicit option, else the one Application::run() built from
+        // auth.refresh_tokens / REFRESH_TOKEN_STORE (null = tokens minted but not persisted, as before).
+        // Origins allowed to receive the popup's postMessage (never '*'); null = Env ALLOWED_ORIGINS.
+        $allowedOrigins = $options['allowed_origins'] ?? null;
+        if ($allowedOrigins !== null && !is_array($allowedOrigins)) {
+            throw new \InvalidArgumentException('allowed_origins must be an array of origins');
+        }
+        $issuer = $options['refresh_token_issuer'] ?? RefreshTokenIssuer::configured();
+        if ($issuer !== null && !($issuer instanceof RefreshTokenIssuer)) {
+            throw new \InvalidArgumentException('refresh_token_issuer must be a RefreshTokenIssuer');
+        }
 
         if (empty($clientId) || empty($clientSecret) || empty($redirectUri)) {
             throw new \InvalidArgumentException(
@@ -60,21 +72,29 @@ class GoogleOAuthRoutes
             throw new \InvalidArgumentException('jwt_handler must implement JwtHandlerInterface');
         }
 
+        // Loud at boot: with no allowed origin, sign-in only works when the sign-in page is on the API's own origin.
+        $originReport = OpenerOrigins::report($allowedOrigins);
+        if (!$originReport['ok']) {
+            log_error('GoogleOAuthRoutes: ' . $originReport['message'] . ' Verify with `php stone auth:check-origins`.');
+        }
+
         $initiatePath = "$prefix/oauth/google";
         $callbackPath = "$prefix/oauth/google/callback";
 
         // Both public — no JWT exists yet when a user is trying to sign in.
         $router->get(
             $initiatePath,
-            new GoogleOAuthInitiateRoute($clientId, $clientSecret, $redirectUri, $jwtHandler),
+            new GoogleOAuthInitiateRoute($clientId, $clientSecret, $redirectUri, $jwtHandler, $allowedOrigins),
             [],
-            true
+            true,
+            head: 'probe'
         );
         $router->get(
             $callbackPath,
-            new GoogleOAuthCallbackRoute($clientId, $clientSecret, $redirectUri, $jwtHandler, $userResolver),
+            new GoogleOAuthCallbackRoute($clientId, $clientSecret, $redirectUri, $jwtHandler, $userResolver, $issuer, $allowedOrigins),
             [],
-            true
+            true,
+            head: 'probe'
         );
 
         log_info("GoogleOAuthRoutes: Registered GET $initiatePath and GET $callbackPath");

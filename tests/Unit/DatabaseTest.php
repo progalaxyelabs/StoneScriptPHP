@@ -17,6 +17,23 @@ use PHPUnit\Framework\TestCase;
 class DatabaseTest extends TestCase
 {
     /**
+     * These tests pin the LEGACY hydration contract (NULL into a non-nullable property is
+     * coerced); that path now emits an E_USER_DEPRECATED notice by design, which is the
+     * subject of RowHydratorTest, not of these tests.
+     */
+    protected function setUp(): void
+    {
+        \StoneScriptPHP\Database\RowHydrator::reset();
+        set_error_handler(static fn (): bool => true, E_USER_DEPRECATED);
+    }
+
+    protected function tearDown(): void
+    {
+        restore_error_handler();
+        \StoneScriptPHP\Database\RowHydrator::reset();
+    }
+
+    /**
      * Test that Database uses singleton pattern
      */
     public function test_database_is_singleton(): void

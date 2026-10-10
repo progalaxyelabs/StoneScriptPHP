@@ -67,7 +67,7 @@ class GetSubscriptionPlansRoute implements IRouteHandler
 
             return res_ok($plans ?? []);
         } catch (\Exception $e) {
-            error_log('[Subscription Plans] Error: ' . $e->getMessage());
+            log_error('[Subscription Plans] Error: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return res_error('Failed to retrieve subscription plans');
         }
     }

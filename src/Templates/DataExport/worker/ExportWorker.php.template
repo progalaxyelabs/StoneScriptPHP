@@ -177,7 +177,7 @@ final class ExportWorker
             // exceptions.
             $failParams = new FailExportJobParams();
             $failParams->p_job_uuid = $jobUuid;
-            $failParams->p_error = substr($e->getMessage(), 0, 2000);
+            $failParams->p_error = substr(\StoneScriptPHP\Persistence\LogSanitizer::forLog($e->getMessage()), 0, 2000);
             FnFailExportJob::run($failParams);
 
             // A failed job's PARTIAL artifact file (if the exporter got far

@@ -7,6 +7,283 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.0.0]
+
+Major release. It bundles seven changes. Four of them change behaviour on every platform without a flag (the OAuth
+opener lock, the tenant-id rule, the generated client's `setTenant` validation, and `405` instead of `404`), and each of
+those has an availability failure mode if its pre-flight is skipped. Under SemVer that is a major version. The
+persistence, hydration and refresh-token features are opt-in (defaults keep 11.0 behaviour). Nothing from 11.x was ever
+adopted by a platform: go from 11.0.0 straight to 12.0.0.
+
+### Breaking changes
+
+Each item states what breaks, who is affected, and the BLOCKING pre-flight (do not deploy 12.0.0 until it passes).
+
+1. **Builtin Google OAuth popup: the sign-in result is delivered only to allowed origins (was `postMessage(data, '*')`).**
+   Before, any page that opened the initiate URL in a popup could receive the victim's access and refresh tokens. Now
+   tokens go only to origins in `ALLOWED_ORIGINS` (or the `allowed_origins` route option; wildcards are ignored) plus the
+   request's own origin (a same-origin deployment needs no configuration). The initiate route binds the OAuth state to the
+   opener origin (from `Referer`) and refuses an unlisted opener with a clear configuration-error page; the callback never
+   puts tokens in a page that has nowhere safe to send them and shows a visible message instead. `GoogleOAuthRoutes::register`
+   logs an error at boot when no origin is configured.
+   **Affected:** every platform whose sign-in page is on a different origin than the API (an Angular app on its own host).
+   **BLOCKING pre-flight:** `php stone auth:check-origins` (lists the configured origins, exits 1 if empty) and confirm
+   every sign-in page origin is listed. Without it, sign-in silently stops working for that site. Client libraries should
+   time out the popup with an honest message; the server side can no longer signal a blocked opener.
+2. **Tenant-id rule enforced before provisioning (`TenantIdRule`), no opt-out.** Lower-case letters/digits in groups
+   separated by single hyphens (canonical UUIDs pass); `_`, upper case, spaces, edge/double hyphens and a trailing newline
+   are rejected, and `{platform}_{schema}_{id}` must fit 63 bytes. It stays mandatory: ids that sanitise onto one database
+   name would merge tenants.
+   **Affected:** platforms with stored tenant ids that fail the rule, or an id generator that can emit one.
+   **BLOCKING pre-flight, both parts:**
+   `psql -At -c "select tenant_id from tenants" | php stone tenants:check-ids --platform=<code> --schema=<tenant schema>`
+   (stored ids; exits 1 on any refused id or collision group) AND
+   `php stone tenants:check-ids --platform=<code> --schema=<tenant schema> --sample-generator[=N] [--generator-class=<FQCN>]`
+   (generates N ids with the platform's real `ProvisionTenantRoute::generateUuid()` and validates them plus the 63-byte
+   database name; exits 1 if the generator can emit a refused id). A tenant whose stored id fails can no longer be
+   PROVISIONED; already provisioned tenants are unaffected. Platforms overriding `createDatabase()` should delete the override.
+3. **`TenantProvisioner` acts on the gateway's create-database error code (gateway 4.7.0 contract).** 409
+   `database_already_exists` = success; 409 `database_exists_legacy` / a plain 409 from an older gateway = success with a
+   warning; 422/409 `database_name_collision`, any unknown 409 code, and 500 `database_incomplete_unmarked` = failure
+   (fail closed). Requires gateway >= 4.7.0 to get identity verification.
+   **BLOCKING pre-flight:** `curl -s <gateway>/health` reports version >= 4.7.0.
+4. **Refresh-token subject is tenant-qualified; `identity_id` is never fabricated.** `LoginUser::toArray()` no longer
+   emits `identity_id` unless a real global identity exists (it used to fall back to `user_id`). The stored session subject
+   is `identity_id` when real, otherwise `{tenant_id}#{user_id}`; the same builder (`RefreshTokenIssuer::subjectOf()`) is
+   used when issuing and by every revoke path (`revokeAllForUser`, `revokeAllForClaims`, `LogoutRoute`, the password-reset
+   template). Revoke functions return counts and a revoke-all that affects 0 rows where sessions were expected logs a warning.
+   **Affected:** platforms that read the `identity_id` claim of Google-login tokens expecting the local user id (read
+   `user_id`), and platforms with their own issuing code.
+   **Pre-flight:** `grep -rn "identity_id" <your src>` for consumers of that claim; no stored sessions exist before 12.0.0
+   unless you built your own store.
+5. **Raw database/exception text no longer reaches a client or a log line.** What the code guarantees, exactly:
+   (a) `Logger` itself passes the message text and every context string through `LogSanitizer` (database
+   `Key (col)=(value)`, `DETAIL:`/`CONTEXT:`, quoted literals) and masks email addresses (`a***@domain`), so no call site
+   can leak them; (b) `Database::fn()` exception messages, `TenantProvisioner` logs (status and code only, never the
+   response body), the OAuth callback and logout routes use the sanitiser, and every framework `error_log()` that could
+   carry exception or database text (cache, JWT validators, request logger, subscription routes and middleware, tenant
+   provisioning) now goes through the Logger; tenant and payment ids in subscription logs are short `ref:xxxxxxxx` hashes;
+   quoted literals are masked only in database-shaped text, so JSON debug lines and prose keep their structure;
+   (c) NO response contains raw exception text, in any mode (`ExceptionHandler`, the router's handler and typed-handler
+   paths, fatal errors): a response carries only a `PublicError` message, the message of an exception deliberately marked
+   public (`StoneScriptPHP\Exceptions\PublicMessage`; every `FrameworkException` is, and is shown unmodified), or a
+   generic sentence for the status plus a `correlation_id` that is also in the log line. **A coded `\RuntimeException`
+   (e.g. `new \RuntimeException('Not found', 404)`) keeps its status but now answers the generic sentence; make it
+   implement `PublicMessage` to show its text.** Auth-service errors proxied by the external-auth routes are public only when
+   the auth service's error body carries a structured `public_message` string (cleaned, 300 characters at most; it becomes an
+   `AuthServicePublicException`); any other upstream text answers the generic sentence for the status plus a `correlation_id`
+   (**the auth service must send `public_message` for user-facing errors such as an invalid OTP**). `TokenExchangeException`
+   and `InvitationException` are marked public and no longer embed upstream or library text in their messages (it is in
+   `getPrevious()`); the hCaptcha middleware no longer returns the verifier's error text. `DEBUG_MODE` adds the exception class, code, location, trace and
+   correlation id only; (d) a `{success:false, message}` function envelope without `public_message` is now a generic 400
+   (text kept in `getPrevious()`). The guarantee covers framework code paths; application code that writes with
+   `error_log()` or builds its own responses is not covered.
+   **Affected:** apps/tests asserting raw exception text in a response, or grepping logs for emails/quoted values.
+   **Pre-flight:** `grep -rn "getMessage()" <your src>/App/Routes` for handlers echoing exception text, and `grep -rnE "RuntimeException\(.*, *4[0-9][0-9]\)" <your src>` for coded exceptions whose text clients rely on (implement `PublicMessage` on them).
+6. **HEAD and wrong-method requests.** `HEAD` is answered wherever `GET` is routed; a known path requested with a method
+   that has no route answers `405` + `Allow` (was `404`). Existence of a path was already visible through `401` on protected
+   routes, so `405` adds no new enumeration signal beyond public routes. **Audit your own GET handlers with side effects**
+   (email verification, unsubscribe, magic links, one-time links): flag them `head: 'probe'`, or set `HEAD_EXECUTES_GET=false`.
+   **Affected:** clients that depended on `404` for a wrong method; monitors now seeing 200 for HEAD.
+   **Pre-flight:** `grep -rn "'GET'" <your src>/config/routes.php` and review each side-effecting GET.
+7. **Generated T3 client:** `setTenant('')`, whitespace, `NaN`, `null`, `undefined` now throw; use the new `clearTenant()`
+   on logout/tenant removal. Regenerate clients to pick it up (`php stone generate client --tenancy=T3`); apps calling
+   `setTenant(null)` break at runtime until changed. **Pre-flight:** `grep -rn "setTenant(" <your frontend src>`.
+8. **`composer.json` has no `version` field** (the git tag is the version). A `path`-type repository can no longer infer a
+   version: consumers require a released tag or set `COMPOSER_ROOT_VERSION` / a branch alias.
+9. **Deprecation notices.** The lenient modes below emit one `E_USER_DEPRECATED` per kind (rate-limited to once an hour
+   across requests, stamps kept in a private per-uid 0700 directory, never able to throw out of a request; APCu is
+   preferred). PHPUnit suites using `failOnDeprecation` will flag them: that is the migration worklist. A raw PHP array
+   passed to `Database::fn()` now uses the same rate-limited notice instead of a bare `trigger_error`.
+
+### Opt-in features (defaults keep 11.0 behaviour; each becomes the default in the next major)
+
+10. `REFRESH_TOKEN_STORE=postgres` (default `none`): persist Google OAuth / login refresh tokens. Run
+    `php stone gateway:migrate-vendor-main` first (`php stone auth:check-refresh-store` verifies; enabling it earlier
+    fails loudly). `REFRESH_TOKEN_ROTATE` (default off) turns on rotation: the stock body-mode client does not read a
+    rotated refresh token. Schedule `php stone auth:purge-refresh-tokens`. A platform can delete its own store,
+    SQL, Fn wrappers, callback override, JwtHandler decorator and logout route (use `BodyLogoutRoute`).
+11. `PERSISTENCE_CONTRACT=enforced` (default `lenient`): error-shaped bodies get a real 4xx/5xx, a 2xx after an
+    unacknowledged failed `Database::mutate()` becomes 500. Adding `mutate()` calls is itself the opt-in for the write
+    boundary. A function that wants a user-facing message uses the public convention in `docs/PERSISTENCE-CONTRACT.md`.
+12. `DB_HYDRATION_MODE=strict` (default `legacy`): SQL NULL stays NULL; NULL for a non-nullable property throws. Fix the
+    notices (`?type` / `-- @out`), then delete local NULL/`''` guards. For a `-- @mutation` function the row is mapped
+    inside `Mutation::hydrateCommitted()`: if strict hydration refuses a row AFTER the write committed, the response is a
+    500 with `data.persisted: true` and a `correlation_id` (detail logged, sanitised) and a "do not repeat the action"
+    message, so clients do not retry a write that already happened.
+13. `HEAD_EXECUTES_GET=false` (default `true`): probe every HEAD without running handlers unless the route opts in.
+14. `php stone generate model` lints annotations: a `-- @mutation` / `-- @out` line that does not parse (a typo such as
+    `@mutate`, `allow_empty`) is warned about instead of silently producing a plain read wrapper; `--strict` makes it fail.
+
+### Details
+
+#### Refresh-token persistence, rotation with reuse detection, revocation and purge; OAuth popup origin lock
+
+`BuiltinOAuth`'s Google callback minted a refresh token and never persisted it; only `InMemoryRefreshTokenStore`
+shipped, so every platform hand-wrote a Postgres store, SQL and a callback override or JWT-handler decorator.
+
+- Vendor schema `src/Auth/RefreshTokens/Schema` (table `auth_refresh_tokens`, functions `auth_rt_*`; tokens hashed,
+  session families, tombstones for replay detection, expiry index). Idempotent. Activate with
+  `php stone gateway:migrate-vendor-main`. SQL behaviour test against real PostgreSQL:
+  `tests/Integration/sql/run-refresh-tokens-test.sh`.
+- `Auth\RefreshTokens\PostgresRefreshTokenStore` (+ `RotatingRefreshTokenStore` interface extending `RefreshTokenStore`;
+  `InMemoryRefreshTokenStore` now implements it): `inspect`, atomic `rotate`, `revokeSession`, `revokeFamily`,
+  `purgeExpired`; main-DB routing; hash-only API.
+- `Auth\RefreshTokens\RefreshTokenIssuer`: `issueSession()` (fails closed), `refresh()` (optional rotation, `claims_provider`),
+  `revokeSession()`, `revokeAll()`; built by `Application::run()` from `auth.refresh_tokens` / `REFRESH_TOKEN_STORE`,
+  `RefreshTokenIssuer::configured()`. Refresh tokens get a unique `jti`.
+- `GoogleOAuthCallbackRoute`/`GoogleOAuthRoutes` persist through the issuer (option `refresh_token_issuer`, default the
+  configured one); a persistence failure bridges `oauth_error`, never a token. Generated email-password / mobile-otp
+  login routes issue a persisted session when configured (response gains `refresh_token`).
+- `RefreshTokenMiddleware` revokes the whole session family when a spent token is replayed (rotating stores).
+- **Tenant isolation:** the stored subject is tenant-qualified (`{tenant}#{user}`) whenever claims carry a `tenant_id` and no
+  real global `identity_id` (see Breaking change 4); `revokeAllForUser($userId, $tenantId)`. The generated templates pass the
+  qualified subject; the password-reset template revokes all of the user's sessions.
+- Grace window bounded to ONE extra exchange per spent token; absolute, never-sliding session cap (`REFRESH_TOKEN_SESSION_MAX_SECONDS`,
+  default 180 days); `FOR UPDATE SKIP LOCKED` on reap/purge; stored client address truncated to a network prefix.
+- Cookie-mode `RefreshRoute` / `LogoutRoute` go through the issuer when configured (rotation + replay detection; logout revokes the session).
+  Also fixes the legacy `LogoutRoute` calling a non-existent `AuthContext::user()`.
+- `php stone auth:check-refresh-store` and a once-per-process schema probe: enabling `REFRESH_TOKEN_STORE=postgres` before
+  `gateway:migrate-vendor-main` fails loudly with the fix, not with an opaque database error.
+- **SECURITY: the builtin Google OAuth popup no longer posts tokens with `postMessage(data, '*')`.** (See Breaking change 1.) Any page that
+  opened the initiate URL in a popup could receive a victim's access and refresh tokens. The result now goes only to allowed origins
+  (`ALLOWED_ORIGINS` / `allowed_origins` option; wildcards ignored); the initiate route binds the OAuth state to the opener origin (Referer) and
+  refuses unlisted openers; no allowed origin = nothing posted (fail closed, logged). Make sure `ALLOWED_ORIGINS` lists every origin hosting your
+  sign-in page (it must already for CORS). Applies regardless of `REFRESH_TOKEN_STORE`.
+- Deprecation notices go through `Support\DeprecationNotice`: never throw out of a request, rate-limited to once an hour across requests under FPM.
+- `Routes\BodyRefreshRoute`, `Routes\BodyLogoutRoute` (body-mode, no cookie/CSRF), `php stone auth:purge-refresh-tokens`.
+
+**Semver / default:** `REFRESH_TOKEN_STORE=none` is the **11.x default** (behaviour unchanged; the OAuth callback emits
+a deprecation notice (rate-limited, never throwing) saying its refresh token is not persisted). Rotation is a separate flag
+(`REFRESH_TOKEN_ROTATE`, default off) because the stock body-mode client does not read a rotated refresh token.
+Persistence becomes the default in the next major. Minor release. See `docs/REFRESH-TOKENS.md`.
+
+#### Persistence contract: a failed write is never a 2xx (`Database::mutate`, `DbErrorMapper`, `PERSISTENCE_CONTRACT`)
+
+Applications often hand-build a write boundary because `Database::fn()` treats zero rows as success and nothing
+stopped a handler answering 2xx after a failed or swallowed write. Now in the framework (`StoneScriptPHP\Persistence`):
+
+- `Database::mutate()` / `mutateTyped()` / `Persistence\Mutation::run()`: call a writing function and throw a typed
+  `PersistenceException` (HTTP status in `getCode()`) on an `{error}` envelope, a `{success:false}` envelope, no
+  row where one was expected, a wrong row count (`exactRows`), or a database refusal. `allowEmpty`,
+  `notFoundMessage`, `noun` options. Handles `o_`-prefixed envelopes.
+- **Privacy (see Breaking change 5 for the exact guarantee):** a response carries a
+  classified generic sentence or an explicitly PUBLIC business message; the raw text lives only in `getPrevious()`.
+  `LogSanitizer` strips `Key (col)=(value)`, `DETAIL:` and quoted literals from log lines.
+- **Business-error convention** (documented in `docs/PERSISTENCE-CONTRACT.md`): a function returns an envelope with
+  `public_message` (+ `error_code`, `status` 4xx, `fields`, `errors`) or RAISEs `'[public:code:status] message'`; the framework
+  surfaces message/status/fields/errors as-is. `DbErrorMapper::extend()` classifiers get `(lowerCause, noun, rawCause, throwable)`
+  and may return `[status, message]` or a full `PublicError`; `DbErrorMapper::publicResponse()` / `causeContains()` for route
+  catch blocks. A `{success:false, message}` envelope WITHOUT `public_message` is now a generic 400 (its text stays in the cause).
+  A coded `\RuntimeException` (4xx/5xx) passes through and a default-400 "not found" becomes 404.
+- A direct/pgandroid transport connection failure maps to 503 (retryable); the ledger is bounded (50) and reset after dispatch.
+- `Persistence\DbErrorMapper`: SQLSTATE/cause-text classification to a status and a message that never leaks schema
+  names (unique 409, FK 400/409, check 422, malformed value 400, deadlock/serialization 503, else 500);
+  `extend()` for a platform's own business-rule vocabulary.
+- `Persistence\ResponseGuard` (applied by `Router::dispatch()`) + `PersistenceLedger`: an error-shaped body with no
+  HTTP status stops shipping as 200; a 2xx after an unacknowledged failed `mutate()` (the handler swallowed it)
+  becomes a 500. `PersistenceLedger::handled($e)` is the explicit opt-out for deliberate recovery.
+- `PersistenceException` thrown out of a handler is always mapped to its own status/message (new class, no
+  existing behaviour affected).
+- `php stone generate model`: `-- @mutation` / `-- @mutation allow-empty` in the SQL file's leading comment block
+  generates `Database::mutateTyped()/mutate()` wrappers.
+
+**Semver / default:** the response-changing behaviours are behind `PERSISTENCE_CONTRACT` (env, or
+`persistence.contract` in the `Application::run()` config): `lenient` is the **11.x default** (responses unchanged,
+one `E_USER_DEPRECATED` per kind saying what `enforced` would do, rate-limited to once an hour across requests under FPM and never able to throw out of a request; PHPUnit suites using `failOnDeprecation` will flag them); `enforced` becomes the default in
+the next major. Adding `mutate()` calls is itself the opt-in for the write boundary. Minor release.
+
+#### TenantProvisioner reads the gateway's create-database error code; tenant-id rule
+
+`createDatabase()` treated ANY gateway 409 as success without reading the body, so a database that belongs to a
+DIFFERENT tenant (tenant ids that sanitise to the same database name) was reported as provisioned and the tenant
+marked active. It now acts on the `error` code: `database_already_exists` = success; `database_exists_legacy` / a plain or older-gateway 409 (no machine code) = success with a warning (identity not
+verifiable); `database_name_collision` (409 or 422) = hard failure; any other 409 code = failure (fail closed);
+other non-2xx (incl. 500) = failure. The log only claims "identity verified" when `GET /health` reports gateway >= 4.7.0.
+
+New tenant-id rule (`Tenancy\TenantIdRule`), enforced BEFORE the gateway is called: lower-case letters/digits in groups
+separated by single hyphens (canonical UUIDs pass); `_`, upper case, spaces, edge/double hyphens and a trailing newline
+are rejected (so `a-b` and `a_b` can no longer both pass and collide); the resulting database name
+`{platform}_{schema}_{id}` must fit 63 bytes (PostgreSQL truncates identifiers there, merging tenants).
+
+Gateway 4.7.0 contract handled: 409 `database_already_exists` (success), 409 `database_exists_legacy` (success + warning), 422/409 `database_name_collision` (failure), 500 `database_incomplete_unmarked` (failure). Any other 409 code, including one never released, fails closed. See upgrade note 4 for the required `tenants:check-ids` pre-flight.
+
+#### HEAD is answered wherever GET is routed (RFC 9110 9.3.2); correct 405/OPTIONS
+
+A `HEAD` request used to find no route (404) unless the platform registered a `HEAD` route by hand, and an
+uncaught exception on any request still echoed a JSON body. Monitors, link checkers and crawlers that probe with
+`HEAD` therefore saw errors while `GET` returned 200.
+
+- `Router::dispatch()` matches `HEAD` against an explicit `HEAD` route first, otherwise against the `GET` route.
+  Per-route middleware registered on the GET route runs for HEAD. `$request['method']` stays `'HEAD'` so every
+  middleware sees the real, safe method: CSRF / hCaptcha / proof-of-work / audit / read-only subscription gating
+  already treat only POST/PUT/PATCH/DELETE as writes and therefore never block or gate a HEAD (now covered by tests).
+  Auth is unchanged: a protected GET route still requires authentication for HEAD.
+- **HEAD is safe by construction (probe mode).** A route can declare `head: 'probe'` (routes.php key, or `head:` on
+  `Router::get()`): HEAD then answers 200 with the route's headers and no body WITHOUT running the handler;
+  `head: 'execute'` runs the GET handler and drops the body. Global default `HEAD_EXECUTES_GET` (env, or
+  `head_executes_get` in the `Application::run()` config; default `true`): set it to `false` to probe every HEAD unless
+  a route opts back in. A probe sends no `Content-Length` (the length is unknown).
+  Always probed regardless of config: routes flagged `streaming: true`, and handlers implementing the new
+  `IStreamingRouteHandler` marker (`streaming: true` is REQUIRED for SSE/long-poll GET routes; without it or the marker a
+  monitor's HEAD would pin a PHP worker on a stream that never ends). Stream probes answer `text/event-stream`.
+  Framework GET routes audited: the builtin Google OAuth initiate (mints state) and callback (resolves the user,
+  mints and returns tokens) are `head: 'probe'`; `check-tenant-slug`, `memberships`, `me`, `onboarding/status`, the
+  auth `health` route and the subscription `status` / `plans` routes are read-only and run normally.
+  **Platforms must audit their own GET handlers with side effects** (email verification, unsubscribe, magic links,
+  one-time links) and flag them `head: 'probe'`, or set `HEAD_EXECUTES_GET=false`.
+- New `StoneScriptPHP\Http\ResponseEmitter` (pure `render()` + `emit()`) now writes every response from
+  `Application::run()`: HEAD gets the same status and headers as GET (including `Content-Length`) and no body;
+  `204`/`304` never carry a body. `ExceptionHandler` and the boot-config error path also drop the body on HEAD.
+  `/robots.txt` answers HEAD.
+- New `ApiResponse::$headers` (name => value) for response-level headers.
+- A known path requested with a method that has no route now answers **405 Method Not Allowed** with an `Allow`
+  header (was 404). Unknown paths stay 404. `OPTIONS` on a known path that reaches the router answers `204` +
+  `Allow`; `CorsMiddleware` preflight responses carry `Allow` for known paths (status/body unchanged).
+  `HEAD` is advertised whenever `GET` is.
+- `$request['allowed_methods']`, `$request['route']['streaming']` and `$request['route']['head']` are new request-context keys.
+- Compiled route regexes are cached per pattern, so 404/405 traffic stays cheap.
+
+#### Opt-in strict row hydration: SQL NULL stays NULL (`DB_HYDRATION_MODE`)
+
+`Database::result_as_*()` / `array_to_class_object()` turned a SQL NULL for a non-nullable model property into
+`''` / `0` / `false` (and a numeric `float` property into a `TypeError`), so platforms carried NULL/`''` guards and
+numeric-coercion shims. Mapping now lives in `StoneScriptPHP\Database\RowHydrator` with two modes:
+
+- `legacy` (**default in 11.x, behaviour unchanged**): same coercion as before, plus an `E_USER_DEPRECATED` per
+  class::property naming exactly what to fix (rate-limited to once per hour across requests under FPM, once per
+  process on CLI; a notice can never throw out of a request, see `Support\DeprecationNotice`). PHPUnit suites using
+  `failOnDeprecation` will flag every legacy NULL hit - that is the migration worklist.
+- `strict`: NULL stays null; NULL for a non-nullable property throws `HydrationException` (function + property +
+  fix hint); wire values are converted explicitly (int/float/string/bool/DateTime/enum/JSON array) and a value that
+  does not fit throws. A JSON float arriving for a `string` property throws (money must not drift silently) and
+  zone-less `timestamp` values are read as UTC. **`strict` becomes the default in the next major version.**
+
+Select with `DB_HYDRATION_MODE=legacy|strict`, `db.hydration_mode` in the `Application::run()` config, or
+`RowHydrator::setMode()`. New `HydrationException`. Untyped/union property types now throw `HydrationException`
+instead of a fatal `Error` (a `throw` of a string).
+
+`php stone generate model`: `-- @out <column> <type>` lines in the SQL file's leading comment block pin an output
+column's PHP type (`?string` for a nullable column, `string` for an exact-decimal NUMERIC) so it survives
+regeneration. See `docs/DB-HYDRATION-AND-NULL-FIDELITY.md` (migration steps and the money-exactness story).
+
+**Money exactness is a data-layer property:** a `string` property is exact ONLY when the gateway delivers NUMERIC as text (`numeric_format=string`, gateway 4.7.x); with plain JSON numbers the value has already been through a float, which is why strict mode refuses a float for a `string` property.
+
+#### Generated T3 client: `clearTenant()`; `setTenant('')` rejected
+
+The generated tenant-scoped (T3 url-tenant) `ApiClient` had `setTenant(id)` but no way to unset the tenant, and
+`setTenant('')` was accepted, producing `/portal/tenant//...` paths. Now: `clearTenant(): this` truly resets the
+in-memory tenant (the optional `IApiClient.clearTenant?()` contract of client-core 4.3.0 / ngx 7.5.0), after which
+every tenant-scoped call throws `[ApiClient] Tenant context not set`; `setTenant()` throws on `''`, whitespace,
+`NaN`, `null`, `undefined` (numeric `0` stays valid) and the tenant getter also refuses `''`. Admin and T2 clients
+are unchanged (no tenant methods). Verified by compiling the generated client with `tsc --strict` and running it.
+Apps call `clearTenant()` on logout / tenant removal instead of `setTenant(null)`; regenerate clients to pick it up.
+
+
+#### Removed the `version` field from composer.json
+
+Composer warns against `version` for packages on Packagist, and on a mismatch with the git tag Packagist silently skips the tag. The git tag is the version; nothing in the framework reads this field (`cli/upgrade.php` reads the consuming project's own file).
+
 ## [11.0.0]
 
 ### BREAKING (security default) - `client_ip()` is spoof-safe and trusted-proxy aware
@@ -514,16 +791,15 @@ hand-written `fromArray()` convention. Design doc: internal.
   recursively (structured 400 on a shape problem) instead of raw-assigning
   and throwing an uncaught `TypeError` under `strict_types` (previously a
   bare 500 on every request — confirmed live regression, see below).
-- Fixes a LIVE PROD REVENUE OUTAGE on a downstream platform
-  (`PostDistributorInvoiceSubmitRoute`, every real invoice submit 500ing):
-  the route's hand-written request DTO typed `distributor_id` as `?string`
-  while every real caller sends a JSON number — an uncaught constructor
-  `TypeError`. Converted to the typed-binder pattern; `distributor_id` is now
-  `int` (required, matching the real `invoice_master.distributor_id` DB
+- Fixes a production outage class on a downstream platform (an order-submit
+  route returning 500 on every real request): the route's hand-written request
+  DTO typed `customer_id` as `?string` while every real caller sends a JSON
+  number — an uncaught constructor `TypeError`. Converted to the typed-binder
+  pattern; `customer_id` is now `int` (required, matching the real database
   column) and the hydrator casts a numeric wire value or returns a clean
-  400. Pilot conversion deletes both hand-written `fromArray()`s on this
+  400. The pilot conversion deletes both hand-written `fromArray()`s on that
   route. Verified against the live API with a real submit (200 + real
-  `invoice_master`/`invoice_detail` rows).
+  order rows).
 - `tests/Unit/DtoHydratorTest.php` + `tests/Unit/RouterTypedHandlerTest.php` —
   full test matrix (scalar/nested/array-of-DTO/enum/nullable/required cases).
   `phpstan-binding.neon` — PHPStan `level: max` scoped to the new code,
@@ -875,9 +1151,9 @@ just whether the call threw.
 Refines the existing-tenant guard shipped in 9.0.0: that release replayed an
 existing tenant purely because the identity had ANY membership, without
 checking whether the submitted name matched the existing one. An identity
-that already owns "ABC Medicals" and submits "XYZ Pharmacy" is not retrying
-a request; silently logging them into ABC Medicals with no indication XYZ
-Pharmacy was never created is worse than an explicit error.
+that already owns "Acme Store" and submits "Globex Shop" is not retrying
+a request; silently logging them into Acme Store with no indication Globex
+Shop was never created is worse than an explicit error.
 
 `findExistingTenantId()` (returned only a `tenant_id`) is now
 `findExistingMembership()` (returns `tenant_id` + `tenant_name` — both

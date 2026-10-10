@@ -71,9 +71,18 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
             } else {
                 http_response_code(502);
             }
-            return res_error($e->getMessage());
+            if ($e instanceof \StoneScriptPHP\Exceptions\PublicMessage) {
+                return res_error($e->getMessage()); // the auth service's own structured public_message
+            }
+            // Upstream free text is not deliberately public: generic sentence + correlation id, detail to the log.
+            $correlationId = bin2hex(random_bytes(6));
+            log_error("ExternalAuth upstream error [correlation_id=$correlationId, HTTP " . (int) $httpCode . ']: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            $generic = ($httpCode >= 400 && $httpCode < 500)
+                ? \StoneScriptPHP\Persistence\DbErrorMapper::genericMessage((int) $httpCode)
+                : 'Authentication service unavailable';
+            return new \StoneScriptPHP\ApiResponse('error', $generic, ['correlation_id' => $correlationId], null);
         } catch (\Throwable $e) {
-            log_error('ExternalAuth proxy error: ' . $e->getMessage());
+            log_error('ExternalAuth proxy error: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             http_response_code(502);
             return res_error('Authentication service unavailable');
         }

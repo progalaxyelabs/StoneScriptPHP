@@ -47,7 +47,14 @@ class AuthenticatedUser
         public readonly ?string $tenant_slug = null,
         public readonly ?string $platform_code = null,
         public readonly ?string $issuer_type = null,
-        public readonly array $customClaims = []
+        public readonly array $customClaims = [],
+
+        /**
+         * The RAW `identity_id` claim: a real, global identity, or NULL when the token has none. Kept apart from
+         * $user_id (which falls back across several claims) so refresh-token subjects are built from what the token
+         * really says. `identity_id` is a standard claim and is not in $customClaims.
+         */
+        public readonly ?string $identity_id = null,
     ) {
     }
 
@@ -129,8 +136,29 @@ class AuthenticatedUser
             tenant_slug: $tenant_slug,
             platform_code: $platform_code,
             issuer_type: $issuer_type,
-            customClaims: $customClaims
+            customClaims: $customClaims,
+            identity_id: (isset($payload['identity_id']) && (is_string($payload['identity_id']) || is_int($payload['identity_id'])) && (string) $payload['identity_id'] !== '')
+                ? (string) $payload['identity_id']
+                : null
         );
+    }
+
+    /**
+     * Claims for {@see \StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer::subjectOf()}: the same shape the session was
+     * issued with, so issue and every revoke path build the identical subject.
+     *
+     * @return array<string, string>
+     */
+    public function subjectClaims(): array
+    {
+        $claims = ['user_id' => $this->user_id];
+        if ($this->tenant_id !== null && $this->tenant_id !== '') {
+            $claims['tenant_id'] = $this->tenant_id;
+        }
+        if ($this->identity_id !== null) {
+            $claims['identity_id'] = $this->identity_id;
+        }
+        return $claims;
     }
 
     /**

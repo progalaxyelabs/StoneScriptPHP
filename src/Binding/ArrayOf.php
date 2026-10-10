@@ -18,7 +18,7 @@ use Attribute;
  *
  * Usage (legacy — `array $rows`, bare array, back-compat, unchanged):
  *   public function __construct(
- *       #[ArrayOf(DistributorInvoiceRowInput::class)]
+ *       #[ArrayOf(OrderLineInput::class)]
  *       public readonly array $rows,
  *   ) {}
  *
@@ -26,7 +26,7 @@ use Attribute;
  * $class; $class may also be a scalar keyword int|float|bool|string for a
  * homogeneous scalar list):
  *   public function __construct(
- *       #[ArrayOf(DistributorInvoiceRowInput::class)]
+ *       #[ArrayOf(OrderLineInput::class)]
  *       public readonly TypedArray $rows,
  *   ) {}
  */

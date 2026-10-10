@@ -31,7 +31,7 @@ class RequestContext
     public static function captureException(Throwable $e): void
     {
         self::$errorClass   = get_class($e);
-        self::$errorMessage = mb_substr($e->getMessage(), 0, 1000);
+        self::$errorMessage = mb_substr(\StoneScriptPHP\Persistence\LogSanitizer::forLog($e->getMessage()), 0, 1000);
     }
 
     /**

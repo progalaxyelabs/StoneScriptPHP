@@ -217,11 +217,11 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         $this->authenticatedUser();
         $client = new FakeExternalAuthServiceClient();
         $client->membershipsResponse = ['memberships' => [
-            ['tenant_id' => 'existing-tenant-99', 'tenant_name' => 'ABC Medicals', 'status' => 'active'],
+            ['tenant_id' => 'existing-tenant-99', 'tenant_name' => 'Acme Store', 'status' => 'active'],
         ]];
         $provisioner = new SpyTenantProvisioner();
         $route = $this->route($client, $provisioner);
-        $route->tenant_name = 'XYZ Pharmacy';
+        $route->tenant_name = 'Globex Shop';
         $route->idempotency_key = 'idem-1';
 
         $res = $route->process();

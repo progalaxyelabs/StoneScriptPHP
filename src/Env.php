@@ -12,9 +12,29 @@ class Env
     public bool $DEBUG_MODE = false;
     public string $TIMEZONE = 'UTC';
 
+    // HEAD on a GET route: true (default) runs the GET handler and drops the body; false answers every HEAD as a
+    // probe (200, headers only, handler NOT run) unless the route opts in with head: 'execute'.
+    public bool $HEAD_EXECUTES_GET = true;
+
+    // Persistence contract ("a failed write is never a 2xx"): lenient (default in 12.x; notices
+    // only) | enforced (error bodies get a 4xx/5xx, a 2xx after an unacknowledged failed
+    // Database::mutate() becomes 500, raw DB errors are mapped to 409/400/422/503).
+    // See StoneScriptPHP\Persistence\PersistenceContract. enforced becomes the default in the next major.
+    public string $PERSISTENCE_CONTRACT = 'lenient';
+
     public string $APP_NAME = 'My API';
     public string $APP_ENV = 'development';
     public int $APP_PORT = 9100;
+
+    // Refresh-token persistence (see StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer).
+    // REFRESH_TOKEN_STORE: none (default in 12.x: refresh tokens are minted but NOT persisted) | postgres.
+    // REFRESH_TOKEN_ROTATE: rotate on every refresh with reuse detection. Off by default: the stock
+    // body-mode client does not read a rotated refresh token from the refresh response.
+    public string $REFRESH_TOKEN_STORE = 'none';
+    public bool $REFRESH_TOKEN_ROTATE = false;
+    public int $REFRESH_TOKEN_REUSE_GRACE_SECONDS = 10;
+    // Absolute session cap (family lifetime), fixed at login and never slid by rotation. Default 180 days.
+    public int $REFRESH_TOKEN_SESSION_MAX_SECONDS = 15552000;
 
     // Database transport mode: gateway (default) | direct | pgandroid.
     // Selects the DbTransport implementation Database::fn() dispatches
@@ -22,6 +42,12 @@ class Env
     // below); an unrecognized value fails loud rather than surfacing as a
     // confusing error deep inside Database::initConnection().
     public string $DB_MODE = 'gateway';
+
+    // Row-to-model hydration: legacy (default in 12.x; SQL NULL into a non-nullable
+    // model property becomes ''/0/false, with a deprecation notice) | strict (NULL stays
+    // NULL, a NULL for a non-nullable property throws, values are converted explicitly).
+    // See StoneScriptPHP\Database\RowHydrator. strict becomes the default in the next major.
+    public string $DB_HYDRATION_MODE = 'legacy';
 
     // Database - Direct Connection (DB_MODE=direct only). Needs the
     // pdo_pgsql PHP extension. Ignored in gateway/pgandroid mode.

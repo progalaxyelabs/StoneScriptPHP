@@ -113,7 +113,7 @@ trait RequestContextTrait
 
             return !empty($result) ? $result[0] : null;
         } catch (\Exception $e) {
-            error_log("Failed to fetch local user: " . $e->getMessage());
+            log_error("Failed to fetch local user: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         }
     }

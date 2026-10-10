@@ -102,20 +102,30 @@ class RegisterRoute implements IRouteHandler
 
                 // Generate JWT token for immediate login
                 $jwtHandler = new RsaJwtHandler();
-                $token = $jwtHandler->generateToken([
+                $claims = [
                     'user_id' => $userId,
                     'email' => $this->email,
                     'display_name' => $this->display_name,
                     'user_role' => 'user',
                     'tenant_id' => tenant_id()
-                ]);
+                ];
+                // Persisted session (access + refresh token) when REFRESH_TOKEN_STORE is configured; otherwise
+                // the original single access token. Never mint a refresh token without going through the issuer.
+                $session = \StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer::configured()?->issueSession(
+                $claims,
+                \StoneScriptPHP\Auth\TokenClaims::PURPOSE_AUTHENTICATION,
+                null,
+                \StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer::qualifiedSubject($userId, tenant_check() ? tenant_id() : null)
+            );
+                $token = $session?->accessToken ?? $jwtHandler->generateToken($claims);
 
                 return new ApiResponse('success', 'User registered successfully', [
                     'user_id' => $userId,
                     'email' => $this->email,
                     'display_name' => $this->display_name,
                     'email_verified' => true,
-                    'token' => $token
+                    'token' => $token,
+                    'refresh_token' => $session?->refreshToken
                 ]);
             }
 

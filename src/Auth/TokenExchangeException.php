@@ -21,7 +21,7 @@ namespace StoneScriptPHP\Auth;
  * - JWKS_INVALID: JWKS response is invalid
  * - JWKS_PARSE_ERROR: Cannot parse JWKS keys
  */
-class TokenExchangeException extends \Exception
+class TokenExchangeException extends \Exception implements \StoneScriptPHP\Exceptions\PublicMessage
 {
     private string $errorCode;
 

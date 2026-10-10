@@ -257,6 +257,146 @@ final class GenerateModelTypedParamsCommandTest extends TestCase
         $this->assertStringNotContainsString('?mixed', $php);
     }
 
+    /**
+     * L15: `-- @out <col> <type>` in the leading comment block pins an output column's PHP
+     * type, so a nullable column (or an exact-decimal NUMERIC) survives regeneration.
+     */
+    public function test_out_annotation_overrides_output_column_types(): void
+    {
+        $fixture = $this->buildFixture();
+
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/get_invoice.pgsql',
+            "-- Returns an invoice.\n"
+            . "-- @out o_note ?string\n"
+            . "-- @out amount string\n"
+            . "-- @out o_nope ?int\n"
+            . "CREATE OR REPLACE FUNCTION get_invoice(p_id uuid)\n"
+            . "RETURNS TABLE (\n"
+            . "    o_id uuid,\n"
+            . "    o_note text,\n"
+            . "    o_amount numeric(15,2),\n"
+            . "    o_qty numeric(10,3)\n"
+            . ")\n"
+            . "AS \$\$\n"
+            . "BEGIN\nEND;\n"
+            . "\$\$ LANGUAGE plpgsql;\n"
+        );
+
+        [$exitCode, $output] = $this->runGenerator($fixture, 'get_invoice.pgsql');
+        $this->assertSame(0, $exitCode, "generator exited non-zero:\n$output");
+        $this->assertStringContainsString('@out nope', $output, 'an @out naming no output column is reported, not silently ignored');
+
+        $file = $fixture . 'src/App/Database/Functions/FnGetInvoice.php';
+        $this->assertPhpSyntaxValid($file);
+        $php = file_get_contents($file);
+
+        $this->assertStringContainsString('public ?string $note;', $php);
+        $this->assertStringContainsString('public string $amount;', $php);
+        $this->assertStringContainsString('public float $qty;', $php, 'columns without an annotation keep the default mapping');
+        $this->assertStringContainsString('public string $id;', $php);
+    }
+
+    /** L4: `-- @mutation` makes the generated wrapper call Database::mutate()/mutateTyped(). */
+    public function test_mutation_annotation_generates_mutate_calls(): void
+    {
+        $fixture = $this->buildFixture();
+
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/update_widget.pgsql',
+            "-- @mutation\n"
+            . "CREATE OR REPLACE FUNCTION update_widget(p_id uuid, p_name text)\n"
+            . "RETURNS TABLE (o_id uuid)\n"
+            . "AS \$\$\nBEGIN\nEND;\n\$\$ LANGUAGE plpgsql;\n"
+        );
+        [$exitCode, $output] = $this->runGenerator($fixture, 'update_widget.pgsql');
+        $this->assertSame(0, $exitCode, $output);
+        $php = file_get_contents($fixture . 'src/App/Database/Functions/FnUpdateWidget.php');
+        $this->assertStringContainsString('Database::mutateTyped($function_name, $params);', $php);
+        $this->assertStringNotContainsString('fnTyped', $php);
+
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/release_all.pgsql',
+            "-- @mutation allow-empty\n"
+            . "CREATE OR REPLACE FUNCTION release_all()\n"
+            . "RETURNS TABLE (o_id uuid)\n"
+            . "AS \$\$\nBEGIN\nEND;\n\$\$ LANGUAGE plpgsql;\n"
+        );
+        [$exitCode, $output] = $this->runGenerator($fixture, 'release_all.pgsql');
+        $this->assertSame(0, $exitCode, $output);
+        $php = file_get_contents($fixture . 'src/App/Database/Functions/FnReleaseAll.php');
+        $this->assertStringContainsString('Database::mutate($function_name, [], allowEmpty: true);', $php);
+        $this->assertPhpSyntaxValid($fixture . 'src/App/Database/Functions/FnReleaseAll.php');
+    }
+
+    public function test_mutation_allow_empty_rejected_for_single_row_function(): void
+    {
+        $fixture = $this->buildFixture();
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/bump.pgsql',
+            "-- @mutation allow-empty\n"
+            . "CREATE OR REPLACE FUNCTION bump(p_id uuid, OUT o_n integer)\n"
+            . "AS \$\$\nBEGIN\nEND;\n\$\$ LANGUAGE plpgsql;\n"
+        );
+        [$exitCode, $output] = $this->runGenerator($fixture, 'bump.pgsql');
+        $this->assertNotSame(0, $exitCode);
+        $this->assertStringContainsString('allow-empty', $output);
+    }
+
+    public function test_read_function_without_annotation_still_uses_fn(): void
+    {
+        $fixture = $this->buildFixture();
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/get_widget.pgsql',
+            "CREATE OR REPLACE FUNCTION get_widget(p_id uuid)\n"
+            . "RETURNS TABLE (o_id uuid)\n"
+            . "AS \$\$\nBEGIN\nEND;\n\$\$ LANGUAGE plpgsql;\n"
+        );
+        [$exitCode, $output] = $this->runGenerator($fixture, 'get_widget.pgsql');
+        $this->assertSame(0, $exitCode, $output);
+        $php = file_get_contents($fixture . 'src/App/Database/Functions/FnGetWidget.php');
+        $this->assertStringContainsString('Database::fnTyped($function_name, $params);', $php);
+    }
+
+    /** W5: an annotation that does not parse is warned about (and refused with --strict), never silently ignored. */
+    public function test_unparsed_annotations_are_warned_and_strict_fails(): void
+    {
+        $fixture = $this->buildFixture();
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/typo_fn.pgsql',
+            "-- @mutate\n-- @out o_x ?integer\n-- @mutation allow_empty\n"
+            . "CREATE OR REPLACE FUNCTION typo_fn(p_id uuid)\nRETURNS TABLE (o_id uuid)\nAS \$\$\nBEGIN\nEND;\n\$\$ LANGUAGE plpgsql;\n"
+        );
+        [$exitCode, $output] = $this->runGenerator($fixture, 'typo_fn.pgsql');
+        $this->assertSame(0, $exitCode, $output);
+        $this->assertSame(3, substr_count($output, 'unparsed annotation'), $output);
+        $this->assertStringContainsString('@mutate', $output);
+
+        $stoneBinary = $fixture . 'vendor/progalaxyelabs/stonescriptphp/stone';
+        $cmd = 'cd ' . escapeshellarg(rtrim($fixture, DIRECTORY_SEPARATOR))
+            . ' && php ' . escapeshellarg($stoneBinary) . ' generate model typo_fn.pgsql --strict 2>&1';
+        $out = [];
+        exec($cmd, $out, $code);
+        $this->assertSame(1, $code, implode("\n", $out));
+        $this->assertStringContainsString('--strict', implode("\n", $out));
+    }
+
+    /** W4: a @mutation wrapper maps the row inside hydrateCommitted so a strict-hydration failure says "persisted". */
+    public function test_mutation_wrapper_hydrates_inside_hydrate_committed(): void
+    {
+        $fixture = $this->buildFixture();
+        file_put_contents(
+            $fixture . 'src/postgresql/functions/save_widget.pgsql',
+            "-- @mutation\nCREATE OR REPLACE FUNCTION save_widget(p_id uuid)\nRETURNS TABLE (o_id uuid)\nAS \$\$\nBEGIN\nEND;\n\$\$ LANGUAGE plpgsql;\n"
+        );
+        [$exitCode, $output] = $this->runGenerator($fixture, 'save_widget.pgsql');
+        $this->assertSame(0, $exitCode, $output);
+        $file = $fixture . 'src/App/Database/Functions/FnSaveWidget.php';
+        $this->assertPhpSyntaxValid($file);
+        $php = file_get_contents($file);
+        $this->assertStringContainsString('Mutation::hydrateCommitted($function_name, static fn () => Database::result_as_typed_table(', $php);
+    }
+
     private function assertPhpSyntaxValid(string $file): void
     {
         $output = [];

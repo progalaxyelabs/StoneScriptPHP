@@ -25,7 +25,7 @@ namespace StoneScriptPHP\Auth\Invitations;
  *
  * @package StoneScriptPHP\Auth\Invitations
  */
-class InvitationException extends \Exception
+class InvitationException extends \Exception implements \StoneScriptPHP\Exceptions\PublicMessage
 {
     /** No invitation row matches the given token hash. */
     public const NOT_FOUND = 'invite_not_found';

@@ -133,8 +133,9 @@ class Router
         ?string $access = null,
         string $tokenType = 'access',
         ?string $request = null,
+        ?string $head = null,
     ): self {
-        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection, $access, $tokenType, null, $request);
+        return $this->addRoute('GET', $path, $handler, $middleware, $isPublic, $group, $action, $streaming, $param, $service, $response, $collection, $access, $tokenType, null, $request, $head);
     }
 
     /**
@@ -193,6 +194,7 @@ class Router
         string $tokenType = 'access',
         ?int $clientTimeoutMs = null,
         ?string $request = null,
+        ?string $head = null,
     ): self {
         $method = strtoupper($method);
         $fullPath = $path;
@@ -239,6 +241,7 @@ class Router
             'collection' => $collection,
             'client_timeout_ms' => $clientTimeoutMs,
             'request'    => $request,
+            'head'       => $head,
         ];
 
         // Track known services/scopes
@@ -288,6 +291,7 @@ class Router
             tokenType: $config['token_type'] ?? 'access',
             clientTimeoutMs: isset($config['client_timeout_ms']) ? (int) $config['client_timeout_ms'] : null,
             request:   $config['request']    ?? null,
+            head:      $config['head']       ?? null,
         );
     }
 
@@ -333,7 +337,7 @@ class Router
             $method = strtoupper($method);
             foreach ($routes as $path => $config) {
                 $entry = self::normalizeRouteConfig($config);
-                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection, $entry->access, $entry->tokenType, $entry->clientTimeoutMs, $entry->request);
+                $this->addRoute($method, $path, $entry->handler, [], $entry->isPublic, $entry->group, $entry->action, $entry->streaming, $entry->param, $entry->service !== 'shared' ? $entry->service : null, $entry->response, $entry->collection, $entry->access, $entry->tokenType, $entry->clientTimeoutMs, $entry->request, $entry->head);
             }
         }
         return $this;
@@ -413,12 +417,22 @@ class Router
      */
     public function dispatch(?IncomingRequest $incoming = null): ApiResponse
     {
+        \StoneScriptPHP\Persistence\PersistenceLedger::reset();
         $method = strtoupper($incoming?->method ?? ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
         $path = $incoming?->path ?? parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 
         // Pre-match route BEFORE running middleware so middleware (e.g. JwtAuthMiddleware)
         // can inspect the route's is_public flag without needing a separate excludedPaths list.
+        // HEAD (RFC 9110 9.3.2): an explicit HEAD route wins; otherwise the GET route
+        // answers it. `$match['method']` is the method the route was REGISTERED under
+        // (GET for a HEAD request served by a GET route) and is what the per-route
+        // middleware lookup keys on; `$request['method']` stays 'HEAD' so every
+        // middleware sees the real (safe, read-only) method.
         $match = $this->matchRoute($method, $path);
+        if ($match === null && $method === 'HEAD') {
+            $match = $this->matchRoute('GET', $path);
+        }
+        $allowedMethods = $match === null ? $this->allowedMethodsFor($path) : [];
 
         // Build request context — includes route metadata for middleware
         $request = [
@@ -428,6 +442,9 @@ class Router
             'params'  => $match['params'] ?? [],
             'headers' => $incoming?->headers ?? $this->getHeaders(),
             'cookies' => $incoming?->cookies ?? $_COOKIE,
+            // Methods registered for this path when no route matched the request method
+            // (drives 405 + Allow and the OPTIONS Allow header). Empty when matched / unknown path.
+            'allowed_methods' => $allowedMethods,
             // null when route not found — middleware passes through, closure returns 404
             'route'   => $match ? [
                 'pattern'       => $match['pattern'],
@@ -437,13 +454,20 @@ class Router
                 'service'       => $match['service'] ?? 'shared',
                 'handler_class' => is_object($match['handler']) ? get_class($match['handler']) : $match['handler'],
                 'request'       => $match['request'] ?? null,
+                'streaming'     => $match['streaming'] ?? false,
+                'head'          => $match['head'] ?? null,
             ] : null,
         ];
 
         // Process through global middleware pipeline.
         // Closure captures $match from outer scope — avoids double-matching.
-        return $this->globalMiddleware->process($request, function($request) use ($method, $match) {
+        $response = $this->globalMiddleware->process($request, function($request) use ($method, $match, $allowedMethods) {
             if (!$match) {
+                if ($allowedMethods !== []) {
+                    return $method === 'OPTIONS'
+                        ? $this->optionsResponse($allowedMethods)
+                        : $this->error405($allowedMethods);
+                }
                 return $this->error404();
             }
 
@@ -457,7 +481,7 @@ class Router
             $routeScope = $match['service'] ?? 'shared';
 
             // Build the middleware chain: scope middleware first, then route-specific middleware
-            $routeKey = "$method:" . $match['pattern'];
+            $routeKey = ($match['method'] ?? $method) . ':' . $match['pattern'];
             $routeMiddleware = $this->routeMiddleware[$routeKey] ?? [];
 
             // If there's scope-specific middleware, run it before route middleware
@@ -490,6 +514,11 @@ class Router
             // No scope or route-specific middleware, execute handler directly
             return $this->executeHandler($handler, $request);
         });
+
+        // A failed write must never ship as 2xx (see Persistence\ResponseGuard).
+        $response = \StoneScriptPHP\Persistence\ResponseGuard::apply($response);
+        \StoneScriptPHP\Persistence\PersistenceLedger::reset();
+        return $response;
     }
 
     /**
@@ -519,11 +548,14 @@ class Router
                     'token_type' => $this->routeMeta[$routeKey]['token_type'] ?? 'access',
                     'service'   => $this->routeMeta[$routeKey]['service'] ?? 'shared',
                     'request'   => $this->routeMeta[$routeKey]['request'] ?? null,
+                    'streaming' => $this->routeMeta[$routeKey]['streaming'] ?? false,
+                    'head'      => $this->routeMeta[$routeKey]['head'] ?? null,
+                    'method'    => $method,
                 ];
             }
 
             // Pattern match (with parameters like /users/{id})
-            $regex = $this->buildRegex($pattern);
+            $regex = $this->regexCache[$pattern] ??= $this->buildRegex($pattern);
             if (preg_match($regex, $path, $matches)) {
                 array_shift($matches); // Remove full match
                 $params = $this->extractParams($pattern, $matches);
@@ -537,6 +569,9 @@ class Router
                     'token_type' => $this->routeMeta[$routeKey]['token_type'] ?? 'access',
                     'service'   => $this->routeMeta[$routeKey]['service'] ?? 'shared',
                     'request'   => $this->routeMeta[$routeKey]['request'] ?? null,
+                    'streaming' => $this->routeMeta[$routeKey]['streaming'] ?? false,
+                    'head'      => $this->routeMeta[$routeKey]['head'] ?? null,
+                    'method'    => $method,
                 ];
             }
         }
@@ -591,6 +626,18 @@ class Router
      */
     private function executeHandler(string|object $handlerClass, array $request): ApiResponse
     {
+        // HEAD must be SAFE BY CONSTRUCTION: answer as a probe (200, headers only, handler NOT run) when the
+        // route says `head: 'probe'`, is a streaming route, has a streaming-type handler, or the global
+        // default `HEAD_EXECUTES_GET=false` is in force (and the route did not opt back in with 'execute').
+        if (($request['method'] ?? '') === 'HEAD' && $this->headIsProbe($handlerClass, $request)) {
+            $probe = new ApiResponse('ok', '', null, 200);
+            $probe->headProbe = true;
+            if (($request['route']['streaming'] ?? false) || $this->isStreamingHandler($handlerClass)) {
+                $probe->headers = ['Content-Type' => 'text/event-stream', 'Cache-Control' => 'no-cache'];
+            }
+            return $probe;
+        }
+
         try {
             if (is_object($handlerClass)) {
                 // Pre-instantiated handler object (e.g. RefreshRoute with jwtHandler injected)
@@ -709,12 +756,32 @@ class Router
             return $response;
 
         } catch (TenantDatabaseUnavailableException $e) {
-            log_error('Tenant database unavailable: ' . $e->getMessage());
+            log_error('Tenant database unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             http_response_code(401);
             return new ApiResponse('error', 'Unauthorized: session references an unavailable tenant. Please sign in again.');
+        } catch (\StoneScriptPHP\Persistence\PersistenceException $e) {
+            // A write that did not persist: classified safe message (or explicit public business error) + the real 4xx/5xx.
+            return \StoneScriptPHP\Persistence\DbErrorMapper::toResponse($e);
         } catch (\Exception $e) {
-            log_debug('Exception in handler: ' . $e->getMessage());
-            return $this->error500($e->getMessage());
+            $dbOrigin = \StoneScriptPHP\Persistence\DbErrorMapper::isDatabaseOrigin($e);
+            // Raw database text may embed customer values: only ever log/show the sanitised form.
+            log_debug('Exception in handler: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            $coded = $e instanceof \RuntimeException && $e->getCode() >= 400 && $e->getCode() < 600;
+            if ($dbOrigin || $coded) {
+                $mapped = \StoneScriptPHP\Persistence\DbErrorMapper::resolve($e);
+                if (\StoneScriptPHP\Persistence\PersistenceContract::enforced()) {
+                    return \StoneScriptPHP\Persistence\DbErrorMapper::toResponse($e);
+                }
+                if ($mapped->status !== 500) {
+                    \StoneScriptPHP\Persistence\PersistenceContract::wouldEnforce(
+                        'db-error-mapping',
+                        "an unhandled database error answered HTTP 500 but classifies as HTTP {$mapped->status}."
+                    );
+                }
+            }
+            // A response carries only a PublicError message, a message deliberately marked public (PublicMessage), or
+            // a generic sentence plus a correlation id. Raw exception text never reaches a client, in any mode.
+            return $this->genericFailure($e, 500, $dbOrigin ? 'Database error (details are in the server log)' : null, false);
         }
     }
 
@@ -775,11 +842,17 @@ class Router
             log_debug('Structured business validation failed: ' . json_encode($e->errors()));
             http_response_code($e->httpCode());
             return new ApiResponse('error', 'Validation failed', null, $e->httpCode(), $e->errors());
+        } catch (\StoneScriptPHP\Persistence\PersistenceException $e) {
+            // keeps error_code / fields / errors and the not-found upgrade; never raw database text
+            return \StoneScriptPHP\Persistence\DbErrorMapper::toResponse($e);
         } catch (\RuntimeException $e) {
             $code = $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500;
-            log_debug('RuntimeException in typed handler: ' . $e->getMessage());
-            http_response_code($code);
-            return new ApiResponse('error', $code < 500 || DEBUG_MODE ? $e->getMessage() : 'Internal server error', null, $code);
+            if ($e instanceof \StoneScriptPHP\Exceptions\PublicMessage) {
+                log_debug('Public RuntimeException in typed handler: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                http_response_code($code);
+                return new ApiResponse('error', $e->getMessage(), null, $code);
+            }
+            return $this->genericFailure($e, $code);
         }
 
         // Convention: a response DTO's `message` property (if it declares
@@ -787,7 +860,7 @@ class Router
         // excluded from `data`, matching the wire shape every hand-written
         // `process()`/`res_ok($data, $message)` route already produced
         // (`data` = the business payload; `message` = a separate top-level
-        // human-readable string) — see PostDistributorInvoiceSubmitResponse
+        // human-readable string) — see an order-submit response DTO
         // for a real example.
         $data = self::dtoToArray($responseDto);
         $message = '';
@@ -855,7 +928,7 @@ class Router
     {
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-        if ($method === 'GET') {
+        if ($method === 'GET' || $method === 'HEAD') {
             return $_GET;
         }
 
@@ -896,6 +969,85 @@ class Router
         return $headers;
     }
 
+    /** Global default for HEAD on GET routes: true = run the GET handler and drop the body. */
+    private bool $headExecutesGet = true;
+
+    /** @var array<string, string> compiled route regexes, by pattern */
+    private array $regexCache = [];
+
+    public function setHeadExecutesGet(bool $executes): self
+    {
+        $this->headExecutesGet = $executes;
+        return $this;
+    }
+
+    private function headIsProbe(string|object $handler, array $request): bool
+    {
+        $route = $request['route'] ?? [];
+        if (($route['streaming'] ?? false) || $this->isStreamingHandler($handler)) {
+            return true;
+        }
+        $mode = $route['head'] ?? null;
+        if ($mode === 'probe') {
+            return true;
+        }
+        if ($mode === 'execute') {
+            return false;
+        }
+        return !$this->headExecutesGet;
+    }
+
+    private function isStreamingHandler(string|object $handler): bool
+    {
+        return is_object($handler)
+            ? $handler instanceof \StoneScriptPHP\IStreamingRouteHandler
+            : (class_exists($handler) && is_subclass_of($handler, \StoneScriptPHP\IStreamingRouteHandler::class));
+    }
+
+    /**
+     * Methods registered for $path (any method whose route pattern matches), plus HEAD
+     * when GET is present (served by the GET route) and OPTIONS. Sorted, de-duplicated.
+     *
+     * @return string[]
+     */
+    private function allowedMethodsFor(string $path): array
+    {
+        $allowed = [];
+        foreach (array_keys($this->routes) as $registered) {
+            if ($this->matchRoute((string) $registered, $path) !== null) {
+                $allowed[] = (string) $registered;
+            }
+        }
+        if ($allowed === []) {
+            return [];
+        }
+        if (in_array('GET', $allowed, true)) {
+            $allowed[] = 'HEAD';
+        }
+        $allowed[] = 'OPTIONS';
+        $allowed = array_values(array_unique($allowed));
+        sort($allowed);
+        return $allowed;
+    }
+
+    /** 405 Method Not Allowed with the mandatory Allow header (RFC 9110 15.5.6). */
+    private function error405(array $allowed): ApiResponse
+    {
+        http_response_code(405);
+        $r = new ApiResponse('error', 'Method not allowed', null, 405);
+        $r->headers = ['Allow' => implode(', ', $allowed)];
+        return $r;
+    }
+
+    /** OPTIONS for a known path that reached the router (no CORS layer answered it first). */
+    private function optionsResponse(array $allowed): ApiResponse
+    {
+        http_response_code(204);
+        $r = new ApiResponse('ok', '', null, 204);
+        $r->headers = ['Allow' => implode(', ', $allowed)];
+        return $r;
+    }
+
     /**
      * Return 404 error
      *
@@ -914,9 +1066,15 @@ class Router
      * @param string $message
      * @return ApiResponse
      */
-    private function error500(string $message = 'Internal server error'): ApiResponse
+    /**
+     * A failure whose own text must not reach the client: the generic sentence for the status (or an explicit safe
+     * `$message`) plus a correlation id; the sanitised detail is logged under that id. Same in every mode.
+     */
+    private function genericFailure(\Throwable $e, int $status, ?string $message = null, bool $explicitStatus = true): ApiResponse
     {
-        http_response_code(500);
-        return new ApiResponse('error', DEBUG_MODE ? $message : 'Internal server error');
+        $correlationId = bin2hex(random_bytes(6));
+        log_error('Request failed [correlation_id=' . $correlationId . ', HTTP ' . $status . ']: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+        http_response_code($status);
+        return new ApiResponse('error', $message ?? \StoneScriptPHP\Persistence\DbErrorMapper::genericMessage($status), ['correlation_id' => $correlationId], $explicitStatus ? $status : null);
     }
 }

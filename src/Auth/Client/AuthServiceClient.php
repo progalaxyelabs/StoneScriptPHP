@@ -234,9 +234,11 @@ abstract class AuthServiceClient
 
         if ($httpCode < 200 || $httpCode >= 300) {
             $errorMessage = "Auth service returned HTTP $httpCode";
+            $publicMessage = null;
 
             if ($response !== false && !empty($response)) {
                 $errorBody = json_decode($response, true);
+                $publicMessage = AuthServicePublicException::extract($errorBody);
                 if (is_array($errorBody) && isset($errorBody['error'])) {
                     $errorMessage .= ': ' . $errorBody['error'];
                 } elseif (is_array($errorBody) && isset($errorBody['message'])) {
@@ -244,7 +246,12 @@ abstract class AuthServiceClient
                 }
             }
 
-            throw new AuthServiceException($errorMessage, $httpCode);
+            $detail = new AuthServiceException($errorMessage, $httpCode);
+            if ($publicMessage !== null) {
+                // Only the auth service's structured public_message becomes user-facing; the rest stays in the log.
+                throw new AuthServicePublicException($publicMessage, $httpCode, $detail);
+            }
+            throw $detail;
         }
 
         if ($response === false || $response === '') {

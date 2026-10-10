@@ -70,7 +70,7 @@ class GetSubscriptionStatusRoute implements IRouteHandler
 
             return res_ok($data);
         } catch (\Exception $e) {
-            error_log('[Subscription Status] Error: ' . $e->getMessage());
+            log_error('[Subscription Status] Error: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return res_error('Failed to retrieve subscription status');
         }
     }

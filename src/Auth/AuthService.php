@@ -134,7 +134,7 @@ class StandaloneAuth
         // Auto-generate secret if not provided (for quick start)
         if (!$this->jwtSecret && !$this->jwtPrivateKey) {
             $this->jwtSecret = bin2hex(random_bytes(32));
-            error_log("Warning: Using auto-generated JWT secret. Set JWT_SECRET env var for production.");
+            log_error("Warning: Using auto-generated JWT secret. Set JWT_SECRET env var for production.");
         }
 
         $this->ensureTablesExist();
@@ -218,7 +218,7 @@ class StandaloneAuth
 
             return (array) $decoded;
         } catch (\Exception $e) {
-            error_log("JWT validation failed: " . $e->getMessage());
+            log_error("JWT validation failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         }
     }
@@ -491,7 +491,7 @@ class CentralizedAuth
 
             return (array) $decoded;
         } catch (\Exception $e) {
-            error_log("JWT validation failed: " . $e->getMessage());
+            log_error("JWT validation failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         }
     }

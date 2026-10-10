@@ -133,7 +133,7 @@ class InvitationCompletionService
             );
         } catch (TokenExchangeException $e) {
             throw new InvitationException(
-                'Invalid or expired session: ' . $e->getMessage(),
+                'Invalid or expired session',
                 InvitationException::INVALID_AUTH_TOKEN,
                 401,
                 $e
@@ -252,7 +252,7 @@ class InvitationCompletionService
             ], $platformSecret);
         } catch (\Throwable $e) {
             throw new InvitationException(
-                'Failed to notify auth of the new membership: ' . $e->getMessage(),
+                'Failed to notify auth of the new membership',
                 InvitationException::MEMBERSHIP_FAILED,
                 502,
                 $e

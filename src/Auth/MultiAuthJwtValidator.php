@@ -67,7 +67,7 @@ class MultiAuthJwtValidator
             // Manually decode JWT payload to extract issuer (avoids "empty key" error in jwt v6+)
             $parts = explode('.', $jwt);
             if (count($parts) !== 3) {
-                error_log("JWT validation failed: Invalid JWT format");
+                log_error("JWT validation failed: Invalid JWT format");
                 return null;
             }
 
@@ -77,14 +77,14 @@ class MultiAuthJwtValidator
             $issuer = $payload->iss ?? null;
 
             if (!$issuer) {
-                error_log("JWT validation failed: Token has no 'iss' claim");
+                log_error("JWT validation failed: Token has no 'iss' claim");
                 return null;
             }
 
             // Find matching auth server by issuer
             $issuerType = $this->findIssuerType($issuer);
             if (!$issuerType) {
-                error_log("JWT validation failed: Unknown issuer '$issuer'");
+                log_error("JWT validation failed: Unknown issuer '$issuer'");
                 return null;
             }
 
@@ -100,7 +100,7 @@ class MultiAuthJwtValidator
             if (isset($serverConfig['audience'])) {
                 $audience = $decoded->aud ?? null;
                 if ($audience !== $serverConfig['audience']) {
-                    error_log("JWT validation failed: Invalid audience. Expected '{$serverConfig['audience']}', got '$audience'");
+                    log_error("JWT validation failed: Invalid audience. Expected '{$serverConfig['audience']}', got '$audience'");
                     return null;
                 }
             }
@@ -111,13 +111,13 @@ class MultiAuthJwtValidator
 
             return $claims;
         } catch (\Firebase\JWT\ExpiredException $e) {
-            error_log("JWT validation failed: Token expired - " . $e->getMessage());
+            log_error("JWT validation failed: Token expired - " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         } catch (\Firebase\JWT\SignatureInvalidException $e) {
-            error_log("JWT validation failed: Invalid signature - " . $e->getMessage());
+            log_error("JWT validation failed: Invalid signature - " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         } catch (\Exception $e) {
-            error_log("JWT validation failed: " . $e->getMessage());
+            log_error("JWT validation failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         }
     }
@@ -194,7 +194,7 @@ class MultiAuthJwtValidator
                 $staleKeys = $keys;
                 $staleAge = $age;
             } catch (\Exception $e) {
-                error_log("JWKS persistent cache parse error for '$issuerType': " . $e->getMessage());
+                log_error("JWKS persistent cache parse error for '$issuerType': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             }
         }
 
@@ -216,13 +216,13 @@ class MultiAuthJwtValidator
 
                     return $keys;
                 } catch (\Exception $e) {
-                    error_log("JWKS parse error from '$jwksUrl': " . $e->getMessage());
+                    log_error("JWKS parse error from '$jwksUrl': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
                 }
             } else {
-                error_log("Invalid JWKS response from '$jwksUrl' for issuer type '$issuerType'");
+                log_error("Invalid JWKS response from '$jwksUrl' for issuer type '$issuerType'");
             }
         } else {
-            error_log("Failed to fetch JWKS from '$jwksUrl' for issuer type '$issuerType'");
+            log_error("Failed to fetch JWKS from '$jwksUrl' for issuer type '$issuerType'");
         }
 
         // 4. Graceful degradation: use stale cache if fetch failed — but BOUNDED.
@@ -238,7 +238,7 @@ class MultiAuthJwtValidator
                     . "max_stale_ttl {$maxStale}s and the auth service is unreachable (fail-closed)."
                 );
             }
-            error_log("Using stale JWKS cache for '$issuerType' (fetch failed)");
+            log_error("Using stale JWKS cache for '$issuerType' (fetch failed)");
             $this->jwksCache[$issuerType] = $staleKeys;
             return $staleKeys;
         }

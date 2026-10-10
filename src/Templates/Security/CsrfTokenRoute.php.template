@@ -67,7 +67,7 @@ class CsrfTokenRoute implements IRouteHandler
                 'ip' => client_ip()
             ]);
 
-            return new ApiResponse('error', $e->getMessage(), [
+            return new ApiResponse('error', 'Too many requests. Please try again later.', [
                 'error_code' => 'RATE_LIMIT_EXCEEDED'
             ], 429);
 

@@ -8,7 +8,7 @@ use Throwable;
 /**
  * Base Exception for StoneScriptPHP Framework
  */
-abstract class FrameworkException extends Exception
+abstract class FrameworkException extends Exception implements PublicMessage
 {
     protected int $http_status_code = 500;
     protected array $context = [];

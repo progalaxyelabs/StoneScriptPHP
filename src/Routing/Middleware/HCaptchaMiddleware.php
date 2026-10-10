@@ -98,7 +98,7 @@ class HCaptchaMiddleware implements MiddlewareInterface
 
             return new ApiResponse('error', 'CAPTCHA verification failed', [
                 'error_code' => 'CAPTCHA_INVALID',
-                'message' => $error ?? 'Please complete the CAPTCHA verification again'
+                'message' => 'Please complete the CAPTCHA verification again'
             ], 403);
         }
 

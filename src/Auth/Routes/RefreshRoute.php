@@ -9,6 +9,9 @@ use StoneScriptPHP\Auth\JwtHandlerInterface;
 use StoneScriptPHP\Auth\CookieHelper;
 use StoneScriptPHP\Auth\CsrfHelper;
 use StoneScriptPHP\Auth\AuthRoutes;
+use StoneScriptPHP\Auth\RefreshTokens\RefreshRejectedException;
+use StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer;
+use StoneScriptPHP\Auth\RefreshTokens\RotatingRefreshTokenStore;
 
 /**
  * Refresh Route
@@ -72,6 +75,30 @@ class RefreshRoute implements IRouteHandler
             log_error('RefreshRoute: No refresh token in cookie');
             http_response_code(401);
             return new ApiResponse('error', 'No refresh token provided');
+        }
+
+        // 2b. Persisted sessions (REFRESH_TOKEN_STORE / auth.refresh_tokens): the issuer verifies the token, checks
+        // its row, rotates it (a rotating store always rotates here: the cookie carries the successor
+        // automatically) and revokes the whole session on replay of a spent token.
+        $issuer = RefreshTokenIssuer::configured();
+        if ($issuer !== null) {
+            try {
+                $issued = $issuer->refresh($refreshToken, null, $issuer->store() instanceof RotatingRefreshTokenStore);
+            } catch (RefreshRejectedException $e) {
+                log_info('RefreshRoute: refresh refused (' . $e->reason() . ')');
+                http_response_code(401);
+                return new ApiResponse('error', 'Invalid or expired refresh token');
+            }
+            if ($issued->refreshToken !== null) {
+                $cookieTtl = $issuer->refreshTtl();
+                CookieHelper::setRefreshToken($issued->refreshToken, $cookieTtl);
+                CookieHelper::setCsrfToken(CsrfHelper::generate(), $cookieTtl);
+            }
+            return new ApiResponse('ok', [
+                'access_token' => $issued->accessToken,
+                'expires_in' => $issued->expiresIn,
+                'token_type' => 'Bearer'
+            ]);
         }
 
         // 3. Verify refresh token using RsaJwtHandler

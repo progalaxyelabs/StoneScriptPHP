@@ -79,13 +79,22 @@ class VerifyOtpRoute implements IRouteHandler
 
             // Generate JWT token
             $jwtHandler = new RsaJwtHandler();
-            $token = $jwtHandler->generateToken([
+            $claims = [
                 'user_id' => $user['id'],
                 'mobile_number' => $user['mobile_number'],
                 'display_name' => $user['display_name'],
                 'user_role' => 'user',
                 'tenant_id' => tenant_id()
-            ]);
+            ];
+            // Persisted session (access + refresh token) when REFRESH_TOKEN_STORE is configured; otherwise
+            // the original single access token. Never mint a refresh token without going through the issuer.
+            $session = \StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer::configured()?->issueSession(
+                $claims,
+                \StoneScriptPHP\Auth\TokenClaims::PURPOSE_AUTHENTICATION,
+                null,
+                \StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer::qualifiedSubject($user['id'], tenant_check() ? tenant_id() : null)
+            );
+            $token = $session?->accessToken ?? $jwtHandler->generateToken($claims);
 
             log_info("OTP verified successfully", [
                 'user_id' => $user['id'],
@@ -98,7 +107,8 @@ class VerifyOtpRoute implements IRouteHandler
                 'user_id' => $user['id'],
                 'mobile_number' => $user['mobile_number'],
                 'display_name' => $user['display_name'],
-                'token' => $token
+                'token' => $token,
+                'refresh_token' => $session?->refreshToken
             ]);
 
         } catch (\Exception $e) {

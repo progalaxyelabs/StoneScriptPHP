@@ -477,6 +477,49 @@ class ClientGeneratorV4Test extends TestCase
         }
     }
 
+    public function test_t3_client_emits_clear_tenant_and_rejects_empty_set_tenant(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['portal', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $clientTs = file_get_contents($outputDir . '/portal/src/client.ts');
+
+            // clearTenant() truly unsets the in-memory tenant ...
+            $this->assertMatchesRegularExpression('/clearTenant\(\): this \{\s*this\._tenantId = null;\s*return this;\s*\}/', $clientTs);
+            // ... and the tenant getter then throws instead of building `/tenant/` paths
+            $this->assertStringContainsString("if (this._tenantId === null || this._tenantId === '')", $clientTs);
+            $this->assertStringContainsString('Tenant context not set', $clientTs);
+
+            // setTenant rejects '' / whitespace / NaN / null / undefined
+            $this->assertStringContainsString("typeof id === 'string' && id.trim() === ''", $clientTs);
+            $this->assertStringContainsString('Number.isFinite(id)', $clientTs);
+            $this->assertStringContainsString('setTenant() requires a non-empty tenant id', $clientTs);
+
+            // the guard runs BEFORE the assignment inside setTenant
+            $setPos = strpos($clientTs, 'setTenant(id: string | number): this {');
+            $guardPos = strpos($clientTs, 'requires a non-empty tenant id', $setPos);
+            $assignPos = strpos($clientTs, 'this._tenantId = id;', $setPos);
+            $this->assertTrue($setPos < $guardPos && $guardPos < $assignPos, 'validation must precede assignment');
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
+    public function test_admin_and_t2_clients_have_neither_set_nor_clear_tenant(): void
+    {
+        $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();
+
+        try {
+            $this->runGenerator(['admin', '--output=' . $outputDir, '--tenancy=T3'], $this->fixtureRoutesFile());
+            $clientTs = file_get_contents($outputDir . '/admin/src/client.ts');
+            $this->assertStringNotContainsString('clearTenant', $clientTs);
+            $this->assertStringNotContainsString('setTenant', $clientTs);
+        } finally {
+            $this->rmdir($outputDir);
+        }
+    }
+
     public function test_generator_portal_client_has_set_tenant_for_t3(): void
     {
         $outputDir = sys_get_temp_dir() . '/ssp-gen-test-' . uniqid();

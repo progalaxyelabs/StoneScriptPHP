@@ -116,6 +116,55 @@ if (preg_match('/\.(pgsql|pssql|sql)$/i', $filename)) {
 
 $content = file_get_contents($src_filepath);
 
+// Output-column type overrides: `-- @out <column> <type>` lines in the leading
+// comment block, e.g.
+//     -- @out o_note ?string        (a nullable column: NULL stays null)
+//     -- @out o_amount string       (NUMERIC kept as an exact decimal string)
+// A SQL function signature cannot express NOT NULL on a returned column, so this is
+// how a model says "this column may be NULL" without a hand edit that the next
+// regeneration would overwrite. <column> may be written with or without `o_`.
+$out_overrides = [];
+if (preg_match('/\A(?:[ \t]*--[^\n]*\n)+/', $content, $header_block)) {
+    if (preg_match_all('/^[ \t]*--[ \t]*@out[ \t]+([A-Za-z0-9_]+)[ \t]+(\??(?:int|float|string|bool|array|mixed))[ \t]*\r?$/mi', $header_block[0], $om, PREG_SET_ORDER)) {
+        foreach ($om as $m) {
+            $col = strtolower(preg_replace('#^o_#i', '', $m[1]));
+            $out_overrides[$col] = strtolower($m[2]);
+        }
+    }
+}
+
+// Write functions: `-- @mutation` (optionally `-- @mutation allow-empty`) in the leading comment block
+// makes the generated run() call Database::mutate()/mutateTyped() instead of fn()/fnTyped(), so a write
+// that did not persist throws a typed PersistenceException (-> real 4xx/5xx) instead of returning an
+// empty model/array that a handler can answer 2xx for. `allow-empty` is for genuinely idempotent no-ops.
+$mutation = null; // null = read function; otherwise ['allow_empty' => bool]
+if (preg_match('/\A(?:[ \t]*--[^\n]*\n)+/', $content, $mut_header)
+    && preg_match('/^[ \t]*--[ \t]*@mutation(?:[ \t]+(allow-empty))?[ \t]*\r?$/mi', $mut_header[0], $mm)) {
+    $mutation = ['allow_empty' => isset($mm[1]) && strtolower($mm[1]) === 'allow-empty'];
+}
+
+// Lint the annotations: a `-- @mutation` / `-- @out` line that does not parse (a typo such as `@mutate`, a bad
+// type, `allow_empty`) would otherwise be IGNORED silently and generate a plain read wrapper - the unsafe default for a
+// write. Warn always; with --strict, fail before writing anything.
+$annotation_problems = [];
+foreach (preg_split('/\r?\n/', $content) as $line_no => $src_line) {
+    if (!preg_match('/^[ \t]*--[ \t]*@(mutat\w*|out\w*)\b/i', $src_line, $am)) {
+        continue;
+    }
+    $ok_mutation = preg_match('/^[ \t]*--[ \t]*@mutation(?:[ \t]+allow-empty)?[ \t]*\r?$/i', $src_line) === 1;
+    $ok_out = preg_match('/^[ \t]*--[ \t]*@out[ \t]+[A-Za-z0-9_]+[ \t]+\??(?:int|float|string|bool|array|mixed)[ \t]*\r?$/i', $src_line) === 1;
+    if (!$ok_mutation && !$ok_out) {
+        $annotation_problems[] = 'line ' . ($line_no + 1) . ': ' . trim($src_line);
+    }
+}
+foreach ($annotation_problems as $problem) {
+    fwrite(STDERR, "Warning: unparsed annotation in {$filename} ({$problem}) - it is IGNORED. Valid forms: `-- @mutation`, `-- @mutation allow-empty`, `-- @out <column> <int|float|string|bool|array|mixed>` (optional leading ?).\n");
+}
+if ($annotation_problems !== [] && in_array('--strict', $argv, true)) {
+    fwrite(STDERR, "Error: --strict: refusing to generate with unparsed annotations.\n");
+    exit(1);
+}
+
 // Strip SQL comments (-- style) from the beginning of the file
 // This allows functions to have documentation comments
 $content = preg_replace('/^(--.*\n)+/', '', $content);
@@ -563,6 +612,12 @@ $params_class_name = $class_name . 'Params';
 $fn_class_name = 'Fn' . $class_name;
 $has_params = count($input_param_specs) > 0;
 
+if ($mutation !== null && $mutation['allow_empty'] && !$is_return_table) {
+    fwrite(STDERR, "Error: `-- @mutation allow-empty` on '{$parsed_fn_name}' is only valid for a RETURNS TABLE function.\n");
+    fwrite(STDERR, "A single-row function that may return nothing cannot be expressed by a non-nullable model return type.\n");
+    exit(1);
+}
+
 $lines = [];
 $lines[] = '<?php';
 $lines[] = '';
@@ -576,7 +631,17 @@ $lines[] = '';
 $lines[] = "class $model_class_name";
 $lines[] = '{';
 foreach ($output_params as $name => $type) {
+    if (isset($out_overrides[$name])) {
+        $type = $out_overrides[$name];
+        // `mixed` already includes null; `?mixed` is not valid PHP.
+        if ($type === '?mixed') {
+            $type = 'mixed';
+        }
+    }
     $lines[] = "   public $type $$name;";
+}
+foreach (array_diff_key($out_overrides, $output_params) as $unknown => $_t) {
+    fwrite(STDERR, "Warning: `-- @out $unknown` does not match any output column of {$parsed_fn_name}; ignored.\n");
 }
 $lines[] = '}';
 $lines[] = '';
@@ -619,12 +684,25 @@ $lines[] = '     */';
 $lines[] = "    public static function run($run_arg): " . ($is_return_table ? 'TypedArray' : $model_class_name);
 $lines[] = '    {';
 $lines[] = '        $function_name = ' . "'" . $sql_fn_name . "'" . ';';
-if ($has_params) {
+if ($mutation !== null) {
+    $mut_opts = $mutation['allow_empty'] ? ', allowEmpty: true' : '';
+    if ($has_params) {
+        $lines[] = '        $rows = Database::mutateTyped($function_name, $params' . $mut_opts . ');';
+    } else {
+        $lines[] = '        $rows = Database::mutate($function_name, []' . $mut_opts . ');';
+    }
+} elseif ($has_params) {
     $lines[] = '        $rows = Database::fnTyped($function_name, $params);';
 } else {
     $lines[] = '        $rows = Database::fn($function_name, []);';
 }
-$lines[] = '        return Database::' . ($is_return_table ? 'result_as_typed_table' : 'result_as_object') . '($function_name, $rows, ' . $model_class_name . '::class);';
+$hydrate_call = 'Database::' . ($is_return_table ? 'result_as_typed_table' : 'result_as_object') . '($function_name, $rows, ' . $model_class_name . '::class)';
+if ($mutation !== null) {
+    // The write has committed by the time the row is mapped: a strict-hydration failure must say so (persisted: true).
+    $lines[] = '        return \\StoneScriptPHP\\Persistence\\Mutation::hydrateCommitted($function_name, static fn () => ' . $hydrate_call . ');';
+} else {
+    $lines[] = '        return ' . $hydrate_call . ';';
+}
 $lines[] = '    }';
 $lines[] = '}';
 

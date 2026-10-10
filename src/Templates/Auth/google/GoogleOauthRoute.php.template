@@ -70,12 +70,12 @@ class GoogleOauthRoute implements IRouteHandler
             } else {                
                 // Invalid Token (verification failed)
                 http_response_code(401); // Unauthorized
-                error_log("Google Sign-In Error: Invalid ID token received.");
+                log_error("Google Sign-In Error: Invalid ID token received.");
                 return new ApiResponse('not ok', 'Invalid ID token', []);
             }
         } catch (\Exception $e) {
             http_response_code(500);
-            error_log("Google Sign-In Exception: " . $e->getMessage());
+            log_error("Google Sign-In Exception: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return new ApiResponse('not ok', 'Token verification failed', []);
         }        
     }

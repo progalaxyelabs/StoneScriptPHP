@@ -192,7 +192,7 @@ class SubscriptionMiddleware implements MiddlewareInterface
 
         // ----- expired / inactive / no row -----
         if ($this->expiredMode === self::MODE_BLOCK) {
-            error_log('[SubscriptionMiddleware] Blocked tenant=' . $tenantId . ' — ' . ($state->reason ?? 'inactive'));
+            log_error('[SubscriptionMiddleware] Blocked tenant=' . \StoneScriptPHP\Persistence\LogSanitizer::ref($tenantId) . ' — ' . ($state->reason ?? 'inactive'));
             return new ApiResponse(
                 'error',
                 'Your subscription has expired. Please renew to continue using this service.',
@@ -224,7 +224,7 @@ class SubscriptionMiddleware implements MiddlewareInterface
             return;
         }
         self::$lastFailOpenLog = $now;
-        error_log('[SubscriptionMiddleware] lookup failed (failing open; further occurrences suppressed for 60s) tenant=' . $tenantId . ': ' . $e->getMessage());
+        log_error('[SubscriptionMiddleware] lookup failed (failing open; further occurrences suppressed for 60s) tenant=' . \StoneScriptPHP\Persistence\LogSanitizer::ref($tenantId) . ': ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
     }
 
     /** Overridable seam so tests can capture headers (header() is a no-op once PHPUnit output started). */

@@ -59,7 +59,8 @@ class ChallengeRoute implements IRouteHandler
             ));
 
         } catch (\InvalidArgumentException $e) {
-            return new ApiResponse('error', $e->getMessage(), null, 400);
+            log_warning('Challenge request rejected: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return new ApiResponse('error', 'Invalid challenge request', null, 400);
 
         } catch (\Exception $e) {
             log_error("Challenge generation failed: {$e->getMessage()}");

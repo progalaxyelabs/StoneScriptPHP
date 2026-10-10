@@ -17,6 +17,7 @@ use StoneScriptPHP\Db\DirectTransport;
 use StoneScriptPHP\Db\GatewayTransport;
 use StoneScriptPHP\Db\PgandroidTransport;
 use StoneScriptPHP\Binding\TypedArray;
+use StoneScriptPHP\Database\RowHydrator;
 use Throwable;
 
 class Database
@@ -388,6 +389,56 @@ class Database
     }
 
     /**
+     * Call a WRITING SQL function and assert it persisted; throws
+     * {@see \StoneScriptPHP\Persistence\PersistenceException} (typed, with a real 4xx/5xx status) when it
+     * did not. Use this, not {@see fn()}, for every INSERT/UPDATE/DELETE function: `fn()` treats zero rows
+     * as a valid result, so a write that changed nothing would otherwise answer 2xx.
+     *
+     * Failure signals: an `{error}` envelope, a `{success:false}` envelope, no row where one was expected,
+     * a row count other than `$exactRows`, or the database refusing the statement. See
+     * {@see \StoneScriptPHP\Persistence\Mutation::run()} for the full contract and parameters.
+     *
+     * @param array<int|string, mixed> $params
+     * @return array<int, array<string, mixed>> Raw rows on success (same shape as fn()).
+     * @throws \StoneScriptPHP\Persistence\PersistenceException
+     */
+    public static function mutate(
+        string $function_name,
+        array $params,
+        bool $allowEmpty = false,
+        ?string $notFoundMessage = null,
+        ?int $exactRows = null,
+        ?string $noun = null,
+    ): array {
+        return \StoneScriptPHP\Persistence\Mutation::run($function_name, $params, $allowEmpty, $notFoundMessage, $exactRows, $noun);
+    }
+
+    /**
+     * {@see mutate()} with a typed params object (public properties in SQL argument order), the write
+     * counterpart of {@see fnTyped()}.
+     *
+     * @return array<int, array<string, mixed>>
+     * @throws \StoneScriptPHP\Persistence\PersistenceException
+     */
+    public static function mutateTyped(
+        string $function_name,
+        object $params,
+        bool $allowEmpty = false,
+        ?string $notFoundMessage = null,
+        ?int $exactRows = null,
+        ?string $noun = null,
+    ): array {
+        return \StoneScriptPHP\Persistence\Mutation::run(
+            $function_name,
+            self::objectToPositionalParams($params),
+            $allowEmpty,
+            $notFoundMessage,
+            $exactRows,
+            $noun
+        );
+    }
+
+    /**
      * @return array<int, mixed> Positional values, in $params' public
      *   property DECLARATION order (not alphabetical, not visitation order of
      *   any internal storage — {@see \ReflectionClass::getProperties()}
@@ -428,35 +479,35 @@ class Database
             $transport = self::get_instance()->getTransport();
             return $transport->callFunction($function_name, $params);
         } catch (GatewayException $e) {
-            log_debug(__METHOD__ . " Gateway error: " . $e->getMessage());
+            log_debug(__METHOD__ . " Gateway error: " . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()));
 
             // connection_failed means the tenant DB is unreachable (dropped, deprovisioned, or temporarily unavailable).
             // Throw a typed exception so the Router returns 503 instead of leaking a 500 to the client.
             if ($e->getGatewayError() === 'connection_failed') {
                 throw new TenantDatabaseUnavailableException(
-                    "Tenant database unavailable: " . $e->getMessage(),
+                    "Tenant database unavailable: " . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()),
                     503,
                     $e
                 );
             }
 
-            throw new Exception("Database function call failed: " . $e->getMessage(), $e->getCode(), $e);
+            throw new Exception("Database function call failed: " . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()), $e->getCode(), $e);
         } catch (DbTransportException $e) {
             // Transport-agnostic equivalent of the GatewayException handling
             // above — DB_MODE=direct/pgandroid get the exact same
             // "connection failure -> 503, else -> wrapped 500" translation
             // gateway mode already has. See DbTransportException's docblock.
-            log_debug(__METHOD__ . " Transport error: " . $e->getMessage());
+            log_debug(__METHOD__ . " Transport error: " . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()));
 
             if ($e->isConnectionFailure()) {
                 throw new TenantDatabaseUnavailableException(
-                    "Tenant database unavailable: " . $e->getMessage(),
+                    "Tenant database unavailable: " . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()),
                     503,
                     $e
                 );
             }
 
-            throw new Exception("Database function call failed: " . $e->getMessage(), $e->getCode(), $e);
+            throw new Exception("Database function call failed: " . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()), $e->getCode(), $e);
         }
     }
 
@@ -513,13 +564,13 @@ class Database
             // indistinguishable from "no elements of any type" and is a
             // common, harmless default/optional-param value.
             if ($value !== []) {
-                trigger_error(
+                \StoneScriptPHP\Support\DeprecationNotice::emit(
+                    'database:raw-array-param',
                     'Database::fn(): a raw PHP array was passed as a data parameter. ' .
                     'Raw-array params are DEPRECATED — pass a StoneScriptPHP\\Binding\\TypedArray ' .
                     'or a DTO instead, so the DB boundary can marshal it with a known element type. ' .
                     'This still works today (pass-through, unchanged), but will be rejected in a ' .
-                    'future major version.',
-                    E_USER_DEPRECATED
+                    'future major version.'
                 );
             }
             return $value;
@@ -651,89 +702,16 @@ class Database
         return new TypedArray($class, $items);
     }
 
+    /**
+     * Map one result row onto $class. Delegates to {@see RowHydrator}, which owns NULL
+     * handling and type conversion (mode: legacy|strict, see its docblock; selected by
+     * DB_HYDRATION_MODE / {@see RowHydrator::setMode()}).
+     *
+     * @param bool $as_out_param Retained for signature back-compat; no longer drives resolution.
+     */
     public static function array_to_class_object(string $function_name, array $row, string $class, bool $as_out_param = false): object
     {
-        $instance = new $class();
-        $reflect = new ReflectionClass($instance);
-        $properties   = $reflect->getProperties(ReflectionProperty::IS_PUBLIC);
-        $missing_properties = [];
-
-        foreach ($properties as $property) {
-            $p_name = $property->getName();
-            $reflect_type = $property->getType();
-
-            if (
-                ($reflect_type === null)
-                || ($reflect_type instanceof ReflectionUnionType)
-                || (($reflect_type instanceof ReflectionIntersectionType)
-                )
-            ) {
-                throw "Unsupported type for property [$p_name]";
-            }
-
-            $p_type = $reflect_type->getName();
-            $p_nullable = $reflect_type->allowsNull();
-
-            log_debug(__METHOD__ . " property [$p_name] type is [$p_type]" .  ($p_nullable ? " and allows null" : ""));
-
-            // log_debug(__METHOD__ . ' ' . var_export($row, true));
-
-            // Resolve the result-row key for this property (SPEC §5, Output Column
-            // Naming). Model properties are canonically UNPREFIXED; PostgreSQL
-            // functions emit `o_`-prefixed output columns (OUT-param / RETURNS TABLE
-            // convention, to avoid clashing with table columns inside the function
-            // body). Match the exact property name first, then fall back to the
-            // `o_`-prefixed key. This is consistent across all result mappers and
-            // handles every case without re-breaking on model regeneration:
-            //   - clean prop `id`        + row `o_id`  → o_ fallback
-            //   - clean prop `id`        + row `id`    → exact (legacy unprefixed fns)
-            //   - hand-fixed prop `o_id` + row `o_id`  → exact
-            // The legacy `$as_out_param` flag is retained for signature back-compat
-            // but no longer drives resolution (it previously forced an o_-prepend-only
-            // match, which would seek `o_o_id` for an already-`o_` property).
-            $prefixed_key = 'o_' . $p_name;
-            if (array_key_exists($p_name, $row)) {
-                $row_key = $p_name;
-            } elseif (array_key_exists($prefixed_key, $row)) {
-                $row_key = $prefixed_key;
-            } else {
-                $row_key = null;
-            }
-
-            if ($row_key !== null) {
-                if ($row[$row_key] === null) {
-                    if ($p_nullable) {
-                        $instance->$p_name = null;
-                    } else if ($p_type === 'int') {
-                        $instance->$p_name = 0;
-                    } else if ($p_type === 'bool') {
-                        $instance->$p_name = false;
-                    } else {
-                        $instance->$p_name = '';
-                    }
-                } else if ($p_type === 'DateTime') {
-                    $instance->$p_name = new DateTime($row[$row_key]);
-                } else if ($p_type === 'bool') {
-                    // Handle BOTH transport modes: StoneScriptDB Gateway mode
-                    // decodes responses via json_decode() so JSON booleans arrive
-                    // as native PHP `true`/`false`; libpq text mode delivers the
-                    // string 't'/'f'. Strict `===` keeps int/string 0/1 from
-                    // leaking through. (NULL is handled by the branch above.)
-                    $instance->$p_name = ($row[$row_key] === true || $row[$row_key] === 't');
-                } else {
-                    $instance->$p_name = $row[$row_key];
-                }
-            } else {
-                log_debug(" expected [$p_name] or [$prefixed_key] with type [$p_type] from class [$class] but neither found in db function [$function_name] result");
-                $missing_properties[] = $p_name;
-            }
-        }
-
-        if (count($missing_properties) > 0) {
-            throw new Exception("mismatch in function result fields and class properties");
-        }
-
-        return $instance;
+        return RowHydrator::hydrate($function_name, $row, $class);
     }
 
 }

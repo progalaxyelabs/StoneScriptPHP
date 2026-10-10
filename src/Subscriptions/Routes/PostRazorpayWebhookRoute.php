@@ -80,7 +80,7 @@ class PostRazorpayWebhookRoute implements IRouteHandler
         $webhookSecret = $this->config->razorpayWebhookSecret ?? '';
 
         if (empty($webhookSecret)) {
-            error_log('[Razorpay Webhook] razorpay_webhook_secret not configured');
+            log_error('[Razorpay Webhook] razorpay_webhook_secret not configured');
             return res_error('Webhook not configured', 503);
         }
 
@@ -93,7 +93,7 @@ class PostRazorpayWebhookRoute implements IRouteHandler
         // bypassing register() — guard defensively rather than trust that.
         $driver = $this->config->paymentProvider;
         if ($driver === null) {
-            error_log('[Razorpay Webhook] No PaymentProvider injected via SubscriptionConfig::$paymentProvider');
+            log_error('[Razorpay Webhook] No PaymentProvider injected via SubscriptionConfig::$paymentProvider');
             return res_error(
                 'Server misconfiguration: razorpay_webhook requires a PaymentProvider — build one '
                 . '(e.g. an adapter wrapping composer require progalaxyelabs/stonescriptphp-payments\'s '
@@ -106,7 +106,7 @@ class PostRazorpayWebhookRoute implements IRouteHandler
         try {
             $event = $driver->handleWebhook(new WebhookRequest($rawBody, $signature));
         } catch (SignatureVerificationException $e) {
-            error_log('[Razorpay Webhook] Signature verification FAILED: ' . $e->getMessage());
+            log_error('[Razorpay Webhook] Signature verification FAILED: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return res_error(empty($signature) ? 'Missing signature' : 'Invalid signature', 400);
         } catch (WebhookException $e) {
             // The driver verifies the signature BEFORE parsing JSON (same
@@ -123,11 +123,11 @@ class PostRazorpayWebhookRoute implements IRouteHandler
                 $this->requestHeaders(),
                 ['raw_body_excerpt' => substr($rawBody, 0, 2000)]
             );
-            error_log('[Razorpay Webhook] Invalid JSON payload — quarantined');
+            log_error('[Razorpay Webhook] Invalid JSON payload — quarantined');
             return res_error('Invalid payload', 400);
         }
 
-        error_log("[Razorpay Webhook] Event: {$event->providerEvent}");
+        log_error("[Razorpay Webhook] Event: {$event->providerEvent}");
 
         if ($event->isPaymentCaptured()) {
             // handlePaymentCaptured() expects the FULL decoded webhook
@@ -137,7 +137,7 @@ class PostRazorpayWebhookRoute implements IRouteHandler
             // local variable this call site used to pass).
             $this->handlePaymentCaptured($event->raw);
         } else {
-            error_log("[Razorpay Webhook] Ignoring event: {$event->providerEvent}");
+            log_error("[Razorpay Webhook] Ignoring event: {$event->providerEvent}");
         }
 
         return res_ok(['status' => 'received']);
@@ -187,7 +187,7 @@ class PostRazorpayWebhookRoute implements IRouteHandler
         $phone = $this->normalizePhone((string) ($payment['contact'] ?? ''));
         $method = (string) ($payment['method'] ?? '');
 
-        error_log("[Razorpay Webhook] Payment captured: id={$paymentId}, amount_paise={$amountPaise}, email={$email}, phone={$phone}");
+        log_error("[Razorpay Webhook] Payment captured: payment="  . \StoneScriptPHP\Persistence\LogSanitizer::ref($paymentId) . ", amount_paise={$amountPaise}");
 
         try {
             $gw = Database::getGatewayClient();
@@ -271,15 +271,15 @@ class PostRazorpayWebhookRoute implements IRouteHandler
                 $alreadyApplied = $activateData['already_applied'] ?? false;
 
                 if ($alreadyApplied) {
-                    error_log("[Razorpay Webhook] Payment already applied (idempotent no-op replay): platform={$sub['platform_code']}, tenant={$sub['tenant_id']}, payment={$paymentId}");
+                    log_error("[Razorpay Webhook] Payment already applied (idempotent no-op replay): platform={$sub['platform_code']}, tenant=" . \StoneScriptPHP\Persistence\LogSanitizer::ref($sub['tenant_id']) . ", payment=" . \StoneScriptPHP\Persistence\LogSanitizer::ref($paymentId));
                 } else {
-                    error_log("[Razorpay Webhook] Subscription ACTIVATED: platform={$sub['platform_code']}, tenant={$sub['tenant_id']}, payment={$paymentId}");
+                    log_error("[Razorpay Webhook] Subscription ACTIVATED: platform={$sub['platform_code']}, tenant=" . \StoneScriptPHP\Persistence\LogSanitizer::ref($sub['tenant_id']) . ", payment=" . \StoneScriptPHP\Persistence\LogSanitizer::ref($paymentId));
                 }
             } finally {
                 $gw->setTenantId($prev);
             }
         } catch (\Exception $e) {
-            error_log("[Razorpay Webhook] Error processing payment {$paymentId}: " . $e->getMessage());
+            log_error("[Razorpay Webhook] Error processing payment " . \StoneScriptPHP\Persistence\LogSanitizer::ref($paymentId) . ": " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
         }
     }
 

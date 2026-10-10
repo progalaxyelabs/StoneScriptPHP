@@ -63,13 +63,13 @@ class JwtHandler implements JwtHandlerInterface
             unset($claims['iat'], $claims['exp'], $claims['aud'], $claims['nbf']);
             return $claims;
         } catch (\Firebase\JWT\ExpiredException $e) {
-            error_log('JWT token expired: ' . $e->getMessage());
+            log_error('JWT token expired: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         } catch (\Firebase\JWT\SignatureInvalidException $e) {
-            error_log('JWT signature invalid: ' . $e->getMessage());
+            log_error('JWT signature invalid: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         } catch (\Exception $e) {
-            error_log('JWT verification failed: ' . $e->getMessage());
+            log_error('JWT verification failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }

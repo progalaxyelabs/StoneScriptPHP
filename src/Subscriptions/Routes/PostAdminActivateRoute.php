@@ -139,16 +139,17 @@ class PostAdminActivateRoute implements IRouteHandler
 
             $alreadyApplied = $data['already_applied'] ?? false;
             if ($alreadyApplied) {
-                error_log("[Admin Activate] Payment already applied (no-op replay): platform={$this->platform_code}, tenant={$this->tenant_id}, plan={$this->plan_code}, payment_id={$this->payment_id}");
+                log_error("[Admin Activate] Payment already applied (no-op replay): platform={$this->platform_code}, tenant=" . \StoneScriptPHP\Persistence\LogSanitizer::ref($this->tenant_id) . ", plan={$this->plan_code}, payment=" . \StoneScriptPHP\Persistence\LogSanitizer::ref((string) $this->payment_id));
                 return res_ok($data, 'Payment already applied — subscription unchanged');
             }
 
-            error_log("[Admin Activate] Subscription activated: platform={$this->platform_code}, tenant={$this->tenant_id}, plan={$this->plan_code}");
+            log_error("[Admin Activate] Subscription activated: platform={$this->platform_code}, tenant=" . \StoneScriptPHP\Persistence\LogSanitizer::ref($this->tenant_id) . ", plan={$this->plan_code}");
 
             return res_ok($data, 'Subscription activated');
         } catch (\Exception $e) {
-            error_log('[Admin Activate] Error: ' . $e->getMessage());
-            return res_error('Activation failed: ' . $e->getMessage());
+            $correlationId = bin2hex(random_bytes(6));
+            log_error('[Admin Activate] Error [correlation_id=' . $correlationId . ']: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return res_error('Activation failed (reference ' . $correlationId . ')');
         }
     }
 }

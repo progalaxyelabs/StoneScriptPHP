@@ -103,8 +103,15 @@ class CorsMiddleware implements MiddlewareInterface
 
         // Handle preflight OPTIONS request
         if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
-            http_response_code(200);
-            return new ApiResponse('ok', 'Preflight OK', []);
+            http_response_code(204);
+            $preflight = new ApiResponse('ok', 'Preflight OK', [], 204);
+            // RFC 9110 9.3.7: advertise what the resource really supports - but only to an origin that
+            // is allowed to know (an unlisted origin learns nothing about the route table).
+            $allowed = $request['allowed_methods'] ?? [];
+            if ($allowOrigin !== null && is_array($allowed) && $allowed !== []) {
+                $preflight->headers['Allow'] = implode(', ', $allowed);
+            }
+            return $preflight;
         }
 
         // Continue to next middleware

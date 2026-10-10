@@ -103,6 +103,7 @@ class Application
         // so the shutdown function fires even if run() throws mid-pipeline.
         // Trusted-proxy list for client_ip() (TRUSTED_PROXIES env / 'trusted_proxies' config).
         \StoneScriptPHP\Http\ClientIp::bootstrap($config);
+        \StoneScriptPHP\Persistence\PersistenceContract::bootstrap($config);
 
         RequestLogger::arm($config, self::$startTime);
 
@@ -115,6 +116,7 @@ class Application
         }
 
         $env = Env::get_instance();
+        \StoneScriptPHP\Database\RowHydrator::bootstrap($config);
         $authConfig         = $config['auth'] ?? [];
         $appRoutes          = $config['routes'] ?? [];
         $subscriptionConfig = $config['subscription'] ?? [];
@@ -159,6 +161,9 @@ class Application
 
         $jwtHandler = self::buildJwtHandler($authConfig, $env, $jwtConfig);
 
+        // Refresh-token persistence (auth.refresh_tokens / REFRESH_TOKEN_STORE). Null = none (12.x default).
+        \StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer::bootstrap($authConfig, $jwtHandler, $env);
+
         // Build JWT excluded paths from config
         $jwtExcludedPaths = $jwtConfig['excluded_paths'] ?? [];
 
@@ -181,6 +186,7 @@ class Application
         $tenancyStrategy = self::resolveTenancyStrategy($config['tenancy'] ?? [], $plugins);
 
         $router = new Router();
+        $router->setHeadExecutesGet((bool) ($config['head_executes_get'] ?? $env->HEAD_EXECUTES_GET));
         $router->use(new LoggingMiddleware());
         // No '*' fallback here on purpose — Env::$ALLOWED_ORIGINS is a non-nullable
         // typed string (Env.php already resolves it from src/config/allowed-origins.php
@@ -323,26 +329,11 @@ class Application
 
         $response = $router->dispatch();
 
-        // Set HTTP status code from ApiResponse when provided.
-        // Middleware/error handlers set their own codes via http_response_code() directly.
-        // This covers route handlers returning res_error(msg, 400) / res_not_ok(msg, 422) etc.
-        if ($response->httpStatusCode !== null) {
-            http_response_code($response->httpStatusCode);
-        }
-
-        // RedirectResponse / HtmlResponse are ApiResponse subclasses (see their
-        // docblocks) so they reach here unchanged by Router/IRouteHandler — only
-        // the final output step needs to know about them, everything upstream
-        // still sees a plain ApiResponse.
-        if ($response instanceof RedirectResponse) {
-            header('Location: ' . $response->location);
-        } elseif ($response instanceof HtmlResponse) {
-            header('Content-Type: text/html; charset=utf-8');
-            echo $response->html;
-        } else {
-            header('Content-Type: application/json');
-            echo $response->toJson();
-        }
+        // Status, headers and body are written by ResponseEmitter. For HEAD it sends
+        // the same status/headers GET would (incl. Content-Length) and no body
+        // (RFC 9110 9.3.2). RedirectResponse / HtmlResponse are ApiResponse
+        // subclasses so they reach here unchanged; the emitter knows them.
+        \StoneScriptPHP\Http\ResponseEmitter::emit($response, $_SERVER['REQUEST_METHOD'] ?? 'GET');
 
         // Log request to STDERR for Docker/Swarm
         self::logRequest();
@@ -368,12 +359,14 @@ class Application
         if (!headers_sent()) {
             header('Content-Type: application/json');
         }
-        echo (new ApiResponse(
-            'error',
-            $message,
-            ['error' => 'auth_wiring_required'],
-            500
-        ))->toJson();
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'HEAD') {
+            echo (new ApiResponse(
+                'error',
+                $message,
+                ['error' => 'auth_wiring_required'],
+                500
+            ))->toJson();
+        }
         self::logRequest();
     }
 
@@ -397,10 +390,13 @@ class Application
      */
     private static function handleRobotsTxt(): bool
     {
-        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' &&
+        $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        if (($method === 'GET' || $method === 'HEAD') &&
             parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) === '/robots.txt') {
             header('Content-Type: text/plain');
-            echo "User-agent: *\nDisallow: /\n";
+            if ($method === 'GET') {
+                echo "User-agent: *\nDisallow: /\n";
+            }
             return true;
         }
         return false;

@@ -130,7 +130,7 @@ final class LoginUser
     }
 
     /**
-     * Emits EXACTLY: user_id, identity_id, email, display_name,
+     * Emits EXACTLY: user_id, identity_id (ONLY when a real global identity exists), email, display_name,
      * is_email_verified, photo_url — plus a `name` alias mirror of
      * display_name (set BY this serializer, never by the resolver — some
      * legacy consumer refresh-token pipelines read `name`) — plus any extra
@@ -141,15 +141,19 @@ final class LoginUser
      */
     public function toArray(): array
     {
+        // identity_id only when a REAL global identity exists. Never fall back to user_id: a per-tenant user id
+        // presented as a global identity would make refresh-token subjects collide across tenants.
         $core = [
             'user_id' => $this->userId,
-            'identity_id' => $this->identityId ?? $this->userId,
             'email' => $this->email,
             'display_name' => $this->displayName,
             'name' => $this->displayName,
             'is_email_verified' => $this->isEmailVerified,
             'photo_url' => $this->photoUrl,
         ];
+        if ($this->identityId !== null) {
+            $core['identity_id'] = $this->identityId;
+        }
 
         return array_merge($this->extraClaims, $core);
     }

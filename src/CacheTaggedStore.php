@@ -111,7 +111,7 @@ class CacheTaggedStore
             try {
                 $redis->sAdd("tag:{$tag}:keys", $key);
             } catch (Exception $e) {
-                error_log("Failed to add key to tag '{$tag}': " . $e->getMessage());
+                log_error("Failed to add key to tag '{$tag}': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             }
         }
     }
@@ -131,7 +131,7 @@ class CacheTaggedStore
                 }
                 $redis->del("tag:{$tag}:keys");
             } catch (Exception $e) {
-                error_log("Failed to invalidate tag '{$tag}': " . $e->getMessage());
+                log_error("Failed to invalidate tag '{$tag}': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             }
         }
     }

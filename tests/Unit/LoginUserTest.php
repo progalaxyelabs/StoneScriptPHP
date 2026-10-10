@@ -65,7 +65,7 @@ class LoginUserTest extends TestCase
         $arr = $user->toArray();
 
         $this->assertSame('1', $arr['user_id']);
-        $this->assertSame('1', $arr['identity_id']); // defaults to user_id
+        $this->assertArrayNotHasKey('identity_id', $arr, 'never fall back to user_id: only a real global identity is emitted');
         $this->assertSame('ann@example.com', $arr['email']);
         $this->assertSame('Ann Lee', $arr['display_name']);
         $this->assertSame('Ann Lee', $arr['name']); // serializer-set alias mirror

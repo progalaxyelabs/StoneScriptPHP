@@ -352,8 +352,9 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
                         $data = array_merge($data, $hookResult);
                     }
                 } catch (\Throwable $e) {
-                    log_error("before_provision hook failed: " . $e->getMessage());
-                    return res_error('Tenant provisioning failed: ' . $e->getMessage());
+                    $correlationId = bin2hex(random_bytes(6));
+                    log_error("before_provision hook failed [correlation_id=$correlationId]: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                    return res_error('Tenant provisioning failed (reference ' . $correlationId . ')');
                 }
             }
 
@@ -379,8 +380,10 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
                         return res_error($e->getMessage(), $e->getHttpStatusCode());
                     }
 
-                    // Generic 500 for unexpected errors
-                    return res_error('Tenant provisioning failed: ' . $e->getMessage());
+                    // Generic 500 for unexpected errors: the exception text stays in the log under the reference.
+                    $correlationId = bin2hex(random_bytes(6));
+                    log_error("Tenant provisioning failed [correlation_id=$correlationId]: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                    return res_error('Tenant provisioning failed (reference ' . $correlationId . ')');
                 }
             }
         }

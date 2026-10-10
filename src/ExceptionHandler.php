@@ -45,8 +45,9 @@ class ExceptionHandler
         // shutdown function (RequestLogger::persistRequestLog) can read it.
         RequestContext::captureException($exception);
 
-        $this->logException($exception);
-        $this->renderException($exception);
+        $correlationId = bin2hex(random_bytes(6));
+        $this->logException($exception, $correlationId);
+        $this->renderException($exception, $correlationId);
     }
 
     /**
@@ -86,25 +87,27 @@ class ExceptionHandler
             // RequestLogger shutdown function (registered later) can read it.
             RequestContext::captureFatalError($error);
 
-            $this->logFatalError($error);
-            $this->renderFatalError($error);
+            $correlationId = bin2hex(random_bytes(6));
+            $this->logFatalError($error, $correlationId);
+            $this->renderFatalError($error, $correlationId);
         }
     }
 
     /**
      * Log exception to logger
      */
-    private function logException(Throwable $exception): void
+    private function logException(Throwable $exception, string $correlationId = ''): void
     {
-        Logger::get_instance()->log_php_exception($exception);
+        Logger::get_instance()->log_php_exception($exception, $correlationId);
     }
 
     /**
      * Log fatal error
      */
-    private function logFatalError(array $error): void
+    private function logFatalError(array $error, string $correlationId = ''): void
     {
         log_critical('Fatal error: ' . $error['message'], [
+            'correlation_id' => $correlationId,
             'file' => $error['file'],
             'line' => $error['line'],
             'type' => $error['type']
@@ -114,7 +117,7 @@ class ExceptionHandler
     /**
      * Render exception as API response
      */
-    private function renderException(Throwable $exception): void
+    private function renderException(Throwable $exception, string $correlationId = ''): void
     {
         // Clear any existing output
         if (ob_get_level() > 0) {
@@ -133,16 +136,19 @@ class ExceptionHandler
         header('Content-Type: application/json');
 
         // Build error response
-        $response = $this->buildErrorResponse($exception, $status_code);
+        $response = $this->buildErrorResponse($exception, $status_code, null, $correlationId);
 
-        echo json_encode($response, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        // HEAD responses never carry a body (RFC 9110 9.3.2).
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'HEAD') {
+            echo json_encode($response, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        }
         exit(1);
     }
 
     /**
      * Render fatal error as API response
      */
-    private function renderFatalError(array $error): void
+    private function renderFatalError(array $error, string $correlationId = ''): void
     {
         // Clear any existing output
         if (ob_get_level() > 0) {
@@ -157,60 +163,64 @@ class ExceptionHandler
             'message' => 'A fatal error occurred',
             'data' => null
         ];
+        if ($correlationId !== '') {
+            $response['correlation_id'] = $correlationId;
+        }
 
         if (DEBUG_MODE) {
+            // The raw fatal-error text is never put in a response (it may embed data); it is in the log.
             $response['debug'] = [
-                'message' => $error['message'],
                 'file' => $error['file'],
                 'line' => $error['line'],
                 'type' => $error['type']
             ];
         }
 
-        echo json_encode($response, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        // HEAD responses never carry a body (RFC 9110 9.3.2).
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'HEAD') {
+            echo json_encode($response, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        }
         exit(1);
     }
 
     /**
-     * Build structured error response
+     * Build structured error response.
+     *
+     * NEVER contains raw exception text, in any mode: exception messages routinely embed data values (a database
+     * `Key (email)=(...)`, a quoted literal). The raw text goes to the (sanitised) log under the correlation id.
+     * Debug mode adds the exception class, code, location, trace and the correlation id only.
+     *
+     * @param bool|null $debug null = the DEBUG_MODE constant
      */
-    private function buildErrorResponse(Throwable $exception, int $status_code): array
+    private function buildErrorResponse(Throwable $exception, int $status_code, ?bool $debug = null, string $correlationId = ''): array
     {
+        $debug ??= DEBUG_MODE;
         $response = [
             'status' => 'error',
             'message' => $this->getPublicMessage($exception, $status_code),
             'data' => null
         ];
+        if ($correlationId !== '') {
+            $response['correlation_id'] = $correlationId;
+        }
 
         // Add validation errors if ValidationException
         if ($exception instanceof ValidationException) {
             $response['errors'] = $exception->getValidationErrors();
         }
 
-        // Add debug information in debug mode
-        if (DEBUG_MODE) {
+        if ($debug) {
             $response['debug'] = [
                 'exception' => get_class($exception),
-                'message' => $exception->getMessage(),
                 'code' => $exception->getCode(),
                 'file' => $exception->getFile(),
                 'line' => $exception->getLine(),
                 'trace' => $this->formatTrace($exception->getTrace())
             ];
 
-            // Add context if FrameworkException
-            if ($exception instanceof FrameworkException) {
-                $context = $exception->getContext();
-                if (!empty($context)) {
-                    $response['debug']['context'] = $context;
-                }
-            }
-
-            // Add previous exception if exists
             if ($exception->getPrevious()) {
                 $response['debug']['previous'] = [
                     'exception' => get_class($exception->getPrevious()),
-                    'message' => $exception->getPrevious()->getMessage(),
                     'file' => $exception->getPrevious()->getFile(),
                     'line' => $exception->getPrevious()->getLine()
                 ];
@@ -221,21 +231,16 @@ class ExceptionHandler
     }
 
     /**
-     * Get public-facing error message
+     * Get public-facing error message. Only a FrameworkException (whose message the framework authors for
+     * clients) is passed through, and only after the persistence sanitiser; everything else is generic.
      */
     private function getPublicMessage(Throwable $exception, int $status_code): string
     {
-        // In debug mode, show actual message
-        if (DEBUG_MODE) {
+        // A message deliberately marked public (every FrameworkException) is shown as written, unmodified.
+        if ($exception instanceof \StoneScriptPHP\Exceptions\PublicMessage) {
             return $exception->getMessage();
         }
 
-        // In production, show generic messages
-        if ($exception instanceof FrameworkException) {
-            return $exception->getMessage();
-        }
-
-        // Generic messages for different status codes
         return match ($status_code) {
             400 => 'Bad request',
             401 => 'Unauthorized',

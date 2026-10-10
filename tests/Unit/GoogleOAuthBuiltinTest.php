@@ -43,6 +43,9 @@ class GoogleOAuthBuiltinTest extends TestCase
 
     protected function setUp(): void
     {
+        // The request's own origin is implicitly allowed (same-origin deployment).
+        $_SERVER['HTTP_HOST'] = 'api.example.test';
+        $_SERVER['HTTPS'] = 'on';
         $this->setEnvIfEmpty('DB_GATEWAY_URL', 'http://localhost:9000');
         $this->setEnvIfEmpty('DB_GATEWAY_PLATFORM', 'test-platform');
 
@@ -74,6 +77,7 @@ class GoogleOAuthBuiltinTest extends TestCase
 
     protected function tearDown(): void
     {
+        unset($_SERVER['HTTP_HOST'], $_SERVER['HTTPS']);
         @unlink($this->testPrivateKey);
         @unlink($this->testPublicKey);
         @rmdir($this->testKeysDir);

@@ -8,6 +8,7 @@ use StoneScriptPHP\Auth\CookieHelper;
 use StoneScriptPHP\Auth\CsrfHelper;
 use StoneScriptPHP\Auth\AuthRoutes;
 use StoneScriptPHP\Auth\AuthContext;
+use StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer;
 
 /**
  * Logout Route
@@ -59,6 +60,24 @@ class LogoutRoute implements IRouteHandler
         // 2. Get refresh token from cookie
         $refreshToken = CookieHelper::getRefreshToken();
 
+        // 2b. Persisted sessions: end the whole session family; optionally every session of this user in this tenant.
+        $issuer = RefreshTokenIssuer::configured();
+        if ($issuer !== null) {
+            try {
+                if (!empty($refreshToken)) {
+                    $issuer->revokeSession($refreshToken);
+                }
+                $authUser = AuthContext::check() ? AuthContext::getUser() : null;
+                if ($authUser !== null && filter_var($_GET['revoke_all'] ?? $_POST['revoke_all'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                    // Same subject builder as issuing: a real global identity_id when the token carries one, else {tenant}#{user}.
+                    $issuer->revokeAllForClaims($authUser->subjectClaims(), null, true);
+                }
+            } catch (\Throwable $e) {
+                log_error('LogoutRoute: failed to revoke persisted session - ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                // never fail logout: cookies are still cleared below
+            }
+        }
+
         // 3. Get token storage (if configured)
         $tokenStorage = AuthRoutes::getTokenStorage();
 
@@ -70,14 +89,14 @@ class LogoutRoute implements IRouteHandler
                 $tokenStorage->revokeRefreshToken($tokenHash);
                 log_debug('LogoutRoute: Refresh token revoked successfully');
             } catch (\Exception $e) {
-                log_error("LogoutRoute: Failed to revoke refresh token - {$e->getMessage()}");
+                log_error('LogoutRoute: Failed to revoke refresh token - ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
                 // Don't fail logout if revocation fails - still clear cookies
             }
         }
 
         // 5. Optionally revoke all user tokens (if user is authenticated)
         // This is useful for "logout from all devices" functionality
-        $user = AuthContext::user();
+        $user = AuthContext::check() ? AuthContext::getUser() : null;
         if ($user !== null && $tokenStorage !== null) {
             $revokeAll = $_GET['revoke_all'] ?? $_POST['revoke_all'] ?? false;
 
@@ -86,7 +105,7 @@ class LogoutRoute implements IRouteHandler
                     $tokenStorage->revokeAllUserTokens($user->user_id);
                     log_debug("LogoutRoute: All tokens revoked for user {$user->user_id}");
                 } catch (\Exception $e) {
-                    log_error("LogoutRoute: Failed to revoke all user tokens - {$e->getMessage()}");
+                    log_error('LogoutRoute: Failed to revoke all user tokens - ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
                 }
             }
         }

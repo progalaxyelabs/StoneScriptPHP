@@ -205,6 +205,8 @@ class Logger
             } elseif (is_array($value)) {
                 // Recursively sanitize nested arrays
                 $sanitized[$key] = $this->sanitize_context($value);
+            } elseif (is_string($value)) {
+                $sanitized[$key] = \StoneScriptPHP\Persistence\LogSanitizer::forLog($value);
             } else {
                 $sanitized[$key] = $value;
             }
@@ -221,8 +223,10 @@ class Logger
         $timestamp = new DateTime();
         $formatted_time = $timestamp->format('Y-m-d H:i:s.u');
 
-        // Sanitize context to remove sensitive data
+        // Sanitize context to remove sensitive data. The message text and every context string also pass through
+        // LogSanitizer so no call site can leak database values (Key (col)=(value), DETAIL, quoted literals) or raw emails.
         $sanitized_context = $this->sanitize_context($context);
+        $message = \StoneScriptPHP\Persistence\LogSanitizer::forLog((string) $message);
 
         // Build log entry
         $log_entry = [
@@ -445,9 +449,10 @@ class Logger
     /**
      * Log PHP exceptions
      */
-    public function log_php_exception(Throwable $exception): void
+    public function log_php_exception(Throwable $exception, string $correlationId = ''): void
     {
         $this->log(self::CRITICAL, $exception->getMessage(), [
+            'correlation_id' => $correlationId,
             'exception_class' => get_class($exception),
             'code' => $exception->getCode(),
             'file' => $exception->getFile(),

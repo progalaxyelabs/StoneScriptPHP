@@ -36,7 +36,7 @@ class Cache
 
                 $this->redis->select($database);
             } catch (Exception $e) {
-                error_log("Redis connection failed: " . $e->getMessage());
+                log_error("Redis connection failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
                 $this->enabled = false;
                 $this->redis = null;
             }
@@ -63,7 +63,7 @@ class Cache
 
             return unserialize($value);
         } catch (Exception $e) {
-            error_log("Cache get failed for key '{$key}': " . $e->getMessage());
+            log_error("Cache get failed for key '{$key}': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return $default;
         }
     }
@@ -85,7 +85,7 @@ class Cache
                 return $this->redis->set($this->getKey($key), $serialized);
             }
         } catch (Exception $e) {
-            error_log("Cache set failed for key '{$key}': " . $e->getMessage());
+            log_error("Cache set failed for key '{$key}': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }
@@ -99,7 +99,7 @@ class Cache
         try {
             return $this->redis->del($this->getKey($key)) > 0;
         } catch (Exception $e) {
-            error_log("Cache delete failed for key '{$key}': " . $e->getMessage());
+            log_error("Cache delete failed for key '{$key}': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }
@@ -113,7 +113,7 @@ class Cache
         try {
             return $this->redis->flushDB();
         } catch (Exception $e) {
-            error_log("Cache clear failed: " . $e->getMessage());
+            log_error("Cache clear failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }
@@ -127,7 +127,7 @@ class Cache
         try {
             return $this->redis->exists($this->getKey($key)) > 0;
         } catch (Exception $e) {
-            error_log("Cache exists check failed for key '{$key}': " . $e->getMessage());
+            log_error("Cache exists check failed for key '{$key}': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }
@@ -188,7 +188,7 @@ class Cache
         try {
             return $this->redis->incrBy($this->getKey($key), $value);
         } catch (Exception $e) {
-            error_log("Cache increment failed for key '{$key}': " . $e->getMessage());
+            log_error("Cache increment failed for key '{$key}': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }
@@ -202,7 +202,7 @@ class Cache
         try {
             return $this->redis->decrBy($this->getKey($key), $value);
         } catch (Exception $e) {
-            error_log("Cache decrement failed for key '{$key}': " . $e->getMessage());
+            log_error("Cache decrement failed for key '{$key}': " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }
@@ -230,7 +230,7 @@ class Cache
 
             return $result;
         } catch (Exception $e) {
-            error_log("Cache getMultiple failed: " . $e->getMessage());
+            log_error("Cache getMultiple failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return array_fill_keys($keys, $default);
         }
     }
@@ -250,7 +250,7 @@ class Cache
 
             return true;
         } catch (Exception $e) {
-            error_log("Cache setMultiple failed: " . $e->getMessage());
+            log_error("Cache setMultiple failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }
@@ -266,7 +266,7 @@ class Cache
             $this->redis->del($prefixedKeys);
             return true;
         } catch (Exception $e) {
-            error_log("Cache deleteMultiple failed: " . $e->getMessage());
+            log_error("Cache deleteMultiple failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }

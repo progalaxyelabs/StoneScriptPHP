@@ -7,6 +7,8 @@ use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\HtmlResponse;
 use StoneScriptPHP\Env;
 use StoneScriptPHP\Auth\JwtHandlerInterface;
+use StoneScriptPHP\Auth\RefreshTokens\RefreshTokenIssuer;
+use StoneScriptPHP\Auth\TokenClaims;
 use Google\Client as GoogleClient;
 
 /**
@@ -31,12 +33,18 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
     public string $state = '';
     public string $error = '';
 
+    /** Origin the OAuth state was bound to at initiate time (from the verified state token). */
+    private ?string $openerOrigin = null;
+
     public function __construct(
         private readonly string $clientId,
         private readonly string $clientSecret,
         private readonly string $redirectUri,
         private readonly JwtHandlerInterface $jwtHandler,
         private readonly GoogleOAuthUserResolver $userResolver,
+        private readonly ?RefreshTokenIssuer $issuer = null,
+        /** @var array<int, string>|null allowed opener origins; null = Env ALLOWED_ORIGINS */
+        private readonly ?array $allowedOrigins = null,
     ) {
     }
 
@@ -66,6 +74,14 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
             return $this->bridge('oauth_error', 'This sign-in link expired or is invalid. Please try again.');
         }
 
+        $this->openerOrigin = is_string($statePayload['opener_origin'] ?? null) ? (string) $statePayload['opener_origin'] : null;
+
+        // The state was bound to an opener that is no longer (or was never) allowed: do not exchange the code or
+        // mint anything - there is nowhere safe to deliver the result. Show the configuration problem instead.
+        if ($this->openerOrigin !== null && !in_array($this->openerOrigin, OpenerOrigins::allowed($this->allowedOrigins), true)) {
+            return $this->bridge('oauth_error', 'Sign-in is not configured for this site.');
+        }
+
         $client = new GoogleClient();
         $client->setClientId($this->clientId);
         $client->setClientSecret($this->clientSecret);
@@ -74,7 +90,7 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
         try {
             $token = $client->fetchAccessTokenWithAuthCode($this->code);
         } catch (\Exception $e) {
-            log_error('GoogleOAuthCallbackRoute: code exchange failed: ' . $e->getMessage());
+            log_error('GoogleOAuthCallbackRoute: code exchange failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return $this->bridge('oauth_error', 'Could not complete Google sign-in.');
         }
 
@@ -94,7 +110,7 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
         }
 
         if (empty($payload['email_verified'])) {
-            log_warning('GoogleOAuthCallbackRoute: unverified Google email rejected', ['email' => $payload['email'] ?? null]);
+            log_warning('GoogleOAuthCallbackRoute: unverified Google email rejected');
             return $this->bridge('oauth_error', 'Your Google account email is not verified.');
         }
 
@@ -130,17 +146,30 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
             $resolved = $this->userResolver->resolve($profile);
             $loginUser = LoginUser::fromResolverArray($resolved, $profile);
         } catch (\Exception $e) {
-            log_error('GoogleOAuthCallbackRoute: user resolver failed: ' . $e->getMessage());
+            log_error('GoogleOAuthCallbackRoute: user resolver failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return $this->bridge('oauth_error', 'Could not create or update your account.');
         }
 
         $userClaims = $loginUser->toArray();
 
-        $env = Env::get_instance();
-        $accessToken = $this->jwtHandler->generateToken($userClaims, $env->JWT_ACCESS_TOKEN_EXPIRY ?? 900, 'access');
-        $refreshToken = $this->jwtHandler->generateToken($userClaims, $env->JWT_REFRESH_TOKEN_EXPIRY ?? 15552000, 'refresh');
+        if ($this->issuer !== null) {
+            // Persisted path: the refresh token and its row are created together, or not at all.
+            try {
+                $issued = $this->issuer->issueSession($userClaims, TokenClaims::PURPOSE_AUTHENTICATION);
+            } catch (\Throwable $e) {
+                log_error('GoogleOAuthCallbackRoute: could not issue a persisted session: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                return $this->bridge('oauth_error', 'Sign-in is temporarily unavailable. Please try again in a moment.');
+            }
+            $accessToken = $issued->accessToken;
+            $refreshToken = $issued->refreshToken;
+        } else {
+            $env = Env::get_instance();
+            $accessToken = $this->jwtHandler->generateToken($userClaims, $env->JWT_ACCESS_TOKEN_EXPIRY ?? 900, 'access');
+            $refreshToken = $this->jwtHandler->generateToken($userClaims, $env->JWT_REFRESH_TOKEN_EXPIRY ?? 15552000, 'refresh');
+            self::noticeUnpersisted();
+        }
 
-        log_info('GoogleOAuthCallbackRoute: sign-in complete', ['email' => $loginUser->getEmail()]);
+        log_info('GoogleOAuthCallbackRoute: sign-in complete', ['user_id' => $loginUser->getUserId()]);
 
         return $this->bridge('oauth_success', null, [
             'access_token' => $accessToken,
@@ -149,21 +178,60 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
         ]);
     }
 
+    /** This refresh token has no row, so any RefreshTokenMiddleware gate will refuse it. Rate-limited, never throws. */
+    private static function noticeUnpersisted(): void
+    {
+        \StoneScriptPHP\Support\DeprecationNotice::emit(
+            'oauth:unpersisted-refresh-token',
+            'StoneScriptPHP: the builtin OAuth callback minted a refresh token that is NOT persisted. A refresh gate '
+            . '(RefreshTokenMiddleware) will reject it, and it cannot be revoked. This is DEPRECATED: set '
+            . 'REFRESH_TOKEN_STORE=postgres (or auth.refresh_tokens.store) and run `php stone gateway:migrate-vendor-main` first. '
+            . 'Persistence becomes the default in the next major version.'
+        );
+    }
+
+    /**
+     * Resolve the sign-in in the opener via postMessage. NEVER with targetOrigin '*': the data (including both
+     * tokens) goes only to allowed origins - the single origin the state was bound to when there is one, else
+     * every allowed origin (the browser delivers to the one that equals the opener's real origin and drops the rest).
+     * An opener that is not allowed receives nothing; with no allowed origin configured nothing is posted at all.
+     */
     private function bridge(string $type, ?string $message, array $extra = []): HtmlResponse
     {
+        $allowed = OpenerOrigins::allowed($this->allowedOrigins);
+        if ($this->openerOrigin !== null && in_array($this->openerOrigin, $allowed, true)) {
+            $targets = [$this->openerOrigin];
+        } elseif ($this->openerOrigin !== null) {
+            $targets = []; // bound to an origin that is not allowed: deliver nowhere
+        } else {
+            $targets = $allowed;
+        }
+        if ($targets === []) {
+            // Nothing can safely receive the result. No data (and so no tokens) is put in the page; the popup shows a
+            // visible message naming the configuration problem. The opener-side library times out with its own message.
+            log_error('GoogleOAuthCallbackRoute: sign-in result NOT delivered - no allowed opener origin for this flow (check ALLOWED_ORIGINS with `php stone auth:check-origins`)');
+            return OAuthConfigErrorPage::response(
+                'Sign-in could not be completed.',
+                'This site is not listed in the server setting ALLOWED_ORIGINS, so the sign-in result cannot be handed back to it. The site administrator must add it.',
+                403
+            );
+        }
         $data = array_merge(['type' => $type], $message !== null ? ['message' => $message] : [], $extra);
-        $json = json_encode($data);
+        $json = json_encode($data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $targetsJson = json_encode($targets, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
         $html = <<<HTML
 <!DOCTYPE html>
 <html><head><title>Signing you in&hellip;</title></head><body><script>
 (function() {
   var data = {$json};
+  var targets = {$targetsJson};
   if (window.opener) {
-    window.opener.postMessage(data, '*');
+    targets.forEach(function(o) { try { window.opener.postMessage(data, o); } catch (e) {} });
+    document.body.innerText = 'Sign-in finished. You can close this window.';
     window.close();
   } else {
-    document.body.innerText = 'Sign-in complete. You can close this window.';
+    document.body.innerText = 'Sign-in finished, but this window was not opened by the site you signed in from. You can close it.';
   }
 })();
 </script></body></html>

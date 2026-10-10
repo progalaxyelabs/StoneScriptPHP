@@ -127,7 +127,7 @@ class RsaJwtHandler implements JwtHandlerInterface
             $publicKey = file_get_contents($publicKeyPath);
 
             if ($publicKey === false) {
-                error_log("Cannot read public key file: $publicKeyPath");
+                log_error("Cannot read public key file: $publicKeyPath");
                 return false;
             }
 
@@ -142,7 +142,7 @@ class RsaJwtHandler implements JwtHandlerInterface
                 $env = Env::get_instance();
                 $expectedIssuer = $env->JWT_ISSUER ?? null;
                 if (!empty($expectedIssuer) && isset($decoded->iss) && $decoded->iss !== $expectedIssuer) {
-                    error_log("JWT issuer mismatch: expected '$expectedIssuer', got '{$decoded->iss}'");
+                    log_error("JWT issuer mismatch: expected '$expectedIssuer', got '{$decoded->iss}'");
                     return false;
                 }
             }
@@ -153,13 +153,13 @@ class RsaJwtHandler implements JwtHandlerInterface
             unset($claims['iss'], $claims['iat'], $claims['exp'], $claims['aud'], $claims['nbf']);
             return $claims;
         } catch (\Firebase\JWT\ExpiredException $e) {
-            error_log('JWT token expired: ' . $e->getMessage());
+            log_error('JWT token expired: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         } catch (\Firebase\JWT\SignatureInvalidException $e) {
-            error_log('JWT signature invalid: ' . $e->getMessage());
+            log_error('JWT signature invalid: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         } catch (\Exception $e) {
-            error_log('JWT verification failed: ' . $e->getMessage());
+            log_error('JWT verification failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }

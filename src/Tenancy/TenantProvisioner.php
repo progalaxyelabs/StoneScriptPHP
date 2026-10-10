@@ -41,6 +41,8 @@ abstract class TenantProvisioner
      * or the result of auto-provisioning via POST /admin/platform-token.
      */
     private ?string $resolvedPlatformToken = null;
+    private bool $gatewayVersionResolved = false;
+    private ?string $gatewayVersionCache = null;
 
     public function __construct(
         protected string $platformCode,
@@ -127,7 +129,7 @@ abstract class TenantProvisioner
         curl_close($ch);
 
         if ($httpCode < 200 || $httpCode >= 300) {
-            log_error("TenantProvisioner::syncBusinessDetails: HTTP $httpCode: $response");
+            log_error("TenantProvisioner::syncBusinessDetails: HTTP $httpCode (response body not logged)");
         }
     }
 
@@ -154,6 +156,8 @@ abstract class TenantProvisioner
      */
     protected function createDatabase(array $data): void
     {
+        $this->assertTenantIdSafeForGateway((string) ($data['tenant_id'] ?? ''));
+
         $payload = json_encode($this->buildCreateDatabasePayload($data));
         $platformToken = $this->getPlatformToken();
         [$httpCode, $response, $curlErr] = $this->postToGateway('/admin/database/create', $payload, $platformToken);
@@ -163,18 +167,90 @@ abstract class TenantProvisioner
             throw new \RuntimeException("Failed to reach gateway to provision tenant database: {$curlErr}");
         }
 
-        // 409 = database already exists — idempotent, continue to next step
+        // Act on the gateway's error CODE, not just the status (gateway 4.7+ contract):
+        //   409 database_already_exists   complete database (identity verified by gateway >= 4.7.0) -> idempotent success
+        //   409 database_exists_legacy    pre-4.7 database, identity unverifiable -> success + warning
+        //   409 (no/older body)           older gateway plain 409 -> treated as legacy
+        //   409|422 database_name_collision  belongs to a DIFFERENT tenant -> hard failure
+        //   any other 409 code            unknown -> fail closed
+        //   non-2xx otherwise             failure (incl. 500 database_incomplete_* / registry errors)
+        $code = self::gatewayErrorCode((string) $response);
+
+        if ($code === 'database_name_collision') {
+            log_error("TenantProvisioner: gateway reports database NAME COLLISION for tenant {$data['tenant_id']} (HTTP $httpCode): the database belongs to a different tenant. Not provisioning.");
+            throw new \RuntimeException('Tenant database name collides with a different tenant; refusing to provision (HTTP ' . $httpCode . ')');
+        }
+
         if ($httpCode === 409) {
-            log_info("TenantProvisioner: Gateway DB already exists (HTTP 409) for {$data['tenant_id']} — treating as success");
-            return;
+            if ($code === 'database_already_exists') {
+                log_info("TenantProvisioner: Gateway DB already exists for {$data['tenant_id']} - treating as success"
+                    . ($this->gatewayVerifiesIdentity() ? ' (gateway verified the database identity)' : ' (gateway version unknown or < 4.7.0: identity not verified)'));
+                return;
+            }
+            if ($code === null || $code === 'database_exists_legacy') {
+                log_warning("TenantProvisioner: Gateway DB for {$data['tenant_id']} pre-dates identity verification (HTTP 409" . ($code !== null ? " $code" : ', no error code - older gateway') . ') - treating as success, identity NOT verified');
+                return;
+            }
+            log_error("TenantProvisioner: unknown gateway 409 code '$code' for tenant {$data['tenant_id']} - failing closed");
+            throw new \RuntimeException("Failed to provision tenant database (HTTP 409 $code)");
         }
 
         if ($httpCode < 200 || $httpCode >= 300) {
-            log_error("TenantProvisioner: Gateway DB provision failed (HTTP $httpCode): $response");
+            // Code + status only: the response body can echo identifiers or database text and is never logged.
+            log_error("TenantProvisioner: Gateway DB provision failed (HTTP $httpCode" . ($code !== null ? " $code" : '') . ')');
             throw new \RuntimeException("Failed to provision tenant database (HTTP $httpCode)");
         }
 
         log_info("TenantProvisioner: Provisioned database for tenant {$data['tenant_id']} slug={$data['tenant_slug']}");
+    }
+
+    /** The gateway's `error` code from a JSON error body, or null when absent/unparseable. */
+    protected static function gatewayErrorCode(string $body): ?string
+    {
+        $decoded = json_decode($body, true);
+        $code = is_array($decoded) ? ($decoded['error'] ?? null) : null;
+        // Only a machine code counts; prose from an older gateway ("database already exists") is "no code".
+        return is_string($code) && preg_match('/^[a-z][a-z0-9_]*$/', $code) === 1 ? $code : null;
+    }
+
+    /**
+     * Reject, before calling the gateway, every tenant id that does not map one-to-one onto a database
+     * name (see {@see TenantIdRule}): the gateway sanitises ids, so different ids can land on one database.
+     *
+     * @throws \RuntimeException
+     */
+    protected function assertTenantIdSafeForGateway(string $tenantId): void
+    {
+        $why = TenantIdRule::violation($tenantId, $this->platformCode, $this->schemaName);
+        if ($why !== null) {
+            log_error('TenantProvisioner: tenant id rejected before calling the gateway - ' . $why);
+            throw new \RuntimeException('Tenant id is not safe to map to a database name: ' . $why);
+        }
+    }
+
+    /**
+     * Gateway version from GET /health (cached per instance), or null when it cannot be learned.
+     * Identity verification of existing databases exists from gateway 4.7.0.
+     */
+    protected function gatewayVersion(): ?string
+    {
+        if ($this->gatewayVersionResolved) {
+            return $this->gatewayVersionCache;
+        }
+        $this->gatewayVersionResolved = true;
+        $ch = curl_init(rtrim($this->gatewayUrl, '/') . '/health');
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+        $body = curl_exec($ch);
+        curl_close($ch);
+        $decoded = is_string($body) ? json_decode($body, true) : null;
+        $v = is_array($decoded) ? ($decoded['version'] ?? null) : null;
+        return $this->gatewayVersionCache = (is_string($v) && $v !== '' ? $v : null);
+    }
+
+    private function gatewayVerifiesIdentity(): bool
+    {
+        $v = $this->gatewayVersion();
+        return $v !== null && version_compare(ltrim($v, 'v'), '4.7.0', '>=');
     }
 
     /**
@@ -221,7 +297,7 @@ abstract class TenantProvisioner
         }
 
         if ($httpCode < 200 || $httpCode >= 300) {
-            log_error("TenantProvisioner: platform token provisioning failed (HTTP $httpCode): $response");
+            log_error("TenantProvisioner: platform token provisioning failed (HTTP $httpCode) (response body not logged)");
             throw new \RuntimeException("Failed to provision platform token (HTTP $httpCode)");
         }
 

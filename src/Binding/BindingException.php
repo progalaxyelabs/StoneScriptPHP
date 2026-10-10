@@ -24,7 +24,7 @@ class BindingException extends \RuntimeException
      *   execute() may also throw this for a structured BUSINESS-rule
      *   rejection that wants the same {line,field,message}[] wire shape
      *   (e.g. a 409 duplicate-key conflict) — see
-     *   PostDistributorInvoiceSubmitRoute for a real example.
+     *   an order-submit route for a real example.
      */
     public function __construct(array $errors, int $httpCode = 400)
     {

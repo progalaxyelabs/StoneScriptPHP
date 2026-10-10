@@ -8,6 +8,8 @@ use StoneScriptPHP\Routing\MiddlewareInterface;
 use StoneScriptPHP\Routing\RouteAccess;
 use StoneScriptPHP\ApiResponse;
 use StoneScriptPHP\Auth\RefreshTokenStore;
+use StoneScriptPHP\Auth\RefreshTokens\RotatingRefreshTokenStore;
+use StoneScriptPHP\Auth\RefreshTokens\TokenInspection;
 use StoneScriptPHP\Auth\TokenClaims;
 use StoneScriptPHP\Auth\TrustedIssuerVerifier;
 
@@ -108,7 +110,25 @@ class RefreshTokenMiddleware implements MiddlewareInterface
 
         // Stateful gate: the row must exist. Absent ⇒ revoked (hard-deleted) or never
         // issued ⇒ reject, even though the JWT signature + exp are still valid.
-        if (!$this->store->exists($this->hash($refreshToken))) {
+        $hash = $this->hash($refreshToken);
+        if ($this->store instanceof RotatingRefreshTokenStore) {
+            // Rotating store: also catches REPLAY of a spent token - the whole session family is
+            // revoked (a stolen-and-used token must not outlive the legitimate holder's next refresh).
+            $inspection = $this->store->inspect($hash);
+            if ($inspection->status === TokenInspection::REUSED) {
+                if ($inspection->familyId !== null) {
+                    $this->store->revokeFamily($inspection->familyId);
+                }
+                log_alert('RefreshTokenMiddleware: refresh token REUSE detected - session family revoked', [
+                    'family_id' => $inspection->familyId,
+                    'subject'   => $inspection->subject,
+                ]);
+                return $this->deny(401, 'Unauthorized: refresh token has been revoked');
+            }
+            if (!$inspection->usable()) {
+                return $this->deny(401, 'Unauthorized: refresh token has been revoked');
+            }
+        } elseif (!$this->store->exists($hash)) {
             return $this->deny(401, 'Unauthorized: refresh token has been revoked');
         }
 

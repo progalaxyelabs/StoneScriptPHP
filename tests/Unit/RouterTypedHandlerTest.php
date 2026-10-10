@@ -12,7 +12,7 @@ use StoneScriptPHP\Routing\Router;
 final class RouterTypedHandlerTestRequest
 {
     public function __construct(
-        public readonly int $distributor_id,
+        public readonly int $customer_id,
         public readonly string $invoice_number,
     ) {
     }
@@ -34,7 +34,7 @@ final class RouterTypedHandlerTestRoute implements ITypedRouteHandler
     {
         return new RouterTypedHandlerTestResponse(
             invoice_id: 999,
-            message: "saved {$request->invoice_number} for distributor {$request->distributor_id}",
+            message: "saved {$request->invoice_number} for customer {$request->customer_id}",
         );
     }
 }
@@ -69,12 +69,12 @@ final class RouterTypedHandlerTest extends TestCase
     public function test_typed_handler_success_hydrates_and_wraps_response(): void
     {
         $resp = $this->exec(new RouterTypedHandlerTestRoute(), [
-            'distributor_id' => '5', // numeric string on the wire — exactly the real bug shape
+            'customer_id' => '5', // numeric string on the wire — exactly the real bug shape
             'invoice_number' => 'INV-1',
         ]);
 
         $this->assertSame('ok', $resp->status);
-        $this->assertSame('saved INV-1 for distributor 5', $resp->message);
+        $this->assertSame('saved INV-1 for customer 5', $resp->message);
         $this->assertSame(999, $resp->data['invoice_id']);
         $this->assertArrayNotHasKey('message', $resp->data, 'message must be promoted out of data, not duplicated');
     }
@@ -83,22 +83,22 @@ final class RouterTypedHandlerTest extends TestCase
     {
         $resp = $this->exec(new RouterTypedHandlerTestRoute(), [
             'invoice_number' => 'INV-1',
-            // distributor_id missing entirely
+            // customer_id missing entirely
         ]);
 
         $this->assertSame('error', $resp->status);
         $this->assertSame(400, $resp->httpStatusCode);
         $this->assertNotNull($resp->errors);
-        $this->assertSame('distributor_id', $resp->errors[0]['field']);
+        $this->assertSame('customer_id', $resp->errors[0]['field']);
     }
 
     public function test_typed_handler_non_numeric_id_returns_400_not_500(): void
     {
         // This is exactly the shape of the live bug this framework feature was
-        // built to fix: a hostile/malformed distributor_id must never TypeError
+        // built to fix: a hostile/malformed customer_id must never TypeError
         // through to a 500.
         $resp = $this->exec(new RouterTypedHandlerTestRoute(), [
-            'distributor_id' => 'not-an-id',
+            'customer_id' => 'not-an-id',
             'invoice_number' => 'INV-1',
         ]);
 
@@ -115,7 +115,7 @@ final class RouterTypedHandlerTest extends TestCase
         // to hydrate/execute with the mismatched class silently.
         $resp = $this->exec(
             new RouterTypedHandlerMismatchedRoute(),
-            ['distributor_id' => 1, 'invoice_number' => 'x'],
+            ['customer_id' => 1, 'invoice_number' => 'x'],
             'SomeOther\\Namespace\\WrongRequestClass'
         );
         $this->assertSame('error', $resp->status);
@@ -125,7 +125,7 @@ final class RouterTypedHandlerTest extends TestCase
     {
         $resp = $this->exec(
             new RouterTypedHandlerTestRoute(),
-            ['distributor_id' => 1, 'invoice_number' => 'x'],
+            ['customer_id' => 1, 'invoice_number' => 'x'],
             RouterTypedHandlerTestRequest::class
         );
         $this->assertSame('ok', $resp->status);

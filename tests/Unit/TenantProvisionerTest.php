@@ -124,6 +124,143 @@ final class TenantProvisionerTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    /** @return array<string, array{0:int,1:string,2:bool}> */
+    public static function gatewayCodeMatrix(): array
+    {
+        return [
+            '409 database_already_exists -> success'        => [409, '{"error":"database_already_exists"}', true],
+            '409 database_exists_unmarked -> FAIL (never released: unknown 409 code fails closed)' => [409, '{"error":"database_exists_unmarked"}', false],
+            '409 database_exists_legacy -> legacy success'   => [409, '{"error":"database_exists_legacy"}', true],
+            '409 older gateway no body -> legacy success'    => [409, '', true],
+            '409 older gateway non-json -> legacy success'   => [409, 'Conflict', true],
+            '409 older gateway prose -> legacy success'      => [409, '{"error":"database already exists"}', true],
+            '409 name collision -> FAIL'                     => [409, '{"error":"database_name_collision"}', false],
+            '422 name collision -> FAIL'                     => [422, '{"error":"database_name_collision"}', false],
+            '409 unknown code -> fail closed'                => [409, '{"error":"something_new"}', false],
+            '500 database_incomplete_unmarked -> FAIL'       => [500, '{"error":"database_incomplete_unmarked"}', false],
+            '500 other -> FAIL'                              => [500, '{"error":"query_failed"}', false],
+            '503 -> FAIL'                                    => [503, '', false],
+            '201 -> success'                                 => [201, '{"status":"created"}', true],
+        ];
+    }
+
+    /** @dataProvider gatewayCodeMatrix */
+    #[\PHPUnit\Framework\Attributes\DataProvider('gatewayCodeMatrix')]
+    public function test_gateway_error_code_matrix(int $http, string $body, bool $succeeds): void
+    {
+        $provisioner = $this->provisionerWithExplicitPlatformToken();
+        $provisioner->queueResponse($http, $body, '');
+        if (!$succeeds) {
+            $this->expectException(\RuntimeException::class);
+        }
+        $provisioner->exposeCreateDatabase(['tenant_id' => 'tenant-uuid-x', 'tenant_slug' => 'acme']);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_failed_provisioning_logs_status_and_code_but_never_the_response_body(): void
+    {
+        $dir = sys_get_temp_dir() . '/ssp-prov-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        \StoneScriptPHP\Logger::get_instance()->configure(false, true, false, $dir);
+        try {
+            $provisioner = $this->provisionerWithExplicitPlatformToken();
+            $provisioner->queueResponse(500, '{"error":"query_failed","detail":"Key (email)=(victim@example.com) SECRETBODY"}', '');
+            try {
+                $provisioner->exposeCreateDatabase(['tenant_id' => 'tenant-uuid-x', 'tenant_slug' => 'acme']);
+                $this->fail('must throw');
+            } catch (\RuntimeException $e) {
+                $this->assertStringNotContainsString('SECRETBODY', $e->getMessage());
+            }
+            $log = '';
+            foreach (glob($dir . '/*') ?: [] as $f) {
+                $log .= file_get_contents($f);
+                unlink($f);
+            }
+            $this->assertStringContainsString('HTTP 500 query_failed', $log);
+            $this->assertStringNotContainsString('SECRETBODY', $log);
+            $this->assertStringNotContainsString('victim@example.com', $log);
+        } finally {
+            \StoneScriptPHP\Logger::get_instance()->configure(false, true, false, null);
+            rmdir($dir);
+        }
+    }
+
+    public function test_name_collision_never_returns_so_seed_data_cannot_run(): void
+    {
+        $provisioner = $this->provisionerWithExplicitPlatformToken();
+        $provisioner->queueResponse(409, '{"error":"database_name_collision"}', '');
+        try {
+            $provisioner->exposeCreateDatabase(['tenant_id' => 'abc-1', 'tenant_slug' => 'a']);
+            $this->fail('must throw');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('collides', $e->getMessage());
+        }
+    }
+
+    /** @return array<string, array{0:string,1:bool}> */
+    public static function tenantIds(): array
+    {
+        return [
+            'canonical uuid'            => ['3f2504e0-4f89-41d3-9a0c-0305e82c3301', true],
+            'plain lower'               => ['clinic001', true],
+            'hyphenated'                => ['clinic-001', true],
+            'underscore rejected'       => ['clinic_001', false],
+            'a-b / a_b collision pair'  => ['a_b', false],
+            'upper case collides'       => ['Clinic001', false],
+            'special chars'             => ['a.b', false],
+            'space'                     => ['a b', false],
+            'leading underscore'        => ['_a', false],
+            'trailing hyphen'           => ['a-', false],
+            'double hyphen'             => ['a--b', false],
+            'trailing newline'          => ["abc\n", false],
+            'leading newline'           => ["\nabc", false],
+            'empty'                     => ['', false],
+            'long id -> db name > 63'   => [str_repeat('a', 60), false],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('tenantIds')]
+    public function test_unsafe_tenant_ids_are_rejected_before_the_gateway_is_called(string $id, bool $ok): void
+    {
+        $provisioner = $this->provisionerWithExplicitPlatformToken();
+        $provisioner->queueResponse(201, '{}', '');
+        if (!$ok) {
+            $this->expectException(\RuntimeException::class);
+        }
+        try {
+            $provisioner->exposeCreateDatabase(['tenant_id' => $id, 'tenant_slug' => 's']);
+        } finally {
+            if (!$ok) {
+                $this->assertSame([], $provisioner->capturedRequests, 'gateway must not be called for an unsafe id');
+            }
+        }
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_sanitised_collision_pair_cannot_both_pass(): void
+    {
+        $passing = array_filter(['a-b', 'a_b'], fn (string $id) => \StoneScriptPHP\Tenancy\TenantIdRule::violation($id, 'myplatform', 'tenant') === null);
+        $this->assertSame(['a-b'], array_values($passing));
+    }
+
+    public function test_db_name_length_boundary_is_63_bytes(): void
+    {
+        // myplatform_tenant_ = 18 bytes -> 45 chars of id fit exactly
+        $this->assertNull(\StoneScriptPHP\Tenancy\TenantIdRule::violation(str_repeat('a', 45), 'myplatform', 'tenant'));
+        $this->assertNotNull(\StoneScriptPHP\Tenancy\TenantIdRule::violation(str_repeat('a', 46), 'myplatform', 'tenant'));
+    }
+
+    public function test_already_exists_log_is_neutral_unless_gateway_version_is_known(): void
+    {
+        foreach ([[null, false], ['4.6.7', false], ['4.7.0', true], ['v4.8.1', true]] as [$version, $verifies]) {
+            $p = $this->provisionerWithExplicitPlatformToken();
+            $p->version = $version;
+            $p->queueResponse(409, '{"error":"database_already_exists"}', '');
+            $p->exposeCreateDatabase(['tenant_id' => 'tenant-1', 'tenant_slug' => 's']);
+            $this->assertSame($verifies, $p->exposeGatewayVerifies(), (string) $version);
+        }
+    }
+
     public function test_non_2xx_non_409_response_throws(): void
     {
         $provisioner = $this->provisionerWithExplicitPlatformToken();
@@ -267,6 +404,20 @@ final class TestableTenantProvisioner extends TenantProvisioner
     public array $capturedRequests = [];
 
     public bool $seedDataCalled = false;
+
+    /** Gateway version the stub reports (null = unknown). */
+    public ?string $version = null;
+
+    protected function gatewayVersion(): ?string
+    {
+        return $this->version;
+    }
+
+    public function exposeGatewayVerifies(): bool
+    {
+        $m = new \ReflectionMethod(TenantProvisioner::class, 'gatewayVerifiesIdentity');
+        return $m->invoke($this);
+    }
 
     public function queueResponse(int $httpCode, string|false $response, string $curlErr): void
     {

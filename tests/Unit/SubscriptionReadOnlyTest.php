@@ -462,8 +462,9 @@ final class SubscriptionReadOnlyTest extends TestCase
 
     public function test_fail_open_log_is_rate_limited(): void
     {
-        $f = sys_get_temp_dir() . '/ssp-failopen-' . uniqid() . '.log';
-        $prev = ini_set('error_log', $f);
+        $dir = sys_get_temp_dir() . '/ssp-failopen-' . uniqid();
+        mkdir($dir);
+        \StoneScriptPHP\Logger::get_instance()->configure(false, true, false, $dir);
         $ref = new \ReflectionProperty(SubscriptionMiddleware::class, 'lastFailOpenLog');
         $ref->setAccessible(true);
         $ref->setValue(null, 0);
@@ -472,11 +473,18 @@ final class SubscriptionReadOnlyTest extends TestCase
             for ($i = 0; $i < 5; $i++) {
                 $this->assertSame('passed', $this->call($mw, 'POST', '/bills')->message);
             }
-            $lines = array_filter(explode("\n", (string) @file_get_contents($f)), fn($l) => str_contains($l, 'lookup failed'));
+            $text = '';
+            foreach (glob($dir . '/*') ?: [] as $lf) {
+                $text .= (string) file_get_contents($lf);
+            }
+            $lines = array_filter(explode("\n", $text), fn($l) => str_contains($l, 'lookup failed'));
             $this->assertCount(1, $lines);
         } finally {
-            ini_set('error_log', (string) $prev);
-            @unlink($f);
+            \StoneScriptPHP\Logger::get_instance()->configure(false, true, false, null);
+            foreach (glob($dir . '/*') ?: [] as $lf) {
+                unlink($lf);
+            }
+            rmdir($dir);
             $ref->setValue(null, 0);
         }
     }

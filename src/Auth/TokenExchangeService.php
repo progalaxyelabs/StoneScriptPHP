@@ -129,8 +129,9 @@ class TokenExchangeService
             throw $e;
         } catch (\Exception $e) {
             throw new TokenExchangeException(
-                'Token validation failed: ' . $e->getMessage(),
-                'VALIDATION_FAILED'
+                'Token validation failed',
+                'VALIDATION_FAILED',
+                $e
             );
         }
     }
@@ -396,8 +397,9 @@ class TokenExchangeService
             return JWT::encode($tokenClaims, $privateKey, self::ALGORITHM);
         } catch (\Exception $e) {
             throw new TokenExchangeException(
-                'Failed to sign token: ' . $e->getMessage(),
-                'SIGNING_ERROR'
+                'Failed to sign token',
+                'SIGNING_ERROR',
+                $e
             );
         }
     }
@@ -442,7 +444,7 @@ class TokenExchangeService
         if ($response === false) {
             // Try to use stale cache if fetch fails
             if (isset($this->jwksCache[$cacheKey])) {
-                error_log("JWKS fetch failed, using stale cache for: $jwksUrl");
+                log_error("JWKS fetch failed, using stale cache for: $jwksUrl");
                 return $this->jwksCache[$cacheKey]['keys'];
             }
             throw new TokenExchangeException(
@@ -465,8 +467,9 @@ class TokenExchangeService
             return $keys;
         } catch (\Exception $e) {
             throw new TokenExchangeException(
-                "Failed to parse JWKS: " . $e->getMessage(),
-                'JWKS_PARSE_ERROR'
+                'Failed to parse JWKS',
+                'JWKS_PARSE_ERROR',
+                $e
             );
         }
     }

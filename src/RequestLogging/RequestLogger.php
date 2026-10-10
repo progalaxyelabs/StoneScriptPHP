@@ -142,7 +142,7 @@ class RequestLogger
             self::writeLog();
         } catch (\Throwable $e) {
             // §6 — fail-open: swallow all errors, never become a new failure mode
-            error_log('[RequestLogger] DB write failed (fail-open): ' . $e->getMessage());
+            log_error('[RequestLogger] DB write failed (fail-open): ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
         }
     }
 
@@ -307,7 +307,7 @@ class RequestLogger
 
         // §6 — table-missing guard: if gateway is not configured, fail-open to STDERR
         if (empty(self::$gatewayUrl) || empty(self::$gatewayPlatform)) {
-            error_log('[RequestLogger] Gateway not configured — request log skipped');
+            log_error('[RequestLogger] Gateway not configured — request log skipped');
             return;
         }
 

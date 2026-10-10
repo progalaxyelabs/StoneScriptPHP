@@ -138,7 +138,18 @@ class RouteEntry
          * this PHP route handler itself.
          */
         public readonly ?int $clientTimeoutMs = null,
+
+        /**
+         * How HEAD is answered for a GET route: `'probe'` = 200 with the route's headers and NO body,
+         * WITHOUT running the handler (safe by construction for routes with side effects: OAuth
+         * callbacks, email-verify / unsubscribe / magic links); `'execute'` = run the GET handler and
+         * drop the body; null = the global default (`HEAD_EXECUTES_GET`, true unless configured).
+         */
+        public readonly ?string $head = null,
     ) {
+        if ($head !== null && $head !== 'probe' && $head !== 'execute') {
+            throw new \InvalidArgumentException("RouteEntry \$head must be 'probe', 'execute' or null, got '$head'.");
+        }
         if ($access !== null && !RouteAccess::isValidAccess($access)) {
             throw new \InvalidArgumentException(
                 "RouteEntry \$access must be one of "

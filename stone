@@ -87,6 +87,22 @@ $commands = [
         'description' => 'Create system administrator user',
         'file' => 'cli/create-admin.php',
     ],
+    'auth:purge-refresh-tokens' => [
+        'description' => 'Delete expired refresh-token rows in batches (schedule hourly/daily)',
+        'file' => 'cli/auth-purge-refresh-tokens.php',
+    ],
+    'auth:check-origins' => [
+        'description' => 'List the origins allowed to receive the Google sign-in popup result; fails if none (run before deploying)',
+        'file' => 'cli/auth-check-origins.php',
+    ],
+    'auth:check-refresh-store' => [
+        'description' => 'Check the refresh-token vendor schema is applied (run before REFRESH_TOKEN_STORE=postgres)',
+        'file' => 'cli/auth-check-refresh-store.php',
+    ],
+    'tenants:check-ids' => [
+        'description' => 'Read-only pre-flight: list stored tenant ids that fail the tenant-id rule or collide (pipe ids in)',
+        'file' => 'cli/tenants-check-ids.php',
+    ],
     'schema:export' => [
         'description' => 'Export postgresql folder as tar.gz for db-gateway',
         'file' => 'cli/schema-export.php',
@@ -227,6 +243,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone validate sqlintegrity         # Check SQL for undefined table/fn refs\n";
     echo "  php stone tenant:create \"Acme\" acme    # Create new tenant\n";
     echo "  php stone tenant:list                   # List all tenants\n";
+    echo "  php stone auth:purge-refresh-tokens      # Purge expired refresh tokens (cron)\n";
     echo "  php stone gateway:register-main          # Register platform + create main DB\n";
     echo "  php stone gateway:register-tenant        # Register platform + upload tenant schema\n";
     echo "  php stone gateway:migrate-main                          # Migrate main database schema\n";
