@@ -219,7 +219,7 @@ final class ClientIpTest extends TestCase
 
     public function test_catch_all_and_invalid_entries_are_rejected(): void
     {
-        $this->setEnv('TRUSTED_PROXIES', '*, 0.0.0.0/0, ::/0, 10.0.0.0/33, bogus, 10.0.0.9, 0.0.0.0/1, 8.0.0.0/7, 2001:db8::/31, ::/1');
+        $this->setEnv('TRUSTED_PROXIES', '*, 0.0.0.0/0, ::/0, 10.0.0.0/33, bogus, 10.0.0.9, 0.0.0.0/1, 8.0.0.0/7, 2001:db8::/31, ::/1, 11.0.0.0/8, 128.0.0.0/9, 16.0.0.0/11');
         $this->assertSame(['10.0.0.9'], ClientIp::trustedProxies());
 
         // "trust everyone" must not enable spoofing
@@ -372,8 +372,12 @@ final class ClientIpTest extends TestCase
 
     public function test_prefix_floor(): void
     {
-        $this->setEnv('TRUSTED_PROXIES', '10.0.0.0/8 11.0.0.0/8 12.0.0.0/7 100.64.0.0/10 2001:db8::/32 2001::/16 fc00::/7');
-        $this->assertSame(['10.0.0.0/8', '11.0.0.0/8', '100.64.0.0/10', '2001:db8::/32', 'fc00::/7'], ClientIp::trustedProxies());
+        // public IPv4 >= /12 (CDN-published minimum), IPv6 >= /32, private blocks exempt
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.0/8 11.0.0.0/8 16.0.0.0/11 17.0.0.0/12 104.16.0.0/12 100.64.0.0/10 127.0.0.0/8 2001:db8::/32 2001::/16 fc00::/7');
+        $this->assertSame(
+            ['10.0.0.0/8', '17.0.0.0/12', '104.16.0.0/12', '100.64.0.0/10', '127.0.0.0/8', '2001:db8::/32', 'fc00::/7'],
+            ClientIp::trustedProxies()
+        );
     }
 
     public function test_ipv4_mapped_entries_are_normalised(): void
@@ -466,6 +470,80 @@ final class ClientIpTest extends TestCase
         $rl2->record('login');
         $rl2->record('login');
         $this->assertFalse($rl2->check('login', 1, 60));
+    }
+
+    // ---- review #2 -------------------------------------------------------------
+
+    public function test_whitelist_matches_ipv4_mapped_spelling(): void
+    {
+        $_SERVER['HTTP_USER_AGENT'] = 'ua';
+        $rl = new RateLimiter();
+        $rl->addToWhitelist('::ffff:1.2.3.4');
+        $_SERVER['REMOTE_ADDR'] = '1.2.3.4';
+        $rl->record('login');
+        $rl->record('login');
+        $this->assertTrue($rl->check('login', 1, 60), 'mapped whitelist entry matches the IPv4 peer');
+
+        $rl2 = new RateLimiter();
+        $rl2->addToWhitelist('1.2.3.4');
+        $_SERVER['REMOTE_ADDR'] = '::ffff:1.2.3.4'; // canonicalised to 1.2.3.4
+        $rl2->record('login');
+        $rl2->record('login');
+        $this->assertTrue($rl2->check('login', 1, 60));
+    }
+
+    public function test_env_failure_is_logged_not_silent_and_throttled(): void
+    {
+        $log = tempnam(sys_get_temp_dir(), 'ssp_log_');
+        $old = ini_set('error_log', $log);
+        try {
+            $_ENV['DB_MODE'] = 'bogus-mode'; // real Env constructor throws
+            (new \ReflectionProperty(Env::class, '_instance'))->setValue(null, null);
+            ClientIp::reset();
+            $this->assertSame([], ClientIp::trustedProxies());
+            $this->assertSame([], ClientIp::trustedProxies());
+            $out = (string) file_get_contents($log);
+            $this->assertStringContainsString('could not read TRUSTED_PROXIES', $out);
+            $this->assertStringContainsString('Invalid DB_MODE', $out);
+            $this->assertSame(1, substr_count($out, 'could not read TRUSTED_PROXIES'), 'throttled to one line');
+        } finally {
+            ini_set('error_log', $old === false ? '' : $old);
+            unlink($log);
+            unset($_ENV['DB_MODE']);
+        }
+    }
+
+    public function test_memoised_per_process_env_change_needs_restart(): void
+    {
+        $this->setEnv('TRUSTED_PROXIES', '10.0.0.5');
+        $this->assertSame(['10.0.0.5'], ClientIp::trustedProxies()); // resolved + memoised
+        // env changes underneath (no ClientIp::reset): documented behaviour = stale until the worker restarts
+        $_ENV['TRUSTED_PROXIES'] = '10.0.0.6';
+        (new \ReflectionProperty(Env::class, '_instance'))->setValue(null, (new \ReflectionClass(Env::class))->newInstanceWithoutConstructor());
+        $this->assertSame(['10.0.0.5'], ClientIp::trustedProxies());
+        ClientIp::reset(); // = worker restart
+        $this->assertSame(['10.0.0.6'], ClientIp::trustedProxies());
+    }
+
+    public function test_real_env_and_dotenv_load_path_after_bootstrap(): void
+    {
+        $dir = sys_get_temp_dir() . '/ssp_dotenv_' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents($dir . '/.env', "TRUSTED_PROXIES=10.0.0.5\nDB_MODE=direct\n");
+        try {
+            ClientIp::bootstrap([]);                       // runs before .env is loaded
+            $this->assertArrayNotHasKey('TRUSTED_PROXIES', $_ENV);
+            \Dotenv\Dotenv::createImmutable($dir)->load(); // the .env load, as Env's constructor does
+            (new \ReflectionProperty(Env::class, '_instance'))->setValue(null, null); // REAL Env constructor from here
+            $_SERVER['REMOTE_ADDR'] = '10.0.0.5';
+            $_SERVER['HTTP_X_FORWARDED_FOR'] = '1.1.1.1, 203.0.113.9';
+            $this->assertSame('203.0.113.9', client_ip());
+            $this->assertSame(['10.0.0.5'], ClientIp::trustedProxies());
+        } finally {
+            unlink($dir . '/.env');
+            rmdir($dir);
+            unset($_ENV['TRUSTED_PROXIES'], $_ENV['DB_MODE']);
+        }
     }
 
     /** setEnv() without dropping config recorded by bootstrap() (simulates a late .env load). */

@@ -49,11 +49,19 @@ namespace StoneScriptPHP\Http;
  *
  * Validation of trust entries
  * ---------------------------
- * `*`, `/0` and any prefix shorter than IPv4 /8 or IPv6 /32 are REJECTED (a trust
- * entry names proxies, not a continent; /8 is the smallest legitimate private
- * block, /32 a typical ISP/organisation allocation). Private-space blocks
- * (fc00::/7, fe80::/10, ...) are exempt from the floor because they are not
- * internet-routable. IPv4-mapped IPv6 entries are normalised to IPv4.
+ * `*`, `/0` and any prefix shorter than public IPv4 /12 or IPv6 /32 are REJECTED.
+ * A trust entry names proxies, not other people's networks. /12 is the broadest
+ * public IPv4 block a CDN publishes (Cloudflare's smallest published range is
+ * /12), so a floor of /12 admits every real CDN list while refusing public /8s
+ * and /9-/11s that no proxy fleet owns; /32 is a typical IPv6 ISP/organisation
+ * allocation. Private-space blocks (10/8, fc00::/7, fe80::/10, ...) are exempt
+ * because they are not internet-routable. IPv4-mapped IPv6 entries are
+ * normalised to IPv4.
+ *
+ * Process model: the list is resolved once per PHP process and memoised. It is
+ * correct for php-fpm (per-worker, restarted on reload) and for long-lived
+ * workers (Swoole, RoadRunner, FrankenPHP worker mode) alike, but a changed
+ * TRUSTED_PROXIES only takes effect after the worker restarts / reloads.
  *
  * The 'unknown' bucket
  * --------------------
@@ -77,10 +85,14 @@ final class ClientIp
 
     private static int $lastHintLog = 0;
     private static int $lastUnknownLog = 0;
+    private static int $lastEnvErrLog = 0;
+
+    /** @var array{key:string,list:string[]}|null last expanded trust list */
+    private static ?array $expandMemo = null;
     private static bool $legacyNoticed = false;
 
     /** Smallest allowed trust-entry prefix (see class docblock). */
-    private const MIN_BITS_V4 = 8;
+    private const MIN_BITS_V4 = 12;
     private const MIN_BITS_V6 = 32;
 
     /** CIDRs behind the `private` keyword. */
@@ -124,7 +136,7 @@ final class ClientIp
             return 'unknown';
         }
 
-        $trusted = self::expand($trustedProxies);
+        $trusted = self::expandMemo($trustedProxies);
         if ($trusted === [] || !self::isTrusted($peer, $trusted)) {
             return $peer;
         }
@@ -270,6 +282,8 @@ final class ClientIp
         self::$effective = null;
         self::$lastHintLog = 0;
         self::$lastUnknownLog = 0;
+        self::$lastEnvErrLog = 0;
+        self::$expandMemo = null;
         self::$legacyNoticed = false;
     }
 
@@ -330,7 +344,15 @@ final class ClientIp
     {
         try {
             return trim((string) \StoneScriptPHP\Env::secret($key));
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            // Never silent: an unreadable Env means the trust list is empty (safe, but a
+            // proxied platform will see one shared bucket). Throttled to once a minute.
+            $now = time();
+            if (self::$lastEnvErrLog === 0 || $now - self::$lastEnvErrLog >= 60) {
+                self::$lastEnvErrLog = $now;
+                error_log('[StoneScriptPHP] client_ip(): could not read ' . $key . ' (' . get_class($e) . ': '
+                    . $e->getMessage() . '); trusting no proxy (REMOTE_ADDR only) until Env is readable.');
+            }
             return null;
         }
     }
@@ -371,7 +393,7 @@ final class ClientIp
             $norm = self::normalizeEntry($entry);
             if ($norm === null) {
                 error_log('[StoneScriptPHP] TRUSTED_PROXIES: ignoring invalid, catch-all or too-broad entry "'
-                    . $entry . '" (min prefix: IPv4 /' . self::MIN_BITS_V4 . ', IPv6 /' . self::MIN_BITS_V6 . ')');
+                    . $entry . '" (min prefix: public IPv4 /' . self::MIN_BITS_V4 . ', IPv6 /' . self::MIN_BITS_V6 . ')');
                 continue;
             }
             $out[] = $norm;
@@ -434,6 +456,21 @@ final class ClientIp
     }
 
     /**
+     * expand() memoised on the exact input (the list is identical on every request of a process).
+     *
+     * @param string[] $entries
+     * @return string[]
+     */
+    private static function expandMemo(array $entries): array
+    {
+        $key = implode("\n", array_map('strval', $entries));
+        if (self::$expandMemo === null || self::$expandMemo['key'] !== $key) {
+            self::$expandMemo = ['key' => $key, 'list' => self::expand($entries)];
+        }
+        return self::$expandMemo['list'];
+    }
+
+    /**
      * @param string[] $entries
      * @return string[] concrete IP/CIDR entries (keyword expanded, invalid dropped)
      */
@@ -468,6 +505,12 @@ final class ClientIp
             return self::valid($m[1]);
         }
         return self::valid($hop);
+    }
+
+    /** Canonical spelling of an IP (lowercase compressed IPv6; IPv4-mapped IPv6 -> IPv4), or null if not an IP. */
+    public static function canonical(string $ip): ?string
+    {
+        return self::valid($ip);
     }
 
     /** Validate + canonicalise (lowercase compressed IPv6; IPv4-mapped IPv6 -> IPv4). */

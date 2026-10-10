@@ -186,11 +186,10 @@ class RateLimiter
         ]);
     }
 
-    /** Canonical spelling of $value if it is an IP address, else null. */
+    /** Canonical spelling of $value if it is an IP address (IPv4-mapped IPv6 unmapped), else null. */
     private function canonicalIp(string $value): ?string
     {
-        $bin = filter_var($value, FILTER_VALIDATE_IP) !== false ? @inet_pton($value) : false;
-        return $bin === false ? null : (string) inet_ntop($bin);
+        return \StoneScriptPHP\Http\ClientIp::canonical($value);
     }
 
     /**

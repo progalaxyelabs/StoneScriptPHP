@@ -51,11 +51,17 @@ The value is read through the framework `Env` accessor, lazily on first use, so 
 loaded `.env`. With php-fpm `clear_env = yes` (the default) real environment variables are stripped;
 `.env`, the file/secret forms above, or a pool `env[TRUSTED_PROXIES] = ...` directive all still work.
 
+Process model: the list is resolved once per PHP process and memoised. That is correct for php-fpm (per worker,
+refreshed when workers restart or the pool reloads) and for long-lived workers (Swoole, RoadRunner, FrankenPHP
+worker mode), but a changed `TRUSTED_PROXIES` only takes effect after the worker restarts / reloads. If `Env`
+cannot be read at all, the framework logs it (once a minute) and trusts no proxy.
+
 ### Validation
-`*`, `/0` and any prefix shorter than **IPv4 /8** or **IPv6 /32** are rejected and logged. Rationale: a trust
-entry names proxies, not networks of other people; /8 is the smallest legitimate private block
-(`10.0.0.0/8`) and /32 is a typical ISP/organisation allocation, so anything broader cannot be "my proxy".
-Blocks inside private space (`fc00::/7`, `fe80::/10`, ...) are exempt from the floor because they are not
+`*`, `/0` and any prefix shorter than **public IPv4 /12** or **IPv6 /32** are rejected and logged. Rationale: a
+trust entry names proxies, not other people's networks. /12 is the broadest public IPv4 block a CDN publishes
+(Cloudflare's smallest published range is /12), so the floor admits every real CDN list while refusing public
+/8s to /11s that no proxy fleet owns; /32 is a typical IPv6 ISP/organisation allocation. Blocks inside private
+space (`10.0.0.0/8`, `fc00::/7`, `fe80::/10`, ...) are exempt from the floor because they are not
 internet-routable. IPv4-mapped IPv6 entries (`::ffff:10.0.0.5`) are normalised to IPv4 so they can match.
 
 ### WARNING: the `private` keyword
@@ -90,23 +96,34 @@ Two topologies. Each has one job.
 1. `REMOTE_ADDR` must be the real client. With the stock `fastcgi_params`
    (`fastcgi_param REMOTE_ADDR $remote_addr;`) and no `real_ip` / `proxy_protocol` directives this is
    automatic. **Do not add `set_real_ip_from` on an edge nginx**: there is no trusted hop to take it from.
-2. Never forward a client-supplied forwarding header. For `proxy_pass` locations **overwrite**:
+2. **Never pass a client-supplied forwarding header on to the application, on EITHER protocol.** Both of these
+   are mandatory on every edge vhost, and **they are rollout step 1** while any application behind that
+   nginx is still on a framework older than 11 (those versions trust the raw leftmost `X-Forwarded-For`):
+
+   **fastcgi (PHP) locations** - the client's raw header otherwise arrives in PHP as `$_SERVER['HTTP_X_FORWARDED_FOR']`
+   (httpoxy-style fix: overwrite the CGI variable, never let the client's value through):
+   ```
+   fastcgi_param HTTP_X_FORWARDED_FOR "";           # or: $remote_addr
+   fastcgi_param HTTP_X_REAL_IP       "";           # or: $remote_addr
+   ```
+   Blanking is the safe default for an edge that faces visitors directly. Use `$remote_addr` instead if a legacy
+   application needs a populated value.
+
+   **proxy_pass locations** - **overwrite**:
    ```
    proxy_set_header X-Forwarded-For $remote_addr;     # NOT $proxy_add_x_forwarded_for
    proxy_set_header X-Real-IP       $remote_addr;
    proxy_set_header X-Forwarded-Proto $scheme;
    ```
-   `$proxy_add_x_forwarded_for` appends to whatever the client sent, so every downstream consumer has to know
-   to walk right to left. Overwriting makes even naive consumers safe. **This overwrite is also the only
-   protection for applications that are not yet on framework 11: roll it out first and independently.**
-3. Defence in depth only, never a substitute for 3a.2 or for framework 11: in the fastcgi snippet used by an
-   **edge** vhost you may blank the headers so a forged value never reaches PHP:
-   ```
-   fastcgi_param HTTP_X_FORWARDED_FOR "";
-   fastcgi_param HTTP_X_REAL_IP       "";
-   ```
-   **Never put these two lines in a snippet that an inner nginx (3b) includes**: they would erase the very
-   header the framework needs and every visitor collapses into the proxy's bucket.
+   `$proxy_add_x_forwarded_for` appends to whatever the client sent, so every downstream consumer has to know to
+   walk right to left. Overwriting makes even naive consumers safe.
+
+   With framework 11 the PHP side no longer depends on these (it ignores the header unless the peer is a trusted
+   proxy), so after all applications are on 11 the fastcgi lines become defence in depth. Until then they are the
+   protection.
+3. **Never put the fastcgi blanking lines (or `= $remote_addr` variants) in a snippet that an inner nginx (3b)
+   includes**: they would erase the very header the framework needs, and every visitor would collapse into the
+   outer proxy's rate-limit bucket.
 4. nginx's own limits (`limit_req_zone`) must key on `$binary_remote_addr`.
 
 ### 3b. Inner nginx / PHP behind another proxy (container behind a host proxy, load balancer, Traefik)

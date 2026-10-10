@@ -31,8 +31,12 @@ with a forged header. Now:
 - Config: `TRUSTED_PROXIES` (read through `Env::secret()`: `.env`, env, `_FILE`, `/run/secrets`; resolved lazily
   after `.env` is loaded; immune to php-fpm `clear_env` except for raw env, see the doc) or `trusted_proxies` in the
   `Application::run()` config. Precedence: config > `TRUSTED_PROXIES` > legacy `trust_proxy`.
-- Trust entries: `*`, `/0` and prefixes shorter than IPv4 /8 or IPv6 /32 are rejected (private-space blocks such as
-  `fc00::/7` are exempt); IPv4-mapped IPv6 entries are normalised to IPv4.
+- Trust entries: `*`, `/0` and prefixes shorter than public IPv4 /12 (the broadest block a CDN publishes) or IPv6 /32 are
+  rejected (private-space blocks such as `10.0.0.0/8` and `fc00::/7` are exempt); IPv4-mapped IPv6 entries are normalised
+  to IPv4. The list is memoised per PHP process (also fine for Swoole/RoadRunner/FrankenPHP workers; changes need a restart).
+  An unreadable `Env` is logged (throttled) and trusts no proxy.
+- nginx: edge vhosts must blank/overwrite `HTTP_X_FORWARDED_FOR`/`HTTP_X_REAL_IP` for fastcgi and overwrite
+  `X-Forwarded-For` for proxy_pass while any app is pre-11 (see the doc).
 - **`private` keyword is unsafe when the backend port is reachable by anything but the proxy** (published docker
   ports, userland-proxy, shared docker bridges). Use an explicit CIDR of your proxy instead.
 - `RateLimiter` / `RateLimitMiddleware` bucket on `ClientIp::rateKey()` (IPv6 -> /64). Blacklisting an IP covers its
