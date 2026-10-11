@@ -3,6 +3,7 @@
 namespace StoneScriptPHP;
 
 use Exception;
+use StoneScriptPHP\Exceptions\ConfigurationException;
 
 class Env
 {
@@ -218,6 +219,9 @@ class Env
      */
     protected array $resolved = [];
 
+    /** Validation failure from construction (see bootFailure()). */
+    private ?\Throwable $bootFailure = null;
+
     protected function __construct()
     {
         // Break a real reentrancy hazard: get_instance() only assigns
@@ -241,11 +245,43 @@ class Env
         // this partially-initialized window at all.
         self::$_instance = $this;
 
-        // Load .env file if it exists (optional for Docker environments)
+        // Load .env file if it exists. A MISSING .env is legitimate (env-only deployments:
+        // Docker, systemd, PHP-FPM pool env[] - required keys are still enforced below).
+        // A .env that EXISTS but cannot be read or parsed is a broken deployment and must
+        // fail loudly: silently continuing would boot with class defaults only (builtin
+        // auth, empty issuer, no gateway config) and ignore the operator's real settings.
         $env_file_path = ROOT_PATH . DIRECTORY_SEPARATOR . '.env';
-        if (file_exists($env_file_path)) {
-            $dotenv = \Dotenv\Dotenv::createImmutable(ROOT_PATH);
-            $dotenv->load();
+        if (is_dir($env_file_path)) {
+            // Typically a Docker bind-mount of a host file that did not exist (the daemon creates a
+            // directory). There is no file to read: treat it as missing and rely on real environment
+            // variables, but say so - the operator probably expected a file.
+            error_log('[StoneScriptPHP] ' . $env_file_path . ' is a directory, not a file; ignoring it and using '
+                . 'real environment variables only (check the volume/bind mount).');
+        } elseif (file_exists($env_file_path)) {
+            if (!is_readable($env_file_path)) {
+                throw new ConfigurationException(
+                    "Cannot read the environment file '{$env_file_path}' (it exists but this PHP process may not "
+                    . 'read it). Fix its permissions/ownership so the PHP-FPM user can read it, or remove it and '
+                    . 'provide every setting through real environment variables.'
+                );
+            }
+            try {
+                $dotenv = \Dotenv\Dotenv::createImmutable(ROOT_PATH);
+                $dotenv->load();
+            } catch (\Dotenv\Exception\ExceptionInterface $e) {
+                // Map by exception class. Never forward Dotenv's own text: it quotes the offending line,
+                // which may be a secret.
+                $reason = match (true) {
+                    $e instanceof \Dotenv\Exception\InvalidFileException => 'it is not valid dotenv syntax',
+                    $e instanceof \Dotenv\Exception\InvalidPathException => 'it could not be read',
+                    default => 'it could not be processed',
+                };
+                throw new ConfigurationException(
+                    "The environment file '{$env_file_path}' could not be loaded ({$reason}). "
+                    . 'Use "# comment" lines, KEY=value pairs, and quote values that contain spaces or special '
+                    . 'characters. Check it with: php stone env:check'
+                );
+            }
         }
 
         // ALLOWED_ORIGINS base: src/config/allowed-origins.php, if the app defines
@@ -289,6 +325,43 @@ class Env
             // If nothing resolved, property keeps its default value
         }
 
+        // Everything above loaded the configuration. Validation failures below leave a fully
+        // resolved instance (CLI tools that need no gateway keep using it), but the failure is
+        // REMEMBERED so serving code can refuse to run on it: see bootFailure().
+        try {
+            $this->validate();
+        } catch (\Throwable $e) {
+            $this->bootFailure = $e;
+            throw $e;
+        }
+    }
+
+    /**
+     * The validation failure recorded when this process's Env was constructed, or null when the
+     * configuration is valid. Application::run() refuses to serve while this is set, because
+     * bootstrap.php swallows the constructor exception for the benefit of CLI tools - without
+     * this the failure would be forgotten and the app would serve on an invalid configuration.
+     */
+    /**
+     * Forget the Env singleton so the next get_instance() re-reads the environment. For test suites that
+     * set their own environment variables after composer's autoload already built it from a developer's
+     * real .env. Not for application code.
+     *
+     * @internal
+     */
+    public static function resetForTesting(): void
+    {
+        self::$_instance = null;
+        \StoneScriptPHP\Auth\LocalSigningIdentity::resetDefault();
+    }
+
+    public static function bootFailure(): ?\Throwable
+    {
+        return self::$_instance?->bootFailure;
+    }
+
+    private function validate(): void
+    {
         // DB_MODE selects the database transport (gateway | direct |
         // pgandroid). Fail loud at boot on an unrecognized value — same
         // discipline as the required-secret checks below — instead of
@@ -550,7 +623,20 @@ class Env
     public static function get_instance(): static
     {
         if (!self::$_instance) {
-            self::$_instance = new static();
+            try {
+                self::$_instance = new static();
+            } catch (\Throwable $e) {
+                // The constructor publishes $this as the singleton BEFORE it finishes (reentrancy guard).
+                // If the CONFIGURATION could not be loaded (unreadable/unparseable .env), that object
+                // holds class defaults only (AUTH_MODE=builtin, empty config); keeping it would make every
+                // later get_instance() succeed on it and the failure would be silently forgotten, so drop it.
+                // A later validation failure (missing required key) leaves a fully loaded instance whose
+                // failure is recorded and exposed through bootFailure().
+                if (self::bootFailure() === null) {
+                    self::$_instance = null;
+                }
+                throw $e;
+            }
         }
 
         return self::$_instance;

@@ -7,6 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.1.0]
+
+Minor release: new public API (mode-aware typed-auth wiring, `Env::resetForTesting()`, `gateway:migrate-vendor-main
+--only`, `php stone env:check`) plus the fixes below. Platforms and the scaffold no longer need local plumbing for
+auth wiring, required-setting checks or test resets.
+
+### Added
+
+- **`AuthMiddlewareRegistrar::forMode($mode, Env $env, array $options = [])`** builds the access-token middleware for
+  the configured `AUTH_MODE` from the environment. external/hybrid trust BOTH the auth service (JWKS,
+  `AUTH_SERVICE_URL`/`AUTH_ISSUER`) and this API (`JWT_ISSUER` + local public key, which `ExchangeRoute` signs with),
+  keeping the strict purpose gate (an identity token cannot reach an authorization route and vice versa; a token
+  claiming the auth issuer but signed by the local key is rejected). builtin uses `SingleTokenMiddleware`. Empty
+  `AUTH_SERVICE_URL`, `AUTH_ISSUER`, `JWT_ISSUER`, a missing key, or `JWT_ISSUER == AUTH_ISSUER` throws at boot naming the
+  variable. Relative key paths resolve against `ROOT_PATH` (and fail loudly if it is undefined), never the working directory.
+  **One signing identity.** New `Auth\LocalSigningIdentity` is the single description of this API as a token issuer (issuer, signing key,
+  passphrase, verifying public key). `Application::run()` sets it from the `ExternalAuthConfig` that `ExchangeRoute` signs with in
+  external/hybrid mode (so `signing_issuer` / `signing_private_key_path` / `signing_private_key_passphrase` set as top-level `auth` keys or in `auth.features` apply, `features` winning if both are set) and from the
+  environment otherwise. `RsaJwtHandler` (login, refresh, `JwtAuthMiddleware`), `HybridApiTokenJwtHandler` and the typed middleware all read it, so
+  the signer and every verifier move together: an overridden signing key/issuer now works end to end (exchange -> protected route), tested with the
+  real `ExchangeRoute`. Default config is unchanged (identity == environment). `RsaJwtHandler` / `HybridApiTokenJwtHandler` accept an optional
+  identity argument; `Env::resetForTesting()` also clears the process identity. A log
+  warning is written when an `AccessTokenMiddleware` is already in `middleware` (double wiring). `forMode()` reads the identity `Application::run()` established, so call it from `run()` (the `typed_auth` option does) or later; called before `run()` it captures the environment's identity. Opt in without writing
+  any wiring with `Application::run(['typed_auth' => true, ...])`. Refresh-token routes still need
+  `RefreshTokenMiddleware` + a store (`AuthMiddlewareRegistrar::create()`).
+- **`Env::resetForTesting()`** (`@internal`): drop the singleton so a test suite that sets its own environment after
+  composer's autoload already built it from a developer's `.env` need not reflect into a private.
+- **`php stone gateway:migrate-vendor-main --only=<Feature>[,<Feature>]`** and **`--list`**: apply only the named staged
+  vendor features (names from `--list`, e.g. `RefreshTokens`) instead of everything staged. Enabling the refresh-token
+  store no longer also creates the Subscriptions tables, which turn tenants read-only (HTTP 423) when a subscription
+  lapses. Without `--only` behaviour is unchanged (everything staged is applied). The command now rejects, with exit 1 and nothing applied,
+  a bare `--only`, an empty `--only=`, the space form (`--only RefreshTokens`), positional arguments and unknown options, so a malformed
+  selection can never fall back to "everything". Unselected features' earlier objects are
+  not in the upload; the gateway never drops tables without an explicit `--allow-drop-table`. Staging now also writes
+  `src/postgresql/vendor/manifest.json` (never uploaded). Refresh-token error messages and docs point at `--only=RefreshTokens`.
+- **`php stone env:check`**: performs the same environment load as the running app and exits 1 with the reason when
+  the app would refuse to boot for any reason that needs no application config (unreadable/unparseable `.env`, missing required gateway
+  settings including `DB_GATEWAY_SCHEMA_NAME`, invalid `DB_MODE`). It uses the same function (`Support\BootCheck::environment()`) as
+  `Application::run()`. Checks that depend on `Application::run()`'s config (tenant schema when tenancy is configured; `typed_auth` issuer/key)
+  cannot be decided from the CLI, so they are printed as `WARN:` lines and do not change the exit code. File
+  permissions are part of what it checks, so run it as the PHP-FPM user: `sudo -u <fpm-user> php stone env:check`.
+- **Tenancy fails at boot.** If tenancy is declared in configuration (`require_api_token`, `store_access`, `tenant_url_match`, or a strategy
+  implementing the new `Tenancy\DeclaresTenantRouting` and returning true; a custom no-op strategy does NOT count and keeps booting) in gateway mode without `DB_GATEWAY_TENANT_SCHEMA_NAME`, boot
+  stops naming the variable instead of every tenant request failing at its first query. A tenant id that only appears in a
+  token at request time (no declared tenancy) is answered by `GatewayTenantMiddleware` with a clear 500 naming the variable,
+  before any database work. Boot cannot know about the latter, hence two checks.
+- `Application::run()` refuses to serve when `DB_GATEWAY_SCHEMA_NAME` is empty in gateway mode (it cannot join Env's
+  construction-time list: CLI tools that never touch the database construct Env without it). Together with the item below,
+  empty `DB_GATEWAY_URL` / `DB_GATEWAY_PLATFORM` / `DB_GATEWAY_SCHEMA_NAME` can no longer boot, so a platform needs no check of
+  its own in `public/index.php`.
+
+- **Machine-readable refresh refusals.** `ApiResponse` has an optional `errorCode`, emitted as top-level `error_code` in the JSON body (absent
+  when null, so every other response is unchanged). Every refusal of a refresh token by `RefreshRoute`, `BodyRefreshRoute` and
+  `RefreshTokenMiddleware` is HTTP 401 with `"error_code": "invalid_grant"` (RFC 6749 section 5.2 style) and the same human `message` as before: missing,
+  malformed, invalid, expired, revoked, replayed, wrong-type or unusable-payload tokens. `BodyRefreshRoute`'s 501 "Refresh token persistence is not
+  configured." carries `"error_code": "refresh_store_not_configured"`: a hard configuration error, not a refused token.
+  A missing refresh token is `"error_code": "invalid_request"` (RFC 6749). **A server that cannot VERIFY tokens is not a refusal:** if the verifying
+  key is unreadable or invalid, or a trusted issuer's JWKS cannot be fetched (and nothing usable is cached), the refresh endpoints answer **503** with
+  `"error_code": "token_verifier_unavailable"` and log the cause, never `invalid_grant`, so a key-mount or JWKS outage cannot sign every user out.
+  New `Auth\TokenVerifierUnavailableException`, optional `Auth\StrictTokenVerifier` (`verifyTokenStrict()`), `TrustedIssuerVerifier::verifyStrict()` and
+  `MultiAuthJwtValidator::validateJWTStrict()` expose the distinction; the existing `verify*()` methods keep returning "not verified" for every failure. A CSRF failure on the cookie
+  route (403) is not a grant refusal and has no code. Clients should key on `error_code`, not on `message`. See `docs/REFRESH-TOKENS.md`.
+
+### Behaviour changes (read before upgrading)
+
+- **Fail-closed environment checks in `Application::run()`.** Previously `bootstrap.php` swallowed Env construction errors
+  and `run()` carried on with whatever instance existed. Now `run()` answers `500 env_configuration_invalid` (generic body;
+  detail only in the server error log) when: `.env` exists but is unreadable or not valid dotenv syntax; a required
+  setting is missing or empty (`DB_GATEWAY_URL`, `DB_GATEWAY_PLATFORM`, and in gateway mode `DB_GATEWAY_SCHEMA_NAME`); or
+  `DB_MODE` is not one of gateway|direct|pgandroid.
+  **Who is newly affected, honestly:** (a) a broken `.env` was already running on class defaults only (the real
+  settings were ignored), so those apps were not working; (b) a gateway-mode app with no `DB_GATEWAY_*` that never
+  touched the database used to serve its non-database routes and now returns 500 on every request; (c) a typo'd `DB_MODE`
+  used to boot and fail at the first database call. All three are configurations the framework itself declared invalid; serving
+  them was unsafe (default builtin auth, empty issuer) or silently degraded. It is treated as a fail-closed security fix, which
+  is why it is not hidden behind a flag. To keep a no-database service running, set the three `DB_GATEWAY_*` values to placeholders or
+  use `DB_MODE=direct`/`pgandroid`.
+  A missing `.env` is still fine (env-only deployments). A `.env` that is a **directory** (typically a Docker bind-mount of a
+  host file that did not exist) is treated as missing, with a warning in the error log.
+  **Pre-flight before deploying:** `sudo -u <fpm-user> php stone env:check` (exit 0 = boots).
+- `php stone env` / `php stone generate env` **never loses a setting**. On an existing `.env` it keeps the file
+  byte-for-byte (comments, `export` lines, quoting, keys the Env schema does not know such as `GOOGLE_CLIENT_ID`) and only
+  appends missing schema settings as comments. `--force` resets the schema's own settings to their defaults, keeps every other
+  key, and first writes a backup `.env.bak.<timestamp>` created 0600 from the first byte (it holds the secrets: `php stone new` now
+  git-ignores `.env.*`; keep `.env.*` out of images too). A symlinked `.env` is updated through the link. If the owner cannot be preserved
+  (not root, file owned by someone else) or the group cannot be kept, it refuses and changes nothing. An invalid existing file is refused and left untouched.
+  Parsing uses phpdotenv; writes are atomic (temp file + rename) and keep the file's mode (and owner when run as root). New files are
+  created 0640. Values with `\`, `$`, quotes, `#` or newlines are now escaped so the file always re-parses to the same value.
+  `php stone setup --quiet` also creates `.env` 0640 (it can contain secrets copied from the process environment).
+
+### Fixed
+
+- Unreadable/unparseable `.env`: previously `Env` published itself as the singleton, threw part-way through, and every later
+  `Env::get_instance()` returned that defaults-only instance (`AUTH_MODE=builtin`, empty issuer, none of the real environment
+  variables). It now throws `ConfigurationException` every time (the reason is mapped from the exception class; phpdotenv's own text,
+  which quotes the offending line, is never forwarded), and `Env::bootFailure()` remembers validation failures for CLI tools that
+  keep a loaded instance.
+- **`php stone generate auth:google`** generated a route that required a `google-oauth.php` the generator never created and
+  lived in `App\Routes` while the generator wrote to and printed `App\Routes\Auth`. The route is now in `App\Routes\Auth`, reads
+  `GOOGLE_CLIENT_ID` through `Env::secret()` (`.env`, environment or `GOOGLE_CLIENT_ID_FILE`) and answers a clear 500 when unset.
+  `auth:linkedin` / `auth:apple` have no template; they now stop before creating anything.
+- **`auth.legacy_compat`** was dropped by `Application::buildAuthRouteOptions()`; the key is now forwarded (absent still defaults to true).
+- **`php stone setup`** wrote an obsolete `.env` (`DATABASE_*`, `JWT_ISSUER=example.com`). It now derives the file from the Env schema
+  through the same generator as `php stone env`, asks for the gateway settings, defaults `JWT_ISSUER` to the local API URL, reads an existing
+  `.env` with phpdotenv, never overwrites an existing `.env`, and resolves the project root in vendor mode.
+- `php stone env` wrote `;` comments, which phpdotenv rejects, and could not find `vendor/autoload.php` when the framework is installed as a
+  dependency (it now resolves the project root from `ROOT_PATH` / the vendor layout).
+- `cli/tenants-check-ids.php` called `setAccessible()` (deprecated in PHP 8.5, no-op since 8.1).
+- The typed-auth boot error always rendered the 7.0.0 "old routing schema" guide. It now names the middleware actually missing and up to
+  three routes it would leave unauthenticated.
+
+### Tests
+
+- New: `EnvBrokenEnvFileTest`, `GenerateEnvPreservationTest`, `RefreshErrorCodeTest`, `SetupCommandEnvTest`, `GenerateAuthGoogleRouteTest`, `GenerateEnvVendorModeTest`,
+  `ApplicationLegacyCompatOptionTest`, `NoDeprecatedReflectionCallsTest`, `TypedAuthForModeRoundTripTest` (real `ExchangeRoute` + `RsaJwtHandler`
+  tokens: wrong issuer, forged signature, expiry, refresh type, wrong purpose, local key claiming the auth issuer),
+  `TypedAuthApplicationOptInTest`, `VendorSchemaOnlyTest`. `GoogleOAuthBuiltinTest` captures its expected deprecation instead of leaking it.
+
 ## [12.0.1]
 
 ### Fixed
@@ -1880,7 +1998,7 @@ This is the framework's single auth model in 7.0.0 — strict, no opt-out. See
   `token_type=refresh` route, verifies the body refresh token (sig + `iss` + `exp`
   + `type==refresh` + `purpose`) AND that its row exists in the `RefreshTokenStore`
   (absent ⇒ revoked ⇒ reject). `purpose` is a constructor parameter, not a third
-  class — the two middleware split by TYPE only (owner preference).
+  class — the two middleware split by TYPE only.
 - **`StoneScriptPHP\Routing\RouteAccess`** + new `RouteEntry`/`Router` fields —
   routes declare `access` ∈ {`public`, `authentication`, `authorization`} plus a
   `token_type` ∈ {`access`, `refresh`}, replacing the `is_public` boolean. `is_public`

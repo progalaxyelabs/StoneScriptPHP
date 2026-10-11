@@ -75,14 +75,21 @@ class GatewayTenantMiddleware implements MiddlewareInterface
             // Route subsequent DB calls to this tenant's database — but only
             // when the active transport IS the gateway. DB_MODE=direct/pgandroid
             // have no "physical tenant database" concept to route to (see
-            // Database::isGatewayMode()'s docblock — found 2026-08-01 by the
-            // android-server manual-build-v2 pass: this middleware is wired
-            // UNCONDITIONALLY by Application::run() regardless of DB_MODE, so
-            // every API-token-authenticated request under a non-gateway transport
-            // hit this line and threw, unconditionally, the first time anyone
-            // actually drove a real request through DB_MODE=pgandroid's full
-            // middleware pipeline rather than calling Database::fn() directly).
+            // Database::isGatewayMode()'s docblock). This middleware is wired
+            // unconditionally by Application::run() regardless of DB_MODE, so it
+            // must ask before touching the gateway client.
             if (Database::isGatewayMode()) {
+                // A tenant id arrived (token claim / URL) but tenant routing is not configured: answer with the
+                // variable name now, not an opaque failure at the first query.
+                if (trim((string) \StoneScriptPHP\Env::get_instance()->DB_GATEWAY_TENANT_SCHEMA_NAME) === '') {
+                    log_error('GatewayTenantMiddleware: request carries tenant_id but DB_GATEWAY_TENANT_SCHEMA_NAME is not set.');
+                    return new ApiResponse(
+                        'error',
+                        'Tenant routing is not configured on this server (DB_GATEWAY_TENANT_SCHEMA_NAME).',
+                        null,
+                        500
+                    );
+                }
                 Database::getGatewayClient()->setTenantId((string) $tenantId);
                 log_debug('GatewayTenantMiddleware: tenant_id set to ' . $tenantId);
             } else {

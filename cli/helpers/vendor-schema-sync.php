@@ -145,8 +145,10 @@ function ssp_find_schema_dirs(string $packageSrc): array
  * @param string $packageName Composer package name (for slugging ordered modules).
  * @param int    $copied      (in/out) running count of files staged.
  * @param array  $features    (in/out) set of "<pkg>/<Feature>" that contributed a file.
+ * @param array|null $manifest (in/out) "<pkg>/<Feature>" => staged paths relative to $targetBase, so a single
+ *                             feature can be applied on its own (gateway:migrate-vendor-main --only=<Feature>).
  */
-function ssp_stage_package_schema(string $packageSrc, string $targetBase, string $packageName, int &$copied, array &$features): void
+function ssp_stage_package_schema(string $packageSrc, string $targetBase, string $packageName, int &$copied, array &$features, ?array &$manifest = null): void
 {
     if (!is_dir($packageSrc)) {
         return;
@@ -184,6 +186,9 @@ function ssp_stage_package_schema(string $packageSrc, string $targetBase, string
                     copy($file, $destDir . '/' . $destName);
                     $copied++;
                     $features[$featureKey] = true;
+                    if ($manifest !== null) {
+                        $manifest[$featureKey][] = 'migrations/' . $destName;
+                    }
                 }
                 continue;
             }
@@ -200,6 +205,9 @@ function ssp_stage_package_schema(string $packageSrc, string $targetBase, string
                     copy($file, $destDir . '/' . basename($file));
                     $copied++;
                     $features[$featureKey] = true;
+                    if ($manifest !== null) {
+                        $manifest[$featureKey][] = $subdirName . '/' . basename($file);
+                    }
                 }
                 continue;
             }
@@ -285,6 +293,7 @@ function syncAllVendorSchema(string $projectRoot, string $targetBase): array
     $copied = 0;
     $features = [];
     $packagesWithFiles = [];
+    $manifest = [];
 
     // Resolve the list of (packageName => srcDir) to scan. Always include the
     // framework so behaviour is never worse than the legacy single-package path.
@@ -292,10 +301,18 @@ function syncAllVendorSchema(string $projectRoot, string $targetBase): array
 
     foreach ($packageSrcDirs as $packageName => $srcDir) {
         $before = $copied;
-        ssp_stage_package_schema($srcDir, $targetBase, $packageName, $copied, $features);
+        ssp_stage_package_schema($srcDir, $targetBase, $packageName, $copied, $features, $manifest);
         if ($copied > $before) {
             $packagesWithFiles[$packageName] = true;
         }
+    }
+
+    // Written NEXT TO (not inside) the staged postgresql/ tree, so it is never part of an uploaded archive.
+    $manifestFile = dirname($targetBase) . '/manifest.json';
+    if ($manifest !== []) {
+        file_put_contents($manifestFile, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+    } elseif (is_file($manifestFile)) {
+        unlink($manifestFile);
     }
 
     return [
@@ -303,6 +320,79 @@ function syncAllVendorSchema(string $projectRoot, string $targetBase): array
         'features' => array_keys($features),
         'packages' => array_keys($packagesWithFiles),
     ];
+}
+
+/**
+ * Features available for selective activation, from the manifest written by syncAllVendorSchema().
+ *
+ * @return array<string, list<string>> "<pkg>/<Feature>" => staged files relative to vendor/postgresql
+ */
+function ssp_read_vendor_manifest(string $vendorDir): array
+{
+    $file = $vendorDir . '/manifest.json';
+    if (!is_file($file)) {
+        return [];
+    }
+    $data = json_decode((string) file_get_contents($file), true);
+    return is_array($data) ? $data : [];
+}
+
+/**
+ * Copy ONLY the requested features' staged files into a fresh sibling target
+ * (<postgresqlDir>/<targetName>/postgresql) that buildSchemaArchive() can merge. Selection is by feature name
+ * (case-insensitive, e.g. "RefreshTokens") or by "<package>/<Feature>".
+ *
+ * @param list<string> $only
+ * @return array{selected: list<string>, files: int}
+ * @throws RuntimeException on an unknown name (message lists the available features) or missing manifest
+ */
+function ssp_materialize_selected_vendor_schema(string $postgresqlDir, string $targetName, array $only): array
+{
+    $vendorDir = $postgresqlDir . '/vendor';
+    $manifest = ssp_read_vendor_manifest($vendorDir);
+    if ($manifest === []) {
+        throw new RuntimeException(
+            'No staged vendor schema manifest found (src/postgresql/vendor/manifest.json). '
+            . 'Run `composer install` (or php vendor/progalaxyelabs/stonescriptphp/cli/sync-vendor-schema.php) first.'
+        );
+    }
+
+    $selected = [];
+    foreach ($only as $want) {
+        $want = trim($want);
+        $match = [];
+        foreach (array_keys($manifest) as $key) {
+            if (strcasecmp($key, $want) === 0 || strcasecmp(basename($key), $want) === 0) {
+                $match[] = $key;
+            }
+        }
+        if ($match === []) {
+            $available = implode(', ', array_map('basename', array_keys($manifest)));
+            throw new RuntimeException("Unknown vendor schema '{$want}'. Available: {$available}");
+        }
+        foreach ($match as $key) {
+            $selected[$key] = true;
+        }
+    }
+
+    $dest = $postgresqlDir . '/' . $targetName . '/postgresql';
+    ssp_rrmdir(dirname($dest));
+    $files = 0;
+    foreach (array_keys($selected) as $key) {
+        foreach ($manifest[$key] as $rel) {
+            $src = $vendorDir . '/postgresql/' . $rel;
+            if (!is_file($src)) {
+                continue;
+            }
+            $to = $dest . '/' . $rel;
+            if (!is_dir(dirname($to))) {
+                mkdir(dirname($to), 0755, true);
+            }
+            copy($src, $to);
+            $files++;
+        }
+    }
+    return ['selected' => array_keys($selected), 'files' => $files];
 }
 
 /**
@@ -376,4 +466,58 @@ function ssp_realish_path(string $path): string
         $parts[] = $seg;
     }
     return '/' . implode('/', $parts);
+}
+
+/**
+ * Parse and STRICTLY validate the arguments of gateway:migrate-vendor-main.
+ *
+ * `--only` selects what is applied, so it must fail closed: a malformed selection that silently fell back to
+ * "everything" would activate features (Subscriptions flips tenants to read-only) the operator meant to leave out.
+ * Rejected: a bare `--only`, an empty `--only=`, the space form (`--only RefreshTokens`; positional arguments are
+ * not accepted at all), and any unknown option.
+ *
+ * @param list<string> $argv full argv (index 0 is the script)
+ * @return array{only: list<string>, list: bool}
+ * @throws InvalidArgumentException
+ */
+function ssp_parse_vendor_main_args(array $argv): array
+{
+    $flags = [
+        '--quiet', '--force', '--dangerously-skip-verification', '--dangerously-allow-cross-db-link', '--list',
+        '--allow-drop-table', '--allow-drop-column', '--allow-column-type-change',
+        '--allow-add-not-null-column', '--allow-set-not-null',
+    ];
+    $valued = ['--retry=', '--delay=', '--database-id=', '--schema-name=', '--main-schema-name=', '--tenant-schema-name='];
+
+    $only = [];
+    $list = false;
+    foreach (array_slice($argv, 1) as $arg) {
+        if ($arg === '--only') {
+            throw new InvalidArgumentException('--only needs a value: use --only=<Feature>[,<Feature>] (see --list). The space form is not supported.');
+        }
+        if (str_starts_with($arg, '--only=')) {
+            $names = array_values(array_filter(array_map('trim', explode(',', substr($arg, 7))), 'strlen'));
+            if ($names === []) {
+                throw new InvalidArgumentException('--only= is empty: name at least one feature (see --list). Nothing was applied.');
+            }
+            $only = array_merge($only, $names);
+            continue;
+        }
+        if ($arg === '--list') {
+            $list = true;
+            continue;
+        }
+        if (in_array($arg, $flags, true)) {
+            continue;
+        }
+        foreach ($valued as $prefix) {
+            if (str_starts_with($arg, $prefix)) {
+                continue 2;
+            }
+        }
+        throw new InvalidArgumentException(
+            "Unknown argument '{$arg}'" . (str_starts_with($arg, '-') ? '.' : ' (positional arguments are not accepted; did you mean --only=' . $arg . '?).')
+        );
+    }
+    return ['only' => $only, 'list' => $list];
 }

@@ -16,7 +16,10 @@ use StoneScriptPHP\IRouteHandler;
  * `claims_provider` in `auth.refresh_tokens`.
  *
  * Register as `access: authentication, token_type: refresh`. Every rejection is a 401 with the same
- * generic message (the precise reason is logged, never returned).
+ * generic message (the precise reason is logged, never returned) and carries the top-level `error_code`
+ * `invalid_grant`. When the server cannot verify tokens at all (key unreadable, JWKS unreachable) the answer is 503
+ * with `error_code` `token_verifier_unavailable` - never `invalid_grant`, which clients treat as "sign in again". A 501 means refresh persistence is not configured (`error_code` `refresh_store_not_configured`):
+ * a hard configuration error, not a refused token.
  */
 final class BodyRefreshRoute implements IRouteHandler
 {
@@ -28,18 +31,30 @@ final class BodyRefreshRoute implements IRouteHandler
         return ['refresh_token' => 'required'];
     }
 
+    /** Error response carrying the stable machine code (top-level `error_code`). */
+    private static function refused(string $message, int $status, string $code): ApiResponse
+    {
+        $r = new ApiResponse('error', $message, null, $status);
+        $r->errorCode = $code;
+        return $r;
+    }
+
     public function process(): ApiResponse
     {
         $issuer = RefreshTokenIssuer::configured();
         if ($issuer === null) {
-            return new ApiResponse('error', 'Refresh token persistence is not configured.', null, 501);
+            return self::refused('Refresh token persistence is not configured.', 501, 'refresh_store_not_configured');
         }
 
         try {
             $issued = $issuer->refresh((string) $this->refresh_token);
+        } catch (\StoneScriptPHP\Auth\TokenVerifierUnavailableException $e) {
+            // We could not verify the token (key/JWKS outage): NOT a refusal. 503 and no `invalid_grant`, or clients end sessions.
+            log_error('BodyRefreshRoute: token verification unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return self::refused('Token verification is temporarily unavailable. Try again shortly.', 503, 'token_verifier_unavailable');
         } catch (RefreshRejectedException $e) {
             log_info('BodyRefreshRoute: refresh refused (' . $e->reason() . ')');
-            return new ApiResponse('error', 'Invalid or expired refresh token', null, 401);
+            return self::refused('Invalid or expired refresh token', 401, 'invalid_grant');
         }
 
         $data = [

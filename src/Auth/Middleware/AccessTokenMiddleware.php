@@ -15,7 +15,7 @@ use StoneScriptPHP\Auth\TrustedIssuerVerifier;
 /**
  * AccessTokenMiddleware — STATELESS verification of a Bearer ACCESS token.
  *
- * Separate-by-type (owner preference): this class handles ONLY `token_type=access`
+ * Separate-by-type: this class handles ONLY `token_type=access`
  * routes; {@see RefreshTokenMiddleware} handles refresh routes. There is no
  * branching "one middleware for both" class.
  *

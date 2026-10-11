@@ -6,7 +6,7 @@
  * Read-only readiness check for REFRESH_TOKEN_STORE=postgres: is the vendor schema (table auth_refresh_tokens and
  * the auth_rt_* functions) applied to the main database? Exit 0 = ready, 1 = not ready (message says what to run).
  * Run it in the deploy pipeline BEFORE switching REFRESH_TOKEN_STORE on, and after
- * `php stone gateway:migrate-vendor-main`.
+ * `php stone gateway:migrate-vendor-main --only=RefreshTokens`.
  */
 
 if (!defined('ROOT_PATH')) {

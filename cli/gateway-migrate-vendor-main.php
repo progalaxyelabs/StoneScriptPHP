@@ -39,10 +39,43 @@
  *
  * Options: same as gateway:migrate-main (--retry, --delay, --quiet,
  * --database-id, --main-schema-name, --schema-name, --allow-*, --force,
- * --dangerously-skip-verification).
+ * --dangerously-skip-verification), plus:
+ *
+ *   --list                 Print the staged vendor features and exit (changes nothing).
+ *   --only=A[,B]           Apply ONLY the named staged features (e.g. --only=RefreshTokens), not everything
+ *                          staged. Use it to enable one opt-in feature without also activating the others -
+ *                          e.g. the refresh-token store without Subscriptions, whose tables turn tenants
+ *                          read-only (HTTP 423) when a subscription lapses. Names come from --list.
+ *                          Without --only the behaviour is unchanged: everything staged is applied.
+ *                          Objects of features you did NOT select that an earlier run created are simply not
+ *                          in this archive; the gateway never drops tables without an explicit --allow-drop-table.
  */
 
 require_once __DIR__ . '/helpers/gateway-common.php';
+
+require_once __DIR__ . '/helpers/vendor-schema-sync.php';
+
+try {
+    $parsedArgs = ssp_parse_vendor_main_args($_SERVER["argv"] ?? $argv);
+} catch (InvalidArgumentException $e) {
+    fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
+    exit(1);
+}
+$onlyFeatures = $parsedArgs['only'];
+$listOnly = $parsedArgs['list'];
+
+if ($listOnly) {
+    $manifest = ssp_read_vendor_manifest(ROOT_PATH . 'src/postgresql/vendor');
+    if ($manifest === []) {
+        echo "No staged vendor schema manifest (run composer install first).\n";
+        exit(0);
+    }
+    echo "Staged vendor schema features (use with --only=<name>):\n";
+    foreach ($manifest as $key => $files) {
+        echo sprintf("  %-22s %3d file(s)   [%s]\n", basename($key), count($files), $key);
+    }
+    exit(0);
+}
 
 $options = parseGatewayOptions($argv);
 $env = loadGatewayEnv($options);
@@ -65,6 +98,23 @@ if (!is_dir($vendorPostgresqlDir) || !glob($vendorPostgresqlDir . '/*/*.{sql,pgs
     exit(0);
 }
 
+$mergeTargets = ['vendor'];
+if ($onlyFeatures !== []) {
+    try {
+        $sel = ssp_materialize_selected_vendor_schema(ROOT_PATH . 'src/postgresql', 'vendor-selected', $onlyFeatures);
+    } catch (RuntimeException $e) {
+        fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
+        exit(1);
+    }
+    register_shutdown_function(static function (): void {
+        ssp_rrmdir(ROOT_PATH . 'src/postgresql/vendor-selected');
+    });
+    $mergeTargets = ['vendor-selected'];
+    if (!$options['quiet']) {
+        echo "Selected vendor schema only: " . implode(', ', array_map('basename', $sel['selected'])) . " ({$sel['files']} file(s))\n";
+    }
+}
+
 if (!$options['quiet']) {
     echo "=== Gateway Migrate Vendor-Provided Schema (V2) ===\n";
     echo "Platform:    {$env['platform_id']}\n";
@@ -80,7 +130,7 @@ if (!$options['quiet']) {
 // Build the SAME 'main' archive gateway:migrate-main would build, PLUS the staged
 // vendor schema merged on top — one full, consistent superset, landing in the
 // SAME database (never a partial/vendor-only archive — see file header).
-$archive = buildGatewayArchive('main', $env['platform_id'], 'migrate_vendor_main', $options['quiet'], ['vendor']);
+$archive = buildGatewayArchive('main', $env['platform_id'], 'migrate_vendor_main', $options['quiet'], $mergeTargets);
 
 // Step 1: Upload the merged schema under the SAME schema name as migrate-main.
 if (!$options['quiet']) echo "Step 1/2: ";

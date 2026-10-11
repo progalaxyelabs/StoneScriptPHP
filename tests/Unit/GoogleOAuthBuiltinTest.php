@@ -307,8 +307,25 @@ class GoogleOAuthBuiltinTest extends TestCase
         );
 
         $profile = ['sub' => 'g-1', 'email' => 'ann@example.com', 'email_verified' => true, 'name' => 'Ann Lee', 'picture' => 'P1'];
-        $response = $route->resolveAndMintTokens($profile);
 
+        // Without a refresh-token store the callback raises the (expected, lenient-mode) "not persisted"
+        // deprecation. Capture it here instead of leaking it to PHPUnit's deprecation report, which also
+        // made this test order- and tmp-dir-dependent (the notice is rate limited via a stamp file).
+        \StoneScriptPHP\Support\DeprecationNotice::reset(false);
+        $notices = [];
+        set_error_handler(static function (int $no, string $msg) use (&$notices): bool {
+            $notices[] = $msg;
+            return true;
+        }, E_USER_DEPRECATED);
+        try {
+            $response = $route->resolveAndMintTokens($profile);
+        } finally {
+            restore_error_handler();
+            \StoneScriptPHP\Support\DeprecationNotice::reset();
+        }
+
+        $this->assertCount(1, $notices);
+        $this->assertStringContainsString('NOT persisted', $notices[0]);
         $this->assertInstanceOf(HtmlResponse::class, $response);
         $this->assertStringContainsString('oauth_success', $response->html);
         $this->assertStringContainsString('access_token', $response->html);

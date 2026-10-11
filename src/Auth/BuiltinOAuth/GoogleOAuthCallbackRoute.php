@@ -185,7 +185,7 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
             'oauth:unpersisted-refresh-token',
             'StoneScriptPHP: the builtin OAuth callback minted a refresh token that is NOT persisted. A refresh gate '
             . '(RefreshTokenMiddleware) will reject it, and it cannot be revoked. This is DEPRECATED: set '
-            . 'REFRESH_TOKEN_STORE=postgres (or auth.refresh_tokens.store) and run `php stone gateway:migrate-vendor-main` first. '
+            . 'REFRESH_TOKEN_STORE=postgres (or auth.refresh_tokens.store) and run `php stone gateway:migrate-vendor-main --only=RefreshTokens` first. '
             . 'Persistence becomes the default in the next major version.'
         );
     }

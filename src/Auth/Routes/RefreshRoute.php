@@ -53,6 +53,25 @@ class RefreshRoute implements IRouteHandler
         $this->jwtHandler = $jwtHandler ?? new RsaJwtHandler();
     }
 
+    /** A refused refresh: HTTP 401 with the stable machine code `invalid_grant` (message unchanged). */
+    private static function refused(string $message, string $code = 'invalid_grant'): ApiResponse
+    {
+        $r = new ApiResponse('error', $message);
+        $r->errorCode = $code;
+        return $r;
+    }
+
+    /**
+     * The server could not verify tokens (key unreadable, JWKS unreachable): HTTP 503 and NO refusal code. Answering
+     * `invalid_grant` here would make clients end every session during an outage.
+     */
+    private static function unavailable(\Throwable $e): ApiResponse
+    {
+        log_error('RefreshRoute: token verification unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+        http_response_code(503);
+        return self::refused('Token verification is temporarily unavailable. Try again shortly.', 'token_verifier_unavailable');
+    }
+
     public function validation_rules(): array
     {
         // No body validation needed - uses cookies and headers
@@ -74,7 +93,7 @@ class RefreshRoute implements IRouteHandler
         if (empty($refreshToken)) {
             log_error('RefreshRoute: No refresh token in cookie');
             http_response_code(401);
-            return new ApiResponse('error', 'No refresh token provided');
+            return self::refused('No refresh token provided', 'invalid_request');
         }
 
         // 2b. Persisted sessions (REFRESH_TOKEN_STORE / auth.refresh_tokens): the issuer verifies the token, checks
@@ -84,10 +103,12 @@ class RefreshRoute implements IRouteHandler
         if ($issuer !== null) {
             try {
                 $issued = $issuer->refresh($refreshToken, null, $issuer->store() instanceof RotatingRefreshTokenStore);
+            } catch (\StoneScriptPHP\Auth\TokenVerifierUnavailableException $e) {
+                return self::unavailable($e);
             } catch (RefreshRejectedException $e) {
                 log_info('RefreshRoute: refresh refused (' . $e->reason() . ')');
                 http_response_code(401);
-                return new ApiResponse('error', 'Invalid or expired refresh token');
+                return self::refused('Invalid or expired refresh token');
             }
             if ($issued->refreshToken !== null) {
                 $cookieTtl = $issuer->refreshTtl();
@@ -102,19 +123,25 @@ class RefreshRoute implements IRouteHandler
         }
 
         // 3. Verify refresh token using RsaJwtHandler
-        $payload = $this->jwtHandler->verifyToken($refreshToken);
+        try {
+            $payload = $this->jwtHandler instanceof \StoneScriptPHP\Auth\StrictTokenVerifier
+                ? $this->jwtHandler->verifyTokenStrict($refreshToken)
+                : $this->jwtHandler->verifyToken($refreshToken);
+        } catch (\StoneScriptPHP\Auth\TokenVerifierUnavailableException $e) {
+            return self::unavailable($e);
+        }
 
         if ($payload === false) {
             log_error('RefreshRoute: Invalid or expired refresh token');
             http_response_code(401);
-            return new ApiResponse('error', 'Invalid or expired refresh token');
+            return self::refused('Invalid or expired refresh token');
         }
 
         // 4. Verify token type is 'refresh'
         if (!isset($payload['type']) || $payload['type'] !== 'refresh') {
             log_error('RefreshRoute: Token is not a refresh token');
             http_response_code(401);
-            return new ApiResponse('error', 'Invalid token type');
+            return self::refused('Invalid token type');
         }
 
         // 5. Check token storage (if provided)
@@ -125,7 +152,7 @@ class RefreshRoute implements IRouteHandler
             if (!$tokenStorage->validateRefreshToken($tokenHash)) {
                 log_error('RefreshRoute: Refresh token revoked or not found in storage');
                 http_response_code(401);
-                return new ApiResponse('error', 'Refresh token has been revoked');
+                return self::refused('Refresh token has been revoked');
             }
 
             // Update last used timestamp
@@ -141,7 +168,7 @@ class RefreshRoute implements IRouteHandler
         if ($userId === null) {
             log_error('RefreshRoute: No user_id in refresh token payload');
             http_response_code(401);
-            return new ApiResponse('error', 'Invalid token payload');
+            return self::refused('Invalid token payload');
         }
 
         // 7. Generate new access token

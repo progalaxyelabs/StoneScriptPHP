@@ -404,6 +404,8 @@ MD;
         $gitignore = <<<GITIGNORE
 /vendor/
 /.env
+/.env.*
+!/.env.example
 /.idea/
 /.vscode/
 /node_modules/

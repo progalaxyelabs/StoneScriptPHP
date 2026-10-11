@@ -16,7 +16,7 @@ use StoneScriptPHP\Auth\TrustedIssuerVerifier;
 /**
  * RefreshTokenMiddleware — STATEFUL verification of a body REFRESH token.
  *
- * Separate-by-type (owner preference): this class handles ONLY `token_type=refresh`
+ * Separate-by-type: this class handles ONLY `token_type=refresh`
  * routes; {@see AccessTokenMiddleware} handles access routes. `purpose` is a
  * PARAMETER on this class (authentication for identity-refresh/logout, authorization
  * for API-token-refresh) — NOT a third middleware class. Split by TYPE only.
@@ -90,17 +90,23 @@ class RefreshTokenMiddleware implements MiddlewareInterface
         $body = $this->resolveBody($request);
         $refreshToken = $body[$this->bodyField] ?? null;
         if (!is_string($refreshToken) || $refreshToken === '') {
-            return $this->deny(401, 'Unauthorized: Missing refresh token');
+            return $this->deny(401, 'Unauthorized: Missing refresh token', 'invalid_request');
         }
 
-        $claims = $this->verifier->verify($refreshToken);
+        try {
+            $claims = $this->verifier->verifyStrict($refreshToken);
+        } catch (\StoneScriptPHP\Auth\TokenVerifierUnavailableException $e) {
+            // Infrastructure failure, not a refusal: 503 without `invalid_grant` so clients keep the session.
+            log_error('RefreshTokenMiddleware: token verification unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return $this->deny(503, 'Token verification is temporarily unavailable. Try again shortly.', 'token_verifier_unavailable');
+        }
         if ($claims === null) {
-            return $this->deny(401, 'Unauthorized: Invalid or expired refresh token');
+            return $this->deny(401, 'Unauthorized: Invalid or expired refresh token', 'invalid_grant');
         }
 
         // Strict type: must be a refresh token.
         if (($claims[TokenClaims::CLAIM_TYPE] ?? null) !== TokenClaims::TYPE_REFRESH) {
-            return $this->deny(401, 'Unauthorized: wrong token type (refresh token required)');
+            return $this->deny(401, 'Unauthorized: wrong token type (refresh token required)', 'invalid_grant');
         }
 
         // Strict purpose: must match the route's access requirement.
@@ -123,13 +129,13 @@ class RefreshTokenMiddleware implements MiddlewareInterface
                     'family_id' => $inspection->familyId,
                     'subject'   => $inspection->subject,
                 ]);
-                return $this->deny(401, 'Unauthorized: refresh token has been revoked');
+                return $this->deny(401, 'Unauthorized: refresh token has been revoked', 'invalid_grant');
             }
             if (!$inspection->usable()) {
-                return $this->deny(401, 'Unauthorized: refresh token has been revoked');
+                return $this->deny(401, 'Unauthorized: refresh token has been revoked', 'invalid_grant');
             }
         } elseif (!$this->store->exists($hash)) {
-            return $this->deny(401, 'Unauthorized: refresh token has been revoked');
+            return $this->deny(401, 'Unauthorized: refresh token has been revoked', 'invalid_grant');
         }
 
         $request['refresh_claims'] = $claims;
@@ -172,9 +178,11 @@ class RefreshTokenMiddleware implements MiddlewareInterface
         return hash('sha256', $token);
     }
 
-    private function deny(int $code, string $message): ApiResponse
+    private function deny(int $code, string $message, ?string $errorCode = null): ApiResponse
     {
         http_response_code($code);
-        return new ApiResponse('error', $message, ['error' => 'unauthorized'], $code);
+        $response = new ApiResponse('error', $message, ['error' => 'unauthorized'], $code);
+        $response->errorCode = $errorCode;
+        return $response;
     }
 }

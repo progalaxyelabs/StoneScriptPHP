@@ -11,8 +11,28 @@
  *   php stone generate env --force  (overwrites existing values with defaults)
  */
 
+/**
+ * Resolve the PROJECT root (where .env and vendor/ live).
+ *
+ * When the framework is installed as a dependency this file sits at
+ * <project>/vendor/progalaxyelabs/stonescriptphp/cli, so dirname(__DIR__) is the
+ * package directory, not the project. `php stone` defines ROOT_PATH correctly; when it
+ * is not defined (file run directly) the vendor layout is detected from the path.
+ */
+function resolveEnvGeneratorRoot(string $cliDir, ?string $definedRoot = null): string
+{
+    if ($definedRoot !== null && $definedRoot !== '') {
+        return rtrim($definedRoot, '/\\');
+    }
+    $normalised = str_replace('\\', '/', $cliDir);
+    if (str_ends_with($normalised, '/vendor/progalaxyelabs/stonescriptphp/cli')) {
+        return dirname($cliDir, 4);
+    }
+    return dirname($cliDir);
+}
+
 // Determine the root path
-$root_path = dirname(__DIR__);
+$root_path = resolveEnvGeneratorRoot(__DIR__, defined('ROOT_PATH') ? (string) ROOT_PATH : null);
 $env_file_path = $root_path . DIRECTORY_SEPARATOR . '.env';
 $env_example_path = $root_path . DIRECTORY_SEPARATOR . '.env.example';
 
@@ -24,12 +44,14 @@ if (defined('STONESCRIPTPHP_ENV_GENERATOR_LIB_ONLY')) {
     return;
 }
 
-// Load the Env class from vendor or autoloader
-if (file_exists($root_path . '/vendor/autoload.php')) {
-    require_once $root_path . '/vendor/autoload.php';
-} else {
-    echo "Error: vendor/autoload.php not found. Run: composer install\n";
-    exit(1);
+// Load the Env class from vendor or autoloader (already loaded when run via `php stone`)
+if (!class_exists('StoneScriptPHP\\Env', false)) {
+    if (file_exists($root_path . '/vendor/autoload.php')) {
+        require_once $root_path . '/vendor/autoload.php';
+    } else {
+        echo "Error: vendor/autoload.php not found under {$root_path}. Run: composer install\n";
+        exit(1);
+    }
 }
 
 // Try to load Env class
@@ -68,71 +90,149 @@ if ($example) {
 echo "Environment Configuration Generator\n";
 echo "====================================\n\n";
 
-// Check if .env already exists
-$existing_values = [];
-if (file_exists($env_file_path)) {
-    if ($force) {
-        echo "⚠ --force flag detected. Existing values will be replaced with defaults.\n\n";
-    } else {
-        echo "ℹ .env file exists. Existing values will be preserved.\n\n";
-        $existing_values = parseEnvFile($env_file_path);
-    }
-} else {
-    echo "ℹ Creating new .env file...\n\n";
+if (is_dir($env_file_path)) {
+    echo "Error: $env_file_path is a directory, not a file. Remove it (or fix the bind mount) first.\n";
+    exit(1);
 }
 
-// Generate the .env file
-generateEnvFile($env_file_path, $force, false, $existing_values);
+if (!file_exists($env_file_path)) {
+    echo "ℹ Creating new .env file...\n\n";
+    generateEnvFile($env_file_path, false, false);
+    echo "✓ .env created (mode 0640).\n";
+    exit(0);
+}
 
-echo "\n✓ .env file generated successfully!\n";
-echo "\nNext steps:\n";
-echo "  1. Edit .env and set your environment-specific values\n";
-echo "  2. Never commit .env to version control\n";
-echo "  3. Run 'php Framework/cli/generate-env.php --example' to create .env.example for documentation\n";
+// An EXISTING .env holds real settings and secrets. It is never regenerated from the schema alone:
+// anything the Env schema does not know (GOOGLE_CLIENT_ID, payment/mail keys, JWT_PRIVATE_KEY, ...) is
+// read through Env::secret() by application code and must survive.
+$raw = file_get_contents($env_file_path);
+if ($raw === false) {
+    echo "Error: cannot read $env_file_path\n";
+    exit(1);
+}
+try {
+    $existing_values = parseEnvContent($raw);
+} catch (\Dotenv\Exception\ExceptionInterface $e) {
+    // Reason by exception class only: Dotenv's own text quotes the offending (possibly secret) line.
+    echo "Error: $env_file_path is not valid dotenv syntax; refusing to touch it. Fix it by hand "
+        . "(use '# comment' lines and KEY=value; quote values containing spaces), then re-run.\n";
+    exit(1);
+}
+
+if ($force) {
+    // --force: reset every setting the Env schema knows to its default. Settings the schema does NOT know are
+    // kept (re-written with correct quoting); the previous file is saved as a mode-0600 backup first.
+    $backup = $env_file_path . '.bak.' . date('YmdHis');
+    // 0600 from the first byte: the backup holds the secrets, so it must never exist with a wider mode, even briefly.
+    $oldUmask = umask(0177);
+    $bh = @fopen($backup, 'xb');
+    umask($oldUmask);
+    if ($bh === false || fwrite($bh, $raw) !== strlen($raw) || !fclose($bh)) {
+        echo "Error: could not write backup $backup; nothing was changed.\n";
+        exit(1);
+    }
+    echo "⚠ --force: schema settings reset to defaults. Previous file saved as " . basename($backup) . " (contains secrets; mode 0600, git-ignored via .env.*; delete it when done and keep it out of images).\n";
+    $schemaKeys = array_keys(currentEnvSchema());
+    $preserved = array_diff_key($existing_values, array_flip($schemaKeys));
+    $content = renderEnvContent(true, false, [], $preserved);
+    try {
+        writeFileAtomic($env_file_path, $content, 0640);
+    } catch (\RuntimeException $e) {
+        echo "Error: " . $e->getMessage() . "\n";
+        exit(1);
+    }
+    echo "✓ .env regenerated; " . count($preserved) . " non-schema setting(s) preserved.\n";
+    exit(0);
+}
+
+// Default: leave the file byte-for-byte as it is and only APPEND schema settings that are missing, commented out.
+$missing = array_diff_key(currentEnvSchema(), $existing_values);
+if ($missing === []) {
+    echo "ℹ .env already has every setting in the schema; nothing to change.\n";
+    exit(0);
+}
+$block = ["", "# --- Added by php stone env on " . date('Y-m-d H:i:s') . " (uncomment to override the default) ---"];
+foreach ($missing as $key => $config) {
+    $block[] = "# Type: {$config['type']} | " . ($config['required'] ? 'Required' : 'Optional');
+    $block[] = "# $key=" . ($config['default'] !== null ? escapeEnvValue($config['default']) : '');
+}
+$content = rtrim($raw, "\r\n") . "\n" . implode("\n", $block) . "\n";
+try {
+    writeFileAtomic($env_file_path, $content, 0640);
+} catch (\RuntimeException $e) {
+    echo "Error: " . $e->getMessage() . "\n";
+    exit(1);
+}
+echo "✓ .env kept as is; " . count($missing) . " missing setting(s) appended as comments.\n";
+exit(0);
 
 /**
- * Parse an existing .env file
+ * Parse dotenv content with the framework's own parser (phpdotenv).
  *
- * @param string $filepath Path to the .env file
- * @return array Key-value pairs from the file
+ * @return array<string, string>
+ * @throws \Dotenv\Exception\ExceptionInterface when the content is not valid dotenv syntax
  */
-function parseEnvFile(string $filepath): array
+function parseEnvContent(string $content): array
 {
-    $values = [];
-    $lines = file($filepath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    return array_map(static fn($v) => (string) $v, \Dotenv\Dotenv::parse($content));
+}
 
-    foreach ($lines as $line) {
-        // Skip comments and empty lines
-        $line = trim($line);
-        if (empty($line) || $line[0] === '#') {
-            continue;
+/**
+ * Write a file atomically (temp file in the same directory + rename). An existing file's mode and, when
+ * running as root, owner/group are preserved; a new file gets $newMode.
+ */
+function writeFileAtomic(string $path, string $content, int $newMode): void
+{
+    // Write through a symlink to its TARGET: renaming over the link would replace the link itself with a regular
+    // file and leave the real file (e.g. a mounted secret) stale.
+    if (is_link($path)) {
+        $resolved = realpath($path);
+        if ($resolved === false) {
+            throw new \RuntimeException("$path is a dangling symlink; refusing to write.");
         }
+        $path = $resolved;
+    }
+    $exists = file_exists($path);
+    $mode = $exists ? (fileperms($path) & 0777) : $newMode;
+    $isRoot = function_exists('posix_geteuid') && posix_geteuid() === 0;
 
-        // Parse KEY=VALUE
-        $pos = strpos($line, '=');
-        if ($pos === false) {
-            continue;
-        }
-
-        $key = trim(substr($line, 0, $pos));
-        $value = trim(substr($line, $pos + 1));
-
-        // Remove quotes if present
-        if (strlen($value) >= 2) {
-            $first = $value[0];
-            $last = $value[strlen($value) - 1];
-            if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
-                $value = substr($value, 1, -1);
-                // Unescape quotes
-                $value = str_replace('\\"', '"', $value);
-                $value = str_replace("\\'", "'", $value);
-            }
-        }
-
-        $values[$key] = $value;
+    // A rename gives the new file OUR owner/group. If we cannot keep the existing owner/group, the runtime user
+    // may lose read access: refuse rather than silently break the deployment.
+    if ($exists && !$isRoot && function_exists('posix_geteuid') && fileowner($path) !== posix_geteuid()) {
+        throw new \RuntimeException("$path is owned by another user; run as its owner (or root) so ownership is preserved. Nothing was changed.");
     }
 
-    return $values;
+    $tmp = $path . '.tmp.' . bin2hex(random_bytes(4));
+    $oldUmask = umask(0177);
+    $fh = fopen($tmp, 'xb');
+    umask($oldUmask);
+    if ($fh === false) {
+        throw new \RuntimeException("Cannot create temporary file next to $path");
+    }
+    $ok = fwrite($fh, $content) === strlen($content);
+    $ok = fclose($fh) && $ok;
+    if (!$ok) {
+        unlink($tmp);
+        throw new \RuntimeException("Cannot write $path");
+    }
+    if ($exists) {
+        if ($isRoot) {
+            @chown($tmp, fileowner($path));
+        }
+        if (filegroup($tmp) !== filegroup($path)) {
+            @chgrp($tmp, filegroup($path));
+            clearstatcache(true, $tmp);
+            if (filegroup($tmp) !== filegroup($path)) {
+                unlink($tmp);
+                throw new \RuntimeException("Cannot keep the group of $path (this user is not a member); the new file would lose group access. Nothing was changed.");
+            }
+        }
+    }
+    chmod($tmp, $mode);
+    if (!rename($tmp, $path)) {
+        unlink($tmp);
+        throw new \RuntimeException("Cannot replace $path");
+    }
 }
 
 /**
@@ -211,31 +311,40 @@ function buildSchemaFromReflection(\ReflectionClass $rc): array
     return $schema;
 }
 
+/** The env-var schema of the project's Env class (App\Env if present, else the framework's). */
+function currentEnvSchema(): array
+{
+    $envClass = class_exists('App\\Env') ? 'App\\Env' : 'StoneScriptPHP\\Env';
+    return buildSchemaFromReflection(new \ReflectionClass($envClass));
+}
+
+/**
+ * Write a NEW .env / .env.example from the schema (never used to rewrite an existing .env without
+ * preserving it - see the flow at the top of this file).
+ */
 function generateEnvFile(string $filepath, bool $force, bool $is_example, array $existing_values = []): void
 {
-    // Get schema from an Env instance (or App\Env if it exists)
-    if (class_exists('App\\Env')) {
-        $envClass = 'App\\Env';
-    } else {
-        $envClass = 'StoneScriptPHP\\Env';
-    }
+    writeFileAtomic($filepath, renderEnvContent($force, $is_example, $existing_values), $is_example ? 0644 : 0640);
+}
 
-    // Derive the schema from the Env class's public typed properties via
-    // reflection. (The old Env::getSchema() array was removed in the v2.3.0
-    // Env refactor; env vars are now declared as public typed properties —
-    // property name == ENV var name, exactly as Env's own constructor reads them.)
-    $reflectionClass = new \ReflectionClass($envClass);
-    $schema = buildSchemaFromReflection($reflectionClass);
+/**
+ * @param array<string,string> $existing_values values to use for schema keys (unless $force)
+ * @param array<string,string> $preserved       non-schema settings to carry over verbatim (re-quoted)
+ */
+function renderEnvContent(bool $force, bool $is_example, array $existing_values = [], array $preserved = []): string
+{
+    $schema = currentEnvSchema();
 
     $output = [];
 
-    // Header (using ; for comments as # causes parse_ini_file issues)
-    $output[] = "; Environment Configuration";
-    $output[] = "; Generated: " . date('Y-m-d H:i:s');
-    $output[] = ";";
-    $output[] = "; This file contains environment-specific configuration.";
-    $output[] = "; DO NOT commit this file to version control";
-    $output[] = ";";
+    // Header. Comments MUST use '#': the framework loads .env with vlucas/phpdotenv, which
+    // rejects ';' lines ("invalid name") and would make the whole file unloadable.
+    $output[] = "# Environment Configuration";
+    $output[] = "# Generated: " . date('Y-m-d H:i:s');
+    $output[] = "#";
+    $output[] = "# This file contains environment-specific configuration.";
+    $output[] = "# DO NOT commit this file to version control";
+    $output[] = "#";
     $output[] = "";
 
     // Group variables by prefix for better organization
@@ -243,15 +352,15 @@ function generateEnvFile(string $filepath, bool $force, bool $is_example, array 
 
     foreach ($groups as $prefix => $variables) {
         // Add group header
-        $output[] = "; " . str_repeat("=", 60);
-        $output[] = "; " . strtoupper(str_replace('_', ' ', $prefix)) . " Configuration";
-        $output[] = "; " . str_repeat("=", 60);
+        $output[] = "# " . str_repeat("=", 60);
+        $output[] = "# " . strtoupper(str_replace('_', ' ', $prefix)) . " Configuration";
+        $output[] = "# " . str_repeat("=", 60);
         $output[] = "";
 
         foreach ($variables as $key => $config) {
             // Add description as comment
             if (!empty($config['description'])) {
-                $output[] = "; " . $config['description'];
+                $output[] = "# " . $config['description'];
             }
 
             // Add type and requirement info
@@ -261,14 +370,14 @@ function generateEnvFile(string $filepath, bool $force, bool $is_example, array 
             } else {
                 $info .= " | Optional";
             }
-            $output[] = "; $info";
+            $output[] = "# $info";
 
             // Determine the value to use
             $value = determineValue($key, $config, $existing_values, $force, $is_example);
 
             // Format the line
             if ($value === null || $value === '') {
-                $output[] = "; $key=";
+                $output[] = "# $key=";
             } else {
                 // Escape special characters in value
                 $escaped_value = escapeEnvValue($value);
@@ -279,8 +388,17 @@ function generateEnvFile(string $filepath, bool $force, bool $is_example, array 
         }
     }
 
-    // Write to file
-    file_put_contents($filepath, implode("\n", $output));
+    if ($preserved !== []) {
+        $output[] = "# " . str_repeat("=", 60);
+        $output[] = "# Settings not in the Env schema (preserved)";
+        $output[] = "# " . str_repeat("=", 60);
+        foreach ($preserved as $key => $value) {
+            $output[] = $value === '' ? "$key=" : "$key=" . escapeEnvValue($value);
+        }
+        $output[] = "";
+    }
+
+    return implode("\n", $output) . "\n";
 }
 
 /**
@@ -383,12 +501,14 @@ function escapeEnvValue($value): string
 {
     $value = (string) $value;
 
-    // If value contains spaces, quotes, or special characters, wrap in quotes
-    if (preg_match('/[\s#"\']/', $value)) {
-        // Escape existing quotes
-        $value = str_replace('"', '\\"', $value);
-        return '"' . $value . '"';
+    // Plain tokens stay bare.
+    if (preg_match('~^[A-Za-z0-9_@%+=:,./-]*$~', $value)) {
+        return $value;
     }
 
-    return $value;
+    // Everything else is double-quoted with phpdotenv's escapes. Backslash and '$' MUST be escaped: unescaped,
+    // '\' sequences are interpreted and '${NAME}' is expanded, silently changing the value (or, for a stray
+    // '$' / quote, making the whole file unparseable).
+    $value = str_replace(['\\', '"', '$', "\n", "\r"], ['\\\\', '\\"', '\\$', '\\n', '\\r'], $value);
+    return '"' . $value . '"';
 }

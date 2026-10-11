@@ -6,7 +6,7 @@ A refresh token is only as revocable as the database row behind it. The framewor
 
 | Piece | What |
 |---|---|
-| `src/Auth/RefreshTokens/Schema` | vendor schema: table `auth_refresh_tokens`, functions `auth_rt_*` (staged by `composer install`, activated with `php stone gateway:migrate-vendor-main`; idempotent) |
+| `src/Auth/RefreshTokens/Schema` | vendor schema: table `auth_refresh_tokens`, functions `auth_rt_*` (staged by `composer install`, activated with `php stone gateway:migrate-vendor-main --only=RefreshTokens`; idempotent) |
 | `PostgresRefreshTokenStore` | `RotatingRefreshTokenStore` over that schema; always talks to the MAIN database; accepts only SHA-256 hex digests |
 | `InMemoryRefreshTokenStore` | reference semantics + tests |
 | `RefreshTokenIssuer` | the ONE mint/persist/rotate/revoke service |
@@ -33,7 +33,7 @@ A refresh token is only as revocable as the database row behind it. The framewor
 ## Before you enable it
 
 1. `composer install` stages the schema into `src/postgresql/vendor/`; review it, then run
-   **`php stone gateway:migrate-vendor-main` BEFORE setting `REFRESH_TOKEN_STORE=postgres`**.
+   **`php stone gateway:migrate-vendor-main --only=RefreshTokens` BEFORE setting `REFRESH_TOKEN_STORE=postgres`**.
 2. `php stone auth:check-refresh-store` (exit 1 = not ready) in the deploy pipeline; `RefreshTokenIssuer::healthCheck()`
    for a `/health` route. The first use in each process also probes the schema once and fails loudly
    ("run migrate-vendor-main") instead of every sign-in dying with an opaque database error.
@@ -130,3 +130,21 @@ ON CONFLICT (token_hash) DO NOTHING;
 what the new code stores: a tenant-less platform stores the bare id (matches both); a multi-tenant platform must instead
 pass `qualifiedSubject($userId, $tenantId)` (rows copied from a per-tenant-id store would need their subject rewritten
 to `{tenant}#{id}`; if unsure, skip the copy: users simply sign in again).
+
+## Refusal contract (`error_code`)
+
+A refused refresh is **HTTP 401** with a stable, machine-readable top-level `error_code`. Key on it, not on the human `message` (which may be reworded):
+
+```json
+{"status":"error","message":"Invalid or expired refresh token","data":null,"error_code":"invalid_grant"}
+```
+
+| `error_code` | HTTP | When |
+|---|---|---|
+| `invalid_grant` | 401 | The refresh token is missing, malformed, invalid, expired, revoked, replayed (reuse detected: the session is revoked), of the wrong type, or its payload is unusable. Emitted by `RefreshRoute`, `BodyRefreshRoute` and `RefreshTokenMiddleware`. The precise reason is logged server-side, never returned. |
+| `invalid_request` | 401 | No refresh token was supplied (cookie or body field absent). |
+| `token_verifier_unavailable` | 503 | The server could not VERIFY the token: the verifying key is unreadable/invalid or the issuer's JWKS cannot be fetched and nothing usable is cached. Not a verdict on the token: **keep the session and retry later**; the cause is logged server-side. |
+| `refresh_store_not_configured` | 501 | `BodyRefreshRoute` was called but refresh persistence (`REFRESH_TOKEN_STORE` / `auth.refresh_tokens`) is not configured. A hard configuration error: do not retry, do not treat the user as signed out. |
+
+A CSRF failure on the cookie route (403) is not a grant refusal and carries no `error_code`. Responses that are not errors never carry `error_code`.
+A client should treat `invalid_grant` (and `invalid_request`) as "sign in again", `token_verifier_unavailable` (503) as transient (retry, do not sign out), and `refresh_store_not_configured` as an operator problem.

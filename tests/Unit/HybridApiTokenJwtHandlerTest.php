@@ -262,13 +262,13 @@ class HybridApiTokenJwtHandlerTest extends TestCase
         $this->assertFalse($result);
     }
 
-    // ── Task #10005: expired platform token must not attempt the JWKS fallback ──
+    // ── Expired platform token must not attempt the JWKS fallback ──
 
     /**
      * An EXPIRED platform API token (iss = this platform's own JWT_ISSUER) must
      * be rejected WITHOUT falling through to the JWKS handler. Regression test
      * for the "JWT validation failed: Unknown issuer '<platform>'" log-noise
-     * bug (task #10005): every access-token expiry — the single most common
+     * bug: every access-token expiry — the single most common
      * auth event in production — used to fall through from a definitively-
      * expired RSA check into a JWKS validator that could never accept a
      * self-issued token, logging a misleading "Unknown issuer" line that

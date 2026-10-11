@@ -73,7 +73,6 @@ if ($sample !== null) {
     $rc = new \ReflectionClass($generatorClass);
     $gen = $rc->newInstanceWithoutConstructor();
     $m = new \ReflectionMethod($generatorClass, 'generateUuid');
-    $m->setAccessible(true);
     for ($i = 0; $i < $sample; $i++) {
         $generated[] = (string) $m->invoke($gen);
     }

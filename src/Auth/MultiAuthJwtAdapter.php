@@ -10,7 +10,7 @@ namespace StoneScriptPHP\Auth;
  *
  * @since 2.2.0
  */
-class MultiAuthJwtAdapter implements JwtHandlerInterface
+class MultiAuthJwtAdapter implements JwtHandlerInterface, StrictTokenVerifier
 {
     private MultiAuthJwtValidator $validator;
 
@@ -25,6 +25,11 @@ class MultiAuthJwtAdapter implements JwtHandlerInterface
      * @param string $jwt JWT token to verify
      * @return array|false Decoded payload or false if invalid
      */
+    public function verifyTokenStrict(string $jwt): array|false
+    {
+        return $this->validator->validateJWTStrict($jwt) ?? false;
+    }
+
     public function verifyToken(string $jwt): array|false
     {
         $result = $this->validator->validateJWT($jwt);

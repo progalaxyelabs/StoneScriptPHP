@@ -1,17 +1,37 @@
 <?php
 /**
  * Interactive Project Setup
- * Runs after: composer create-project progalaxyelabs/stone-script-php my-api
+ * Runs after: composer create-project progalaxyelabs/stonescriptphp-server my-api
+ *
+ * The .env this writes is derived from the framework's own Env schema (the public typed
+ * properties of App\Env, else StoneScriptPHP\Env) via cli/generate-env.php, so it contains
+ * exactly the keys the running framework reads - there is no second hand-maintained list.
  */
 
 require_once __DIR__ . '/generate-common.php';
 
-// Load autoloader - fix path detection issue
-$projectRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR;
+// `php stone` defines ROOT_PATH (the project root, also in vendor mode) and has already
+// loaded the autoloader. Direct invocation falls back to the legacy layout detection.
+if (defined('ROOT_PATH')) {
+    $projectRoot = ROOT_PATH;
+} else {
+    $projectRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR;
+    if (str_ends_with(str_replace('\\', '/', __DIR__), '/vendor/progalaxyelabs/stonescriptphp/cli')) {
+        $projectRoot = dirname(__DIR__, 4) . DIRECTORY_SEPARATOR;
+    }
+}
 $vendorAutoload = $projectRoot . 'vendor/autoload.php';
-if (file_exists($vendorAutoload)) {
+if (!class_exists('StoneScriptPHP\\Env') && file_exists($vendorAutoload)) {
     require_once $vendorAutoload;
 }
+// All relative paths below (.env, keys/) are relative to the project root.
+chdir($projectRoot);
+
+// Reuse the schema helpers (buildSchemaFromReflection / generateEnvFile) without running the generator CLI.
+if (!defined('STONESCRIPTPHP_ENV_GENERATOR_LIB_ONLY')) {
+    define('STONESCRIPTPHP_ENV_GENERATOR_LIB_ONLY', true);
+}
+require_once __DIR__ . '/generate-env.php';
 
 class Setup {
     private bool $quiet = false;
@@ -132,6 +152,20 @@ class Setup {
         echo "\n";
     }
 
+    /** @return array<string, array{type:string, required:bool, default:?string, description:string}> */
+    private function envSchema(): array
+    {
+        $envClass = class_exists('App\\Env') ? 'App\\Env' : 'StoneScriptPHP\\Env';
+        return buildSchemaFromReflection(new \ReflectionClass($envClass));
+    }
+
+    /** Default for a schema key, as the string that would be written to .env. */
+    private function schemaDefault(string $key, string $fallback = ''): string
+    {
+        $default = $this->envSchema()[$key]['default'] ?? null;
+        return $default === null || $default === '' ? $fallback : (string) $default;
+    }
+
     private function generateEnv(): void
     {
         // In quiet mode, load existing .env or use defaults
@@ -140,36 +174,47 @@ class Setup {
             return;
         }
 
+        if (file_exists('.env')) {
+            echo "ℹ️  .env file already exists, skipping creation\n";
+            echo "  To regenerate, delete .env and run setup again\n\n";
+            $this->env = (object) $this->readEnvFile('.env');
+            return;
+        }
+
         echo "📝 Generating .env file...\n\n";
 
         // Application
         $this->env->APP_NAME = $this->ask('Project name', 'My API');
         $this->env->APP_ENV = $this->ask('Environment', 'development');
-        $this->env->APP_PORT = $this->ask('Port', '9100');
+        $this->env->APP_PORT = $this->ask('Port', $this->schemaDefault('APP_PORT', '9100'));
 
-        // Database
-        echo "\n📊 Database Configuration:\n";
-        $this->env->DATABASE_HOST = $this->ask('Database host', 'localhost');
-        $this->env->DATABASE_PORT = $this->ask('Database port', '5432');
-        $this->env->DATABASE_DBNAME = $this->ask('Database name', strtolower(str_replace(' ', '_', $this->env->APP_NAME)));
-        $this->env->DATABASE_USER = $this->ask('Database user', 'postgres');
-        $this->env->DATABASE_PASSWORD = $this->ask('Database password', '', true);
+        // Database (gateway-only: the API never connects to PostgreSQL directly)
+        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '_', strtolower($this->env->APP_NAME)), '_');
+        echo "\n📊 StoneScriptDB Gateway:\n";
+        $this->env->DB_GATEWAY_URL = $this->ask('Gateway URL', 'http://localhost:9000');
+        $this->env->DB_GATEWAY_PLATFORM = $this->ask('Platform code registered in the gateway', $slug ?: 'my_api');
+        $this->env->DB_GATEWAY_SCHEMA_NAME = $this->ask('Main database schema name', 'main');
+        $adminToken = $this->ask('Gateway admin token (optional, leave empty to skip)', '', true);
+        if ($adminToken !== '') {
+            $this->env->DB_GATEWAY_ADMIN_TOKEN = $adminToken;
+        }
 
         // JWT
         echo "\n🔐 JWT Configuration:\n";
-        $this->env->JWT_ISSUER = $this->ask('JWT issuer (your domain)', 'example.com');
-        $this->env->JWT_ACCESS_TOKEN_EXPIRY = $this->ask('Access token expiry (seconds)', '900');
-        $this->env->JWT_REFRESH_TOKEN_EXPIRY = $this->ask('Refresh token expiry (seconds)', '15552000');
+        $this->env->JWT_ISSUER = $this->ask(
+            'JWT issuer (public base URL of this API)',
+            'http://localhost:' . $this->env->APP_PORT
+        );
+        $this->env->JWT_ACCESS_TOKEN_EXPIRY = $this->ask('Access token expiry (seconds)', $this->schemaDefault('JWT_ACCESS_TOKEN_EXPIRY', '900'));
+        $this->env->JWT_REFRESH_TOKEN_EXPIRY = $this->ask('Refresh token expiry (seconds)', $this->schemaDefault('JWT_REFRESH_TOKEN_EXPIRY', '15552000'));
 
         // JWT Keys
-        $this->env->JWT_PRIVATE_KEY_PATH = $this->ask('JWT private key path', './keys/jwt-private.pem');
-        $this->env->JWT_PUBLIC_KEY_PATH = $this->ask('JWT public key path', './keys/jwt-public.pem');
+        $this->env->JWT_PRIVATE_KEY_PATH = $this->ask('JWT private key path', $this->schemaDefault('JWT_PRIVATE_KEY_PATH', './keys/jwt-private.pem'));
+        $this->env->JWT_PUBLIC_KEY_PATH = $this->ask('JWT public key path', $this->schemaDefault('JWT_PUBLIC_KEY_PATH', './keys/jwt-public.pem'));
 
         $usePassphrase = $this->ask('Use passphrase-protected private key? (yes/no)', 'no');
         if (strtolower($usePassphrase) === 'yes' || strtolower($usePassphrase) === 'y') {
             $this->env->JWT_PRIVATE_KEY_PASSPHRASE = $this->ask('Enter passphrase for private key', '', true);
-        } else {
-            $this->env->JWT_PRIVATE_KEY_PASSPHRASE = '';
         }
 
         // CORS
@@ -180,16 +225,14 @@ class Setup {
         echo "\n💾 Caching Configuration:\n";
         $enableRedis = $this->ask('Enable Redis caching? (yes/no)', 'no');
         if (strtolower($enableRedis) === 'yes' || strtolower($enableRedis) === 'y') {
-            $this->env->REDIS_ENABLED = 'true';
+            $this->env->CACHE_ENABLED = 'true';
             $this->env->REDIS_HOST = $this->ask('Redis host', 'localhost');
-            $this->env->REDIS_PORT = $this->ask('Redis port', '6379');
+            $this->env->REDIS_PORT = $this->ask('Redis port', $this->schemaDefault('REDIS_PORT', '6379'));
         } else {
-            $this->env->REDIS_ENABLED = 'false';
+            $this->env->CACHE_ENABLED = 'false';
         }
 
-        // Write .env file
-        $envContent = $this->buildEnvContent();
-        file_put_contents('.env', $envContent);
+        $this->writeEnvFile();
 
         echo "\n✅ .env file created!\n\n";
     }
@@ -205,47 +248,60 @@ class Setup {
             echo "  To regenerate, delete .env and run setup again\n\n";
 
             // Still load existing values into $this->env for key generation
-            $existingEnvData = parse_ini_file($envFile) ?: [];
-            foreach ($existingEnvData as $key => $value) {
-                $this->env->$key = $value;
-            }
+            $this->env = (object) $this->readEnvFile($envFile);
             return;
         }
 
-        // App\Env must exist - fail hard if it doesn't
-        if (!class_exists('App\\Env')) {
-            echo "❌ Error: App\\Env class not found!\n";
-            echo "Make sure you have src/App/Env.php in your project.\n";
-            exit(1);
-        }
-
-        // Use reflection to discover all public properties and their defaults
-        $reflectionClass = new \ReflectionClass('App\\Env');
-        $properties = $reflectionClass->getProperties(\ReflectionProperty::IS_PUBLIC);
-
-        // Populate $this->env with values from:
-        // Priority: 1) System environment variables, 2) Property defaults
-        foreach ($properties as $property) {
-            $propName = $property->getName();
-
-            // Get default value from property
-            $defaultValue = $property->getDefaultValue();
-
-            // Check system environment variable first (Docker-friendly)
-            $systemEnvValue = getenv($propName);
-
-            if ($systemEnvValue !== false) {
-                // System environment variable exists - use it
-                $this->env->$propName = $systemEnvValue;
-            } else {
-                // Use property default
-                $this->env->$propName = $defaultValue;
+        // Priority: 1) real environment variables (Docker-friendly), 2) schema defaults
+        // (applied by the generator for anything not set here).
+        foreach (array_keys($this->envSchema()) as $key) {
+            $systemEnvValue = getenv($key);
+            if ($systemEnvValue !== false && $systemEnvValue !== '') {
+                $this->env->$key = $systemEnvValue;
             }
         }
 
-        // Write .env file
-        $envContent = $this->buildEnvContent();
-        file_put_contents('.env', $envContent);
+        $this->writeEnvFile();
+    }
+
+    /**
+     * Parse an existing .env with the same parser the framework boots with (phpdotenv),
+     * never parse_ini_file(): dotenv syntax (unquoted spaces, ${VAR}, export) is not INI.
+     *
+     * @return array<string, string>
+     */
+    private function readEnvFile(string $path): array
+    {
+        $contents = file_get_contents($path);
+        if ($contents === false) {
+            echo "❌ Error: cannot read $path\n";
+            exit(1);
+        }
+        try {
+            return array_map(
+                static fn($v) => (string) $v,
+                \Dotenv\Dotenv::parse($contents)
+            );
+        } catch (\Dotenv\Exception\ExceptionInterface $e) {
+            // Never print phpdotenv's own text: it quotes the offending line, which may be a secret.
+            echo "❌ Error: $path is not a valid dotenv file.\n";
+            echo "  Use '# comment' lines and KEY=value pairs; double-quote values that contain spaces.\n";
+            exit(1);
+        }
+    }
+
+    /** Write .env from the collected answers; every key must exist in the Env schema. */
+    private function writeEnvFile(): void
+    {
+        $answers = (array) $this->env;
+        $schema = $this->envSchema();
+        $unknown = array_diff(array_keys($answers), array_keys($schema));
+        if ($unknown !== []) {
+            throw new \LogicException(
+                'Setup produced settings the framework does not read: ' . implode(', ', $unknown)
+            );
+        }
+        generateEnvFile('.env', false, false, $answers);
     }
 
     private function generateKeys(string $passphrase = '', string $privateKeyPath = 'keys/jwt-private.pem', string $publicKeyPath = 'keys/jwt-public.pem'): void
@@ -305,10 +361,11 @@ class Setup {
     {
         echo "🎉 Setup complete!\n\n";
         echo "Next steps:\n";
-        echo "  1. Create database: psql -c 'CREATE DATABASE " . ($_ENV['DB_NAME'] ?? 'mydb') . "'\n";
+        echo "  1. Make sure the StoneScriptDB Gateway is running and the platform is registered ("
+            . "DB_GATEWAY_URL / DB_GATEWAY_PLATFORM in .env)\n";
         echo "  2. Start server: php stone serve\n";
-        echo "  3. Generate your first route: php stone generate route login\n";
-        echo "  4. Run migrations: php stone migrate verify\n\n";
+        echo "  3. Generate your first route: php stone generate route POST /hello\n";
+        echo "  4. Check migrations: php stone migrate status\n\n";
         echo "Documentation: https://github.com/progalaxyelabs/StoneScriptPHP\n\n";
     }
 
@@ -329,28 +386,6 @@ class Setup {
         }
 
         return $answer ?: $default;
-    }
-
-    private function buildEnvContent(): string
-    {
-        $lines = [];
-
-        // Simply iterate through all properties in $this->env
-        foreach ($this->env as $key => $value) {
-            // Skip null values
-            if ($value === null) {
-                continue;
-            }
-
-            // Quote string values that contain spaces
-            if (is_string($value) && strpos($value, ' ') !== false) {
-                $value = "\"$value\"";
-            }
-
-            $lines[] = "$key=$value";
-        }
-
-        return implode("\n", $lines);
     }
 }
 

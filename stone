@@ -91,6 +91,10 @@ $commands = [
         'description' => 'Delete expired refresh-token rows in batches (schedule hourly/daily)',
         'file' => 'cli/auth-purge-refresh-tokens.php',
     ],
+    'env:check' => [
+        'description' => 'Load the environment exactly as the app does and fail with the reason if it would not boot (run as the PHP-FPM user)',
+        'file' => 'cli/env-check.php',
+    ],
     'auth:check-origins' => [
         'description' => 'List the origins allowed to receive the Google sign-in popup result; fails if none (run before deploying)',
         'file' => 'cli/auth-check-origins.php',
@@ -247,7 +251,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone gateway:register-main          # Register platform + create main DB\n";
     echo "  php stone gateway:register-tenant        # Register platform + upload tenant schema\n";
     echo "  php stone gateway:migrate-main                          # Migrate main database schema\n";
-    echo "  php stone gateway:migrate-vendor-main                  # Activate opt-in vendor schema (never automatic)\n";
+    echo "  php stone gateway:migrate-vendor-main [--list] [--only=A,B]  # Activate opt-in vendor schema (never automatic); --only picks features\n";
     echo "  php stone gateway:migrate-tenant --database-id=<uuid>  # Migrate ONE tenant database\n";
     echo "  php stone gateway:migrate-all-tenants                  # Migrate ALL tenant databases\n";
     echo "  php stone gateway:provision-token                      # Provision DB_GATEWAY_PLATFORM_TOKEN\n";

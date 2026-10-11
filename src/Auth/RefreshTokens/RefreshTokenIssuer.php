@@ -164,7 +164,9 @@ final class RefreshTokenIssuer
 
     /**
      * @param array<string, mixed>|null $metadata
-     * @throws RefreshRejectedException
+     * @throws RefreshRejectedException when the token is genuinely refused
+     * @throws \StoneScriptPHP\Auth\TokenVerifierUnavailableException when the token cannot be VERIFIED (key unreadable,
+     *         JWKS unreachable): not a refusal - callers must answer 5xx, never end the session
      */
     public function refresh(string $refreshToken, ?array $metadata = null, ?bool $rotate = null): IssuedTokens
     {
@@ -172,7 +174,9 @@ final class RefreshTokenIssuer
         if ($rotate && !($this->store instanceof RotatingRefreshTokenStore)) {
             throw new \LogicException('Refresh token rotation requires a RotatingRefreshTokenStore.');
         }
-        $verified = $this->jwt->verifyToken($refreshToken);
+        $verified = $this->jwt instanceof \StoneScriptPHP\Auth\StrictTokenVerifier
+            ? $this->jwt->verifyTokenStrict($refreshToken)
+            : $this->jwt->verifyToken($refreshToken);
         if ($verified === false) {
             throw new RefreshRejectedException(RefreshRejectedException::INVALID_TOKEN);
         }

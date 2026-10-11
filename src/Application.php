@@ -28,6 +28,7 @@ use StoneScriptPHP\Auth\Middleware\TenantUrlMatchMiddleware;
 use StoneScriptPHP\Auth\Middleware\RequireApiTokenMiddleware;
 use StoneScriptPHP\RequestLogging\RequestLogger;
 use StoneScriptPHP\Plugin\PluginInterface;
+use StoneScriptPHP\Tenancy\NoTenantStrategy;
 use StoneScriptPHP\Tenancy\TenancyStrategyInterface;
 
 /**
@@ -110,12 +111,36 @@ class Application
         // Define STDIN, STDOUT, STDERR for PHP-FPM compatibility (CLI has them by default)
         self::defineStdStreams();
 
+        // Fail closed on a broken environment. Env::get_instance() throws when .env is
+        // unreadable/unparseable or a required setting is missing; bootstrap.php swallows
+        // that for CLI use, so surface it here as a clear 500 BEFORE anything is served
+        // (never boot builtin auth on class defaults). Env-only deployments (no .env file,
+        // everything in real environment variables) pass straight through.
+        try {
+            $env = Env::get_instance();
+            // bootstrap.php already swallowed a validation failure (so get_instance() returns the
+            // loaded-but-invalid instance); it is remembered, and serving on it is refused here.
+            $envFailure = \StoneScriptPHP\Support\BootCheck::environment($env);
+            if ($envFailure !== null) {
+                throw new \RuntimeException($envFailure);
+            }
+        } catch (\Throwable $e) {
+            // Full detail (may include the .env path) goes to the server error log ONLY; the response
+            // body is generic so it never discloses filesystem layout or configuration.
+            self::renderBootConfigError(
+                'StoneScriptPHP: cannot boot - ' . ($e instanceof \Exception ? $e->getMessage() : get_class($e)),
+                'env_configuration_invalid',
+                'The application environment is not configured correctly. See the server error log, or run '
+                . '`php stone env:check` as the PHP-FPM user.'
+            );
+            return;
+        }
+
         // Handle robots.txt before any routing or auth — disallow all crawlers
         if (self::handleRobotsTxt()) {
             return;
         }
 
-        $env = Env::get_instance();
         \StoneScriptPHP\Database\RowHydrator::bootstrap($config);
         $authConfig         = $config['auth'] ?? [];
         $appRoutes          = $config['routes'] ?? [];
@@ -131,6 +156,62 @@ class Application
         // 'require_card', or this feature will silently stay disabled.
         $requireApiTokenConfig = $config['require_api_token'] ?? [];
         $authMode           = $authConfig['mode'] ?? $env->AUTH_MODE ?? 'builtin';
+
+        // ONE signing identity for the whole token chain. In external/hybrid mode it is what ExchangeRoute signs with
+        // (ExternalAuthConfig: signing_issuer / signing_private_key_path, incl. `auth` and `auth.features` overrides);
+        // otherwise the environment. RsaJwtHandler (JwtAuthMiddleware, login, refresh), HybridApiTokenJwtHandler and the
+        // typed middleware all read it, so a signing-key/issuer override moves signer and every verifier together.
+        $bootConfigError = static fn (string $detail) => self::renderBootConfigError(
+            'StoneScriptPHP: cannot boot - ' . $detail,
+            'env_configuration_invalid',
+            'The application environment is not configured correctly. See the server error log, or run '
+            . '`php stone env:check` as the PHP-FPM user.'
+        );
+        try {
+            if ($authMode === 'external' || $authMode === 'hybrid') {
+                $exchange = new \StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig(self::buildAuthRouteOptions($authConfig, $env));
+                \StoneScriptPHP\Auth\LocalSigningIdentity::setDefault(
+                    \StoneScriptPHP\Auth\LocalSigningIdentity::fromExternalConfig($exchange, $env)
+                );
+            } else {
+                \StoneScriptPHP\Auth\LocalSigningIdentity::setDefault(null);
+            }
+        } catch (\RuntimeException $e) {
+            $bootConfigError($e->getMessage());
+            return;
+        }
+
+        // Opt-in: `'typed_auth' => true` wires the access-token middleware for the configured AUTH_MODE
+        // (AuthMiddlewareRegistrar::forMode) so a platform needs no wiring code of its own. Middleware passed
+        // in 'middleware' still runs after it. A missing issuer/key/URL stops the boot with its variable name.
+        if (!empty($config['typed_auth'])) {
+            try {
+                $typedOptions = [
+                    'auth_service_url' => $authConfig['server']['url'] ?? null,
+                    'auth_issuer'      => $authConfig['server']['issuer'] ?? null,
+                    'jwks_path'        => $authConfig['server']['paths']['jwks'] ?? '/api/auth/jwks',
+                ];
+                if (isset($exchange)) {
+                    $typedOptions['auth_service_url'] = $exchange->authServiceUrl;
+                    $typedOptions['auth_issuer']      = $exchange->authIssuer;
+                    $typedOptions['jwks_url']         = $exchange->jwksUrl;
+                }
+                foreach ($customMiddleware as $existing) {
+                    if ($existing instanceof \StoneScriptPHP\Auth\Middleware\AccessTokenMiddleware) {
+                        log_warning('Application::run: typed_auth is enabled but an AccessTokenMiddleware is already in '
+                            . "'middleware'. Both will run; remove one (typed_auth builds the mode-aware one for you).");
+                        break;
+                    }
+                }
+                $customMiddleware = array_merge(
+                    \StoneScriptPHP\Auth\Middleware\AuthMiddlewareRegistrar::forMode($authMode, $env, $typedOptions),
+                    $customMiddleware
+                );
+            } catch (\RuntimeException $e) {
+                $bootConfigError($e->getMessage());
+                return;
+            }
+        }
 
         // Phase 1 plugin seam (§ PluginInterface). `$config['plugins']` is `?? []` for
         // every platform today — no platform passes this key yet, so
@@ -184,6 +265,23 @@ class Application
         // plugin-supplied one; with neither, GatewayTenantMiddleware defaults to
         // NoTenantStrategy itself — identical to pre-Phase-1 behavior.
         $tenancyStrategy = self::resolveTenancyStrategy($config['tenancy'] ?? [], $plugins);
+
+        // Tenancy declared in configuration (require_api_token, store_access, tenant_url_match, or a strategy that
+        // implements DeclaresTenantRouting; a no-op custom strategy does not count) routes queries to per-tenant databases, which needs DB_GATEWAY_TENANT_SCHEMA_NAME. Without it every
+        // tenant request would fail at its first query; stop the boot and name the variable instead. (A tenant
+        // id that only shows up in a token at request time is caught by GatewayTenantMiddleware.)
+        $tenantSchemaFailure = \StoneScriptPHP\Support\BootCheck::tenancyDeclared($config, $tenancyStrategy)
+            ? \StoneScriptPHP\Support\BootCheck::tenantSchema($env)
+            : null;
+        if ($tenantSchemaFailure !== null) {
+            self::renderBootConfigError(
+                'StoneScriptPHP: cannot boot - ' . $tenantSchemaFailure,
+                'env_configuration_invalid',
+                'The application environment is not configured correctly. See the server error log, or run '
+                . '`php stone env:check` as the PHP-FPM user.'
+            );
+            return;
+        }
 
         $router = new Router();
         $router->setHeadExecutesGet((bool) ($config['head_executes_get'] ?? $env->HEAD_EXECUTES_GET));
@@ -313,10 +411,10 @@ class Application
         // PluginInterface precedence). Empty $plugins (the default) is a no-op merge.
         $router->loadRoutes(self::mergePluginRoutes($appRoutes, $plugins));
 
-        // Fail-fast wiring guard (7.0.0, strict single-mode): if protected routes exist
+        // Fail-fast wiring guard (strict single-mode): if protected routes exist
         // but the typed-auth middleware are not (fully) wired, refuse to boot rather
-        // than serve a silently-unprotected route. An un-migrated (old-schema) platform
-        // gets a CLEAR, ACTIONABLE migration error here — never a bare stack trace.
+        // than serve a silently-unprotected route. The error names the middleware that is
+        // actually missing and the routes it leaves open — never a bare stack trace.
         try {
             \StoneScriptPHP\Auth\Middleware\AuthMiddlewareRegistrar::assertFullyWired(
                 $router->getGlobalMiddleware(),
@@ -347,12 +445,12 @@ class Application
     /**
      * Emit a clean, controlled boot-configuration error (HTTP 500) instead of letting
      * an uncaught exception surface as a bare stack trace. Used when the typed-auth
-     * wiring guard rejects an un-migrated / half-wired platform at boot: the full
+     * wiring guard rejects an incompletely wired platform at boot: the full
      * actionable message is logged AND returned in the JSON body so the operator sees
      * exactly what to fix. This is a developer-facing boot misconfiguration, not a
      * per-request error — the guidance is safe (and intended) to surface.
      */
-    private static function renderBootConfigError(string $message): void
+    private static function renderBootConfigError(string $message, string $errorCode = 'auth_wiring_required', ?string $publicMessage = null): void
     {
         error_log('[StoneScriptPHP boot] ' . $message);
         http_response_code(500);
@@ -362,8 +460,8 @@ class Application
         if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'HEAD') {
             echo (new ApiResponse(
                 'error',
-                $message,
-                ['error' => 'auth_wiring_required'],
+                $publicMessage ?? $message,
+                ['error' => $errorCode],
                 500
             ))->toJson();
         }
@@ -597,6 +695,23 @@ class Application
             ],
         ];
 
+        // Top-level auth.legacy_compat (documented in ExternalAuthRoutes): when false, the
+        // deprecated /auth/* alias routes are not registered and the per-request
+        // deprecation warning is not logged. Forwarded explicitly - ExternalAuthConfig
+        // defaults it to true, so dropping the key here silently re-enabled the aliases.
+        if (array_key_exists('legacy_compat', $authConfig)) {
+            $options['legacy_compat'] = (bool) $authConfig['legacy_compat'];
+        }
+
+        // Signing overrides: the issuer and key ExchangeRoute signs API tokens with. Read from the top-level auth config
+        // (documented keys) and, as before, from auth.features (which wins if both are set). LocalSigningIdentity is
+        // built from the resulting ExternalAuthConfig, so signer and verifiers cannot diverge.
+        foreach (['signing_issuer', 'signing_private_key_path', 'signing_private_key_passphrase'] as $signingKey) {
+            if (array_key_exists($signingKey, $authConfig)) {
+                $options[$signingKey] = $authConfig[$signingKey];
+            }
+        }
+
         // Merge feature toggles from config['features'] if present
         if (!empty($authConfig['features'])) {
             $options = array_merge($options, $authConfig['features']);
@@ -617,7 +732,7 @@ class Application
         // API-token model resolver closures (framework-spec.md §6).
         // These were previously NOT threaded through buildAuthRouteOptions(), which forced
         // platforms to bypass Application::run() entirely and call ExternalAuthRoutes::register()
-        // directly (the canary's manual bootstrap workaround). Threading them here means
+        // directly. Threading them here means
         // platforms can wire the API-token model via the normal Application::run() config.
         //
         // tenants_resolver: fn(array $authClaims): array[] — tenants for this identity.

@@ -25,7 +25,7 @@ use StoneScriptPHP\Env;
  *   $token = $handler->generateToken(['user_id' => 123]);
  *   $payload = $handler->verifyToken($token);
  */
-class RsaJwtHandler implements JwtHandlerInterface
+class RsaJwtHandler implements JwtHandlerInterface, StrictTokenVerifier
 {
     private const ALGORITHM = 'RS256';
 
@@ -44,12 +44,26 @@ class RsaJwtHandler implements JwtHandlerInterface
      * @return string JWT token
      * @throws \RuntimeException if private key cannot be loaded
      */
+    /**
+     * @param LocalSigningIdentity|null $identity Issuer + keys. Null (the normal case) = the process identity
+     *   Application::run() established, else the environment (JWT_ISSUER, JWT_PRIVATE_KEY_PATH, ...).
+     */
+    public function __construct(private ?LocalSigningIdentity $identity = null)
+    {
+    }
+
+    private function identity(): LocalSigningIdentity
+    {
+        return $this->identity ?? LocalSigningIdentity::current();
+    }
+
     public function generateToken(
         array $payload,
         ?int $expirySeconds = null,
         string $tokenType = TokenClaims::TYPE_ACCESS,
         string $purpose = TokenClaims::PURPOSE_AUTHENTICATION
     ): string {
+        $identity = $this->identity();
         $privateKeyPath = $this->getPrivateKeyPath();
         $privateKeyContent = file_get_contents($privateKeyPath);
 
@@ -59,7 +73,7 @@ class RsaJwtHandler implements JwtHandlerInterface
 
         // Support passphrase-protected keys
         $env = Env::get_instance();
-        $passphrase = $env->JWT_PRIVATE_KEY_PASSPHRASE;
+        $passphrase = $identity->privateKeyPassphrase;
         $privateKey = $passphrase
             ? openssl_pkey_get_private($privateKeyContent, $passphrase)
             : openssl_pkey_get_private($privateKeyContent);
@@ -83,7 +97,7 @@ class RsaJwtHandler implements JwtHandlerInterface
         // has JWT_ISSUER=example.com, creating a false sense of working auth that breaks the
         // moment the issuer is corrected. Fail loud so the misconfiguration is caught at token
         // generation time rather than as an intermittent 401 in production.
-        $issuer = $env->JWT_ISSUER ?? null;
+        $issuer = $identity->issuer;
         if (empty($issuer)) {
             throw new \RuntimeException(
                 'JWT_ISSUER is not set or empty. Set JWT_ISSUER in .env to the canonical API URL '
@@ -116,6 +130,9 @@ class RsaJwtHandler implements JwtHandlerInterface
     /**
      * Verify and decode a JWT token using RSA public key
      *
+     * Every failure is `false`, including "the public key cannot be read" (logged). Use {@see verifyTokenStrict()} where the
+     * two must be told apart.
+     *
      * @param string $token JWT token to verify
      * @param bool $verifyIssuer Whether to verify the issuer claim
      * @return array|false Decoded payload on success, false on failure
@@ -123,24 +140,46 @@ class RsaJwtHandler implements JwtHandlerInterface
     public function verifyToken(string $token, bool $verifyIssuer = true): array|false
     {
         try {
-            $publicKeyPath = $this->getPublicKeyPath();
-            $publicKey = file_get_contents($publicKeyPath);
+            return $this->verifyTokenStrict($token, $verifyIssuer);
+        } catch (TokenVerifierUnavailableException $e) {
+            log_error('JWT verification unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return false;
+        }
+    }
 
-            if ($publicKey === false) {
-                log_error("Cannot read public key file: $publicKeyPath");
-                return false;
-            }
+    /**
+     * Like {@see verifyToken()}, but a verifying key that is missing, unreadable or not a valid public key throws
+     * {@see TokenVerifierUnavailableException}: that is a server problem, not a verdict on the token.
+     *
+     * @return array|false
+     * @throws TokenVerifierUnavailableException
+     */
+    public function verifyTokenStrict(string $token, bool $verifyIssuer = true): array|false
+    {
+        $identity = $this->identity();
+        if ($identity->publicKeyPem === null && empty($identity->publicKeyPath)) {
+            throw new TokenVerifierUnavailableException(
+                'JWT_PUBLIC_KEY_PATH environment variable is not set. Please add JWT_PUBLIC_KEY_PATH to your .env file.'
+            );
+        }
+        $publicKey = $identity->publicKeyContents();
+        if ($publicKey === false || $publicKey === '') {
+            throw new TokenVerifierUnavailableException('Cannot read public key file: ' . $identity->publicKeyPath);
+        }
+        if (openssl_pkey_get_public($publicKey) === false) {
+            throw new TokenVerifierUnavailableException('The configured JWT public key is not a valid public key.');
+        }
 
+        try {
             $decoded = JWT::decode($token, new Key($publicKey, self::ALGORITHM));
 
             // Optionally verify issuer.
             // If JWT_ISSUER is not set, skip issuer verification rather than comparing
-            // against a placeholder — this prevents false 'example.com' matches and
+            // against a placeholder - this prevents false 'example.com' matches and
             // lets the HybridApiTokenJwtHandler's RSA-then-JWKS chain return false cleanly
             // so the JWKS fallback can try the token instead.
             if ($verifyIssuer) {
-                $env = Env::get_instance();
-                $expectedIssuer = $env->JWT_ISSUER ?? null;
+                $expectedIssuer = $identity->issuer;
                 if (!empty($expectedIssuer) && isset($decoded->iss) && $decoded->iss !== $expectedIssuer) {
                     log_error("JWT issuer mismatch: expected '$expectedIssuer', got '{$decoded->iss}'");
                     return false;
@@ -172,8 +211,7 @@ class RsaJwtHandler implements JwtHandlerInterface
      */
     private function getPrivateKeyPath(): string
     {
-        $env = Env::get_instance();
-        $path = $env->JWT_PRIVATE_KEY_PATH;
+        $path = $this->identity()->privateKeyPath;
 
         if (empty($path)) {
             throw new \RuntimeException(
@@ -182,37 +220,6 @@ class RsaJwtHandler implements JwtHandlerInterface
             );
         }
 
-        // Convert relative path to absolute
-        if (!str_starts_with($path, '/')) {
-            $path = ROOT_PATH . $path;
-        }
-
-        return $path;
-    }
-
-    /**
-     * Get public key path from environment
-     *
-     * @return string
-     * @throws \RuntimeException if JWT_PUBLIC_KEY_PATH is not set
-     */
-    private function getPublicKeyPath(): string
-    {
-        $env = Env::get_instance();
-        $path = $env->JWT_PUBLIC_KEY_PATH;
-
-        if (empty($path)) {
-            throw new \RuntimeException(
-                'JWT_PUBLIC_KEY_PATH environment variable is not set. ' .
-                'Please add JWT_PUBLIC_KEY_PATH to your .env file.'
-            );
-        }
-
-        // Convert relative path to absolute
-        if (!str_starts_with($path, '/')) {
-            $path = ROOT_PATH . $path;
-        }
-
-        return $path;
+        return LocalSigningIdentity::absolute($path);
     }
 }

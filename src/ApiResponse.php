@@ -10,6 +10,13 @@ class ApiResponse {
     public ?array $errors = null;
 
     /**
+     * Optional machine-readable code for an error response, emitted as top-level `error_code` (RFC 6749 section 5.2
+     * style, e.g. `invalid_grant`). Clients key on this instead of matching the human `message`. Null = not emitted,
+     * so existing responses are unchanged.
+     */
+    public ?string $errorCode = null;
+
+    /**
      * Extra response headers to emit with this response (name => value), e.g.
      * `Allow` on a 405. Emitted by {@see \StoneScriptPHP\Http\ResponseEmitter}.
      *
@@ -40,6 +47,10 @@ class ApiResponse {
         // Include errors array if present (for validation errors)
         if ($this->errors !== null) {
             $response['errors'] = $this->errors;
+        }
+
+        if ($this->errorCode !== null) {
+            $response['error_code'] = $this->errorCode;
         }
 
         return (string) json_encode($response);

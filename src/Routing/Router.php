@@ -721,7 +721,7 @@ class Router
                             // Property typed as a userland DTO class — previously this
                             // raw-assigned the decoded array straight onto a typed-object
                             // property, throwing an uncaught TypeError under
-                            // strict_types on every real request (regression #7399).
+                            // strict_types on every real request.
                             // Hydrate it recursively instead, same engine the typed
                             // ITypedRouteHandler path uses below, collecting errors so
                             // a shape problem is a clean 400, never a 500.

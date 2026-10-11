@@ -62,6 +62,22 @@ class MultiAuthJwtValidator
      */
     public function validateJWT(string $jwt): ?array
     {
+        return $this->validate($jwt, false);
+    }
+
+    /**
+     * Like {@see validateJWT()}, but throws {@see TokenVerifierUnavailableException} when the issuer's JWKS cannot be
+     * obtained (instead of reporting it as an invalid token).
+     *
+     * @throws TokenVerifierUnavailableException
+     */
+    public function validateJWTStrict(string $jwt): ?array
+    {
+        return $this->validate($jwt, true);
+    }
+
+    private function validate(string $jwt, bool $strict): ?array
+    {
         // First decode without verification to get the issuer claim
         try {
             // Manually decode JWT payload to extract issuer (avoids "empty key" error in jwt v6+)
@@ -115,6 +131,12 @@ class MultiAuthJwtValidator
             return null;
         } catch (\Firebase\JWT\SignatureInvalidException $e) {
             log_error("JWT validation failed: Invalid signature - " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return null;
+        } catch (TokenVerifierUnavailableException $e) {
+            log_error("JWT validation could not be completed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            if ($strict) {
+                throw $e;
+            }
             return null;
         } catch (\Exception $e) {
             log_error("JWT validation failed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
@@ -233,7 +255,7 @@ class MultiAuthJwtValidator
         if ($staleKeys !== null) {
             $maxStale = $config['max_stale_ttl'] ?? null;
             if ($maxStale !== null && $staleAge !== null && $staleAge > $maxStale) {
-                throw new \Exception(
+                throw new TokenVerifierUnavailableException(
                     "Refusing stale JWKS for '$issuerType': cache age {$staleAge}s exceeds "
                     . "max_stale_ttl {$maxStale}s and the auth service is unreachable (fail-closed)."
                 );
@@ -243,7 +265,7 @@ class MultiAuthJwtValidator
             return $staleKeys;
         }
 
-        throw new \Exception("Failed to fetch JWKS from '$jwksUrl' for issuer type '$issuerType' and no cache available");
+        throw new TokenVerifierUnavailableException("Failed to fetch JWKS from '$jwksUrl' for issuer type '$issuerType' and no cache available");
     }
 
     /**

@@ -1,11 +1,10 @@
 <?php
 
-namespace App\Routes;
+namespace App\Routes\Auth;
 
 use StoneScriptPHP\ApiResponse;
+use StoneScriptPHP\Env;
 use StoneScriptPHP\IRouteHandler;
-
-require CONFIG_PATH . 'google-oauth.php';
 
 class GoogleOauthRoute implements IRouteHandler
 {
@@ -19,7 +18,16 @@ class GoogleOauthRoute implements IRouteHandler
 
     public function process(): ApiResponse
     {
-        $google_client = new \Google\Client(['client_id' => GOOGLE_CLIENT_ID]);
+        // Config comes from the environment like all other auth config: set GOOGLE_CLIENT_ID in
+        // .env (or the real environment / a GOOGLE_CLIENT_ID_FILE secret). No separate config file.
+        $google_client_id = Env::secret('GOOGLE_CLIENT_ID');
+        if ($google_client_id === null || trim($google_client_id) === '') {
+            log_error('Google Sign-In is not configured: GOOGLE_CLIENT_ID is not set.');
+            http_response_code(500);
+            return new ApiResponse('error', 'Google Sign-In is not configured on this server', []);
+        }
+
+        $google_client = new \Google\Client(['client_id' => $google_client_id]);
         try {
             $payload = $google_client->verifyIdToken($this->credential);
             if ($payload) {

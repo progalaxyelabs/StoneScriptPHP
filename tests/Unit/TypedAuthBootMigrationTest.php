@@ -83,28 +83,21 @@ class TypedAuthBootMigrationTest extends TestCase
         } catch (AuthWiringException $e) {
             $msg = $e->getMessage();
             // The message IS the migration aid — assert it is clear and actionable.
-            $this->assertStringContainsString('old routing schema detected', $msg);
+            $this->assertStringContainsString('wiring incomplete', $msg);
+            $this->assertStringContainsString('AccessTokenMiddleware', $msg);
+            $this->assertStringNotContainsString('7.0.0', $msg);
+            $this->assertStringNotContainsString('old routing schema', $msg);
             $this->assertStringContainsString('AuthMiddlewareRegistrar::create', $msg);
-            $this->assertStringContainsString('token_type', $msg);
-            $this->assertStringContainsString('UPGRADING-7.0.md', $msg);
         }
     }
 
-    public function test_migration_message_helper_matches_thrown_message(): void
+    public function test_error_names_actual_missing_middleware_and_routes_not_a_7_0_migration(): void
     {
-        $this->assertSame(
-            AuthMiddlewareRegistrar::migrationMessage(),
-            (function () {
-                try {
-                    AuthMiddlewareRegistrar::assertFullyWired(
-                        [$this->nonTypedMiddleware()],
-                        [['method' => 'GET', 'path' => '/x', 'access' => RouteAccess::AUTHORIZATION, 'token_type' => 'access']]
-                    );
-                    return '';
-                } catch (AuthWiringException $e) {
-                    return $e->getMessage();
-                }
-            })()
+        $this->expectException(AuthWiringException::class);
+        $this->expectExceptionMessageMatches('~AccessTokenMiddleware \\(protects GET /x~');
+        AuthMiddlewareRegistrar::assertFullyWired(
+            [$this->nonTypedMiddleware()],
+            [['method' => 'GET', 'path' => '/x', 'access' => RouteAccess::AUTHORIZATION, 'token_type' => 'access']]
         );
     }
 
@@ -164,7 +157,7 @@ class TypedAuthBootMigrationTest extends TestCase
         $render = new \ReflectionMethod(Application::class, 'renderBootConfigError');
         $render->setAccessible(true);
 
-        $msg = AuthMiddlewareRegistrar::migrationMessage();
+        $msg = 'StoneScriptPHP: typed-auth wiring incomplete - cannot boot. AccessTokenMiddleware missing';
 
         ob_start();
         $render->invoke(null, $msg);
@@ -174,6 +167,6 @@ class TypedAuthBootMigrationTest extends TestCase
         $this->assertIsArray($decoded, 'Boot error output must be clean JSON, not a stack trace');
         $this->assertSame('error', $decoded['status']);
         $this->assertSame('auth_wiring_required', $decoded['data']['error']);
-        $this->assertStringContainsString('old routing schema detected', $decoded['message']);
+        $this->assertStringContainsString('wiring incomplete', $decoded['message']);
     }
 }

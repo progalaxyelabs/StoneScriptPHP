@@ -219,16 +219,9 @@ class Database
      * DB_MODE=direct/pgandroid, where "route this request to a different
      * physical tenant database" has no equivalent — those transports talk to
      * exactly one database already (see getGatewayClient()'s docblock for
-     * the same reasoning). Added 2026-08-01: found by the android-server
-     * manual-build-v2 pass — the FIRST real API-token-authenticated request ever
-     * driven through DB_MODE=pgandroid's full middleware pipeline hit
-     * GatewayTenantMiddleware unconditionally calling getGatewayClient()
-     * and throwing, because that middleware had no way to ask "should I
-     * even try." DB_MODE=pgandroid was landed and unit-tested at the
-     * Database::fn()/PgandroidTransport layer only — this is the first
-     * proof it reached a full Application::run() request lifecycle with a
-     * real, non-public route, which is exactly where a gateway-only
-     * assumption elsewhere in the framework was always going to surface.
+     * the same reasoning). The tenant-routing middleware is wired for every
+     * DB_MODE, so it needs a way to ask "should I even try" instead of assuming a
+     * gateway.
      *
      * @return bool
      */

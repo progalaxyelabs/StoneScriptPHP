@@ -55,22 +55,26 @@ use StoneScriptPHP\Env;
  * @package StoneScriptPHP\Auth
  * @since   5.4.0
  */
-class HybridApiTokenJwtHandler implements JwtHandlerInterface
+class HybridApiTokenJwtHandler implements JwtHandlerInterface, StrictTokenVerifier
 {
     private RsaJwtHandler $platformHandler;
+    private ?LocalSigningIdentity $identity;
     private JwtHandlerInterface $authServiceHandler;
 
     /**
      * @param string $authServiceUrl Auth service base URL (used for JWKS fetch — container URL in Docker)
      * @param string $authIssuer     Auth service JWT 'iss' claim (public URL — NOT the container URL)
      * @param string $jwksPath       JWKS endpoint path on the auth service (default: /api/auth/jwks)
+     * @param LocalSigningIdentity|null $identity this API's own issuer + keys; null = the process identity / environment
      */
     public function __construct(
         string $authServiceUrl,
         string $authIssuer,
-        string $jwksPath = '/api/auth/jwks'
+        string $jwksPath = '/api/auth/jwks',
+        ?LocalSigningIdentity $identity = null
     ) {
-        $this->platformHandler = new RsaJwtHandler();
+        $this->identity = $identity;
+        $this->platformHandler = new RsaJwtHandler($identity);
 
         $validator = new MultiAuthJwtValidator([
             'primary' => [
@@ -94,14 +98,40 @@ class HybridApiTokenJwtHandler implements JwtHandlerInterface
      */
     public function verifyToken(string $jwt): array|false
     {
+        try {
+            return $this->verifyTokenStrict($jwt);
+        } catch (TokenVerifierUnavailableException $e) {
+            log_error('Token verification unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return false;
+        }
+    }
+
+    /**
+     * {@see verifyToken()}, but throws {@see TokenVerifierUnavailableException} when the key or JWKS needed to decide for
+     * THIS token is unavailable (a token of this platform's own issuer needs the local key; any other needs the JWKS).
+     *
+     * @throws TokenVerifierUnavailableException
+     */
+    public function verifyTokenStrict(string $jwt): array|false
+    {
         // Attempt platform RSA validation first (API tokens).
         // RsaJwtHandler::verifyToken() returns false on any failure — never throws.
-        $claims = $this->platformHandler->verifyToken($jwt);
+        $platformIssuer = ($this->identity ?? LocalSigningIdentity::current())->issuer;
+        try {
+            $claims = $this->platformHandler->verifyTokenStrict($jwt);
+        } catch (TokenVerifierUnavailableException $e) {
+            // The local key is the problem: that only matters for tokens that claim to be ours; a foreign-issuer
+            // token can still be decided by the JWKS below.
+            if (!empty($platformIssuer) && $this->peekIssuer($jwt) === $platformIssuer) {
+                throw $e;
+            }
+            $claims = false;
+        }
         if ($claims !== false) {
             return $claims;
         }
 
-        // Task #10005: an EXPIRED (or otherwise RSA-rejected) platform API token
+        // An EXPIRED (or otherwise RSA-rejected) platform API token
         // — the overwhelmingly common case, happening every access-token TTL for
         // every active user — has `iss` = this platform's own JWT_ISSUER. Falling
         // through to the JWKS handler for it can never succeed (the JWKS handler
@@ -111,13 +141,14 @@ class HybridApiTokenJwtHandler implements JwtHandlerInterface
         // Skip the useless network-capable fallback for tokens self-identifying
         // as this platform's own issuer; only genuinely foreign-issuer tokens
         // (auth-service auth tokens) reach the JWKS path below.
-        $platformIssuer = Env::get_instance()->JWT_ISSUER ?? null;
         if (!empty($platformIssuer) && $this->peekIssuer($jwt) === $platformIssuer) {
             return false;
         }
 
         // Fall back to JWKS (auth tokens from the auth service).
-        return $this->authServiceHandler->verifyToken($jwt);
+        return $this->authServiceHandler instanceof StrictTokenVerifier
+            ? $this->authServiceHandler->verifyTokenStrict($jwt)
+            : $this->authServiceHandler->verifyToken($jwt);
     }
 
     /**

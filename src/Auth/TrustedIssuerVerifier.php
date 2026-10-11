@@ -110,6 +110,24 @@ class TrustedIssuerVerifier
      */
     public function verify(string $token): ?array
     {
+        try {
+            return $this->verifyStrict($token);
+        } catch (TokenVerifierUnavailableException $e) {
+            log_error('TrustedIssuerVerifier: cannot verify - ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return null;
+        }
+    }
+
+    /**
+     * {@see verify()}, but a key that cannot be read or a JWKS that cannot be fetched throws
+     * {@see TokenVerifierUnavailableException} instead of looking like a rejected token. Genuine rejections (untrusted
+     * issuer, bad signature, expired, malformed) still return null.
+     *
+     * @return array<string, mixed>|null
+     * @throws TokenVerifierUnavailableException
+     */
+    public function verifyStrict(string $token): ?array
+    {
         $issuer = $this->peekIssuer($token);
         if ($issuer === null) {
             log_error('TrustedIssuerVerifier: token has no readable iss claim — rejected.');
@@ -130,6 +148,8 @@ class TrustedIssuerVerifier
             } else {
                 $claims = $this->verifyJwks($token, $issuer, $entry);
             }
+        } catch (TokenVerifierUnavailableException $e) {
+            throw $e;
         } catch (\Firebase\JWT\ExpiredException $e) {
             log_error('TrustedIssuerVerifier: token expired — ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
@@ -177,11 +197,14 @@ class TrustedIssuerVerifier
         if ($publicKey === null && !empty($entry['public_key_path'])) {
             $publicKey = @file_get_contents($entry['public_key_path']);
             if ($publicKey === false) {
-                throw new \RuntimeException("Cannot read public key: {$entry['public_key_path']}");
+                throw new TokenVerifierUnavailableException("Cannot read public key: {$entry['public_key_path']}");
             }
         }
         if (empty($publicKey)) {
-            throw new \InvalidArgumentException("Local issuer entry needs 'public_key' or 'public_key_path'.");
+            throw new TokenVerifierUnavailableException("Local issuer entry needs 'public_key' or 'public_key_path'.");
+        }
+        if (openssl_pkey_get_public($publicKey) === false) {
+            throw new TokenVerifierUnavailableException('The configured public key for a local issuer is not a valid public key.');
         }
 
         $algorithm = $entry['algorithm'] ?? self::DEFAULT_ALGORITHM;
@@ -204,7 +227,7 @@ class TrustedIssuerVerifier
         // Prod path: delegate to MultiAuthJwtValidator (iss→jwks_url fetch + cache).
         // It already selects the key by iss and rejects unknown issuers.
         $validator = $this->jwksValidator ??= $this->buildJwksValidator();
-        $claims = $validator->validateJWT($token);
+        $claims = $validator->validateJWTStrict($token);
         if ($claims === null) {
             return null;
         }

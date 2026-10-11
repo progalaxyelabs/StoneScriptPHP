@@ -11,7 +11,7 @@ use StoneScriptPHP\Database;
  * PostgreSQL-backed {@see RotatingRefreshTokenStore}. All access goes through the framework's
  * vendor schema (`src/Auth/RefreshTokens/Schema`: table `auth_refresh_tokens`, functions
  * `auth_rt_*`), staged by `composer install` and activated with
- * `php stone gateway:migrate-vendor-main`.
+ * `php stone gateway:migrate-vendor-main --only=RefreshTokens`.
  *
  * Refresh tokens are identity-level, not tenant-level, so every call is routed to the MAIN
  * database: a tenant context set earlier in the request is cleared for the call and restored
@@ -43,7 +43,7 @@ final class PostgresRefreshTokenStore implements RotatingRefreshTokenStore
     /**
      * Loud, actionable failure when the vendor schema (table auth_refresh_tokens + auth_rt_* functions) has not
      * been applied - instead of every sign-in dying with an opaque database error. Probes once per process.
-     * Also run by `php stone auth:check-refresh-store`. Run `php stone gateway:migrate-vendor-main` BEFORE
+     * Also run by `php stone auth:check-refresh-store`. Run `php stone gateway:migrate-vendor-main --only=RefreshTokens` BEFORE
      * enabling REFRESH_TOKEN_STORE=postgres.
      *
      * @throws \RuntimeException
@@ -62,7 +62,7 @@ final class PostgresRefreshTokenStore implements RotatingRefreshTokenStore
                 throw new \RuntimeException('Refresh-token store unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()), 0, $e);
             }
             $msg = 'Refresh-token schema is missing or unusable (table auth_refresh_tokens / functions auth_rt_*). '
-                . 'Run `php stone gateway:migrate-vendor-main` BEFORE enabling REFRESH_TOKEN_STORE=postgres. Cause: '
+                . 'Run `php stone gateway:migrate-vendor-main --only=RefreshTokens` BEFORE enabling REFRESH_TOKEN_STORE=postgres. Cause: '
                 . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage());
             try {
                 log_critical($msg);

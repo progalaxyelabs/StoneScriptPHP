@@ -87,6 +87,16 @@ if (!in_array($provider, $supportedProviders)) {
     exit(1);
 }
 
+// Fail before creating anything if this provider has no route template (nothing half-generated).
+if (in_array($provider, ['google', 'linkedin', 'apple'], true)) {
+    $earlyTemplate = $vendorPath . 'src' . DIRECTORY_SEPARATOR . 'Templates' . DIRECTORY_SEPARATOR . 'Auth'
+        . DIRECTORY_SEPARATOR . $provider . DIRECTORY_SEPARATOR . ucfirst($provider) . 'OauthRoute.php.template';
+    if (!file_exists($earlyTemplate)) {
+        echo "Error: auth:$provider is not available - no route template shipped for it ($earlyTemplate).\n";
+        exit(1);
+    }
+}
+
 echo "Generating $provider authentication...\n\n";
 
 // Create necessary directories
@@ -194,6 +204,10 @@ if ($provider === 'email-password') {
     } elseif (file_exists($templatePath)) {
         copy($templatePath, $routeDestination);
         echo "  ✓ Created: $routeName\n";
+    } else {
+        // Never print "scaffolding complete" + next steps for a route class that was not created.
+        echo "  ❌ Error: no route template for '$provider' ($templatePath)\n";
+        exit(1);
     }
 
     // Update composer.json to add OAuth client dependency
@@ -242,7 +256,7 @@ if ($provider === 'email-password') {
     echo "   'POST' => [\n";
     echo "       '/auth/$provider' => \\App\\Routes\\Auth\\{$providerCap}OauthRoute::class,\n";
     echo "   ]\n\n";
-    echo "4. Add {$providerCap} OAuth credentials to .env:\n";
+    echo "4. Add {$providerCap} OAuth credentials to .env (read via StoneScriptPHP\\Env - no separate config file):\n";
     echo "   " . strtoupper($provider) . "_CLIENT_ID=your_client_id\n";
     echo "   " . strtoupper($provider) . "_CLIENT_SECRET=your_client_secret\n\n";
 }
