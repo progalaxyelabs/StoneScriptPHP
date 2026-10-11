@@ -6,16 +6,74 @@
  * gateway:migrate-main, and gateway:migrate-tenant commands.
  */
 
+require_once __DIR__ . '/cli-env.php';
 require_once __DIR__ . '/schema-archive-builder.php';
+
+/**
+ * Exit 2 on an option this command does not accept. Names only are printed, never values.
+ *
+ * @param string[] $schemaOptions
+ * @param string[] $extra
+ */
+function gatewayRejectUnknownOptions(array $argv, array $schemaOptions, array $extra): void
+{
+    $flags = ['--quiet', '--force', '--dangerously-skip-verification', '--dangerously-allow-cross-db-link',
+        '--allow-drop-table', '--allow-drop-column', '--allow-column-type-change',
+        '--allow-add-not-null-column', '--allow-set-not-null'];
+    $valued = ['--retry=', '--delay=', '--database-id='];
+    $schemaAll = ['schema-name', 'main-schema-name', 'tenant-schema-name'];
+    foreach ($schemaOptions as $name) {
+        $valued[] = '--' . $name . '=';
+    }
+    foreach ($extra as $e) {
+        if (str_ends_with($e, '=')) {
+            $valued[] = $e;
+        } else {
+            $flags[] = $e;
+        }
+    }
+
+    foreach (array_slice($argv, 1) as $arg) {
+        if (!is_string($arg) || !str_starts_with($arg, '-')) {
+            continue; // the command name and positional tokens
+        }
+        if (in_array($arg, $flags, true)) {
+            continue;
+        }
+        foreach ($valued as $prefix) {
+            if (str_starts_with($arg, $prefix)) {
+                continue 2;
+            }
+        }
+        $name = explode('=', $arg, 2)[0];
+        foreach ($schemaAll as $schemaName) {
+            if ($name === '--' . $schemaName) {
+                $honoured = $schemaOptions === [] ? 'none' : '--' . implode(', --', $schemaOptions);
+                fwrite(STDERR, "ERROR: {$name} has no effect on this command and is refused (options this command honours for schema names: {$honoured}).\n");
+                exit(2);
+            }
+        }
+        fwrite(STDERR, "ERROR: unknown option '{$name}'.\n");
+        exit(2);
+    }
+}
 
 /**
  * Parse gateway CLI options from argv.
  *
- * @param array $argv
+ * Unknown `--options` are rejected (exit 2), and so is a schema-name option the calling command
+ * ignores (silently ignoring it could mean "I thought I targeted the tenant schema").
+ *
+ * @param array    $argv
+ * @param string[] $schemaOptions Schema-name options this command honours, from
+ *                                'schema-name' | 'main-schema-name' | 'tenant-schema-name'.
+ * @param string[] $extra         Further options this command accepts: "--name" (flag) or "--name=" (valued).
  * @return array{retry: int, delay: int, quiet: bool, force: bool, allow: string[], skip_verification: bool, database_id: ?string, schema_name: ?string, main_schema_name: ?string, tenant_schema_name: ?string}
  */
-function parseGatewayOptions(array $argv): array
+function parseGatewayOptions(array $argv, array $schemaOptions = [], array $extra = []): array
 {
+    gatewayRejectUnknownOptions($argv, $schemaOptions, $extra);
+
     // Granular per-operation safety flags → gateway allow-tokens (least-privilege).
     // Each flag unlocks exactly one guarded destructive operation.
     $allowFlagMap = [
@@ -96,6 +154,8 @@ function parseGatewayOptions(array $argv): array
  */
 function loadCrossDbLinkAuth(): ?array
 {
+    // Process environment ONLY (getenv), deliberately NOT Env/.env/secret files: this is a per-run,
+    // dangerous opt-in that must never be switched on by a file left in the project.
     $authorized = getenv('GATEWAY_CROSS_DB_LINK_AUTHORIZED');
     if (!$authorized || strtolower(trim($authorized)) !== 'true') {
         return null;
@@ -113,7 +173,7 @@ function loadCrossDbLinkAuth(): ?array
         return null;
     }
 
-    $deployRef = getenv('GATEWAY_CROSS_DB_LINK_DEPLOY_REF') ?: null;
+    $deployRef = (getenv('GATEWAY_CROSS_DB_LINK_DEPLOY_REF') ?: null);
     if (!$deployRef) {
         fwrite(STDERR, "WARNING: GATEWAY_CROSS_DB_LINK_DEPLOY_REF is absent — audit log deploy_ref will be null\n");
     }
@@ -137,36 +197,51 @@ function loadCrossDbLinkAuth(): ?array
  */
 function loadGatewayEnv(array $options, bool $requireDb = true, bool $requireSchema = true): array
 {
-    $gatewayUrl = getenv('DB_GATEWAY_URL');
-    $platformId = getenv('PLATFORM_ID');
-    $schemaName = $options['schema_name'] ?: (getenv('SCHEMA_NAME') ?: null);
-    $databaseId = $options['database_id'] ?: (getenv('DATABASE_ID') ?: 'main');
+    // Every value is resolved through the framework's Env (see helpers/cli-env.php), so `.env`
+    // is honoured exactly as it is by the running application. Precedence, highest first:
+    //   CLI option  >  the setting (legacy CLI name or application name; if both are set they must be equal)
+    // Legacy names (PLATFORM_ID, MAIN_SCHEMA_NAME, TENANT_SCHEMA_NAME, ADMIN_TOKEN) keep working, so an
+    // existing deployment resolves exactly as before. Both names set to different values is an error.
+    $gatewayUrl = cliEnv('DB_GATEWAY_URL');
+    $platformId = cliEnvPair('PLATFORM_ID', 'DB_GATEWAY_PLATFORM');
+    // schema_name is the legacy generic SCHEMA_NAME only. It never falls back to the MAIN schema's
+    // name (DB_GATEWAY_SCHEMA_NAME): a command targeting the tenant schema must not pick it up.
+    $schemaName = $options['schema_name'] ?: cliEnv('SCHEMA_NAME');
+    $databaseId = $options['database_id'] ?: (cliEnv('DATABASE_ID') ?? 'main');
 
     // Admin token: used for gateway-wide operations (platform register, schema upload, token provision)
-    $adminToken = getenv('DB_GATEWAY_ADMIN_TOKEN') ?: (getenv('ADMIN_TOKEN') ?: null);
+    $adminToken = cliEnvPair('ADMIN_TOKEN', 'DB_GATEWAY_ADMIN_TOKEN');
 
     // Platform token: used for platform-scoped operations (database create, migrate, migrate-all).
     // Provisioned via POST /admin/platform-token. Store as DB_GATEWAY_PLATFORM_TOKEN in .env.
-    $platformToken = getenv('DB_GATEWAY_PLATFORM_TOKEN') ?: null;
+    $platformToken = cliEnv('DB_GATEWAY_PLATFORM_TOKEN');
 
-    // Main schema: MAIN_SCHEMA_NAME takes priority, no fallback to SCHEMA_NAME
-    $mainSchemaName = $options['main_schema_name'] ?: (getenv('MAIN_SCHEMA_NAME') ?: null);
+    // Main schema: MAIN_SCHEMA_NAME / DB_GATEWAY_SCHEMA_NAME (the application's main schema).
+    // No fallback to SCHEMA_NAME: it may be a version-tagged name that is not the main schema.
+    $mainSchemaName = $options['main_schema_name'] ?: cliEnvPair('MAIN_SCHEMA_NAME', 'DB_GATEWAY_SCHEMA_NAME');
 
-    // Tenant schema: TENANT_SCHEMA_NAME takes priority, no fallback to SCHEMA_NAME
-    $tenantSchemaName = $options['tenant_schema_name'] ?: (getenv('TENANT_SCHEMA_NAME') ?: null);
+    // Tenant schema: TENANT_SCHEMA_NAME / DB_GATEWAY_TENANT_SCHEMA_NAME. No fallback to SCHEMA_NAME here.
+    $tenantSchemaName = $options['tenant_schema_name'] ?: cliEnvPair('TENANT_SCHEMA_NAME', 'DB_GATEWAY_TENANT_SCHEMA_NAME');
+
+    if ($mainSchemaName && $tenantSchemaName && $mainSchemaName === $tenantSchemaName) {
+        fwrite(STDERR, "ERROR: the main schema name (MAIN_SCHEMA_NAME / DB_GATEWAY_SCHEMA_NAME / --main-schema-name) and the tenant "
+            . "schema name (TENANT_SCHEMA_NAME / DB_GATEWAY_TENANT_SCHEMA_NAME / --tenant-schema-name) resolve to the same value. "
+            . "They must differ: the same name would register one archive over the other.\n");
+        exit(1);
+    }
 
     if (!$gatewayUrl) {
-        fwrite(STDERR, "ERROR: DB_GATEWAY_URL environment variable is required\n");
+        fwrite(STDERR, "ERROR: DB_GATEWAY_URL is required (set it in .env or the environment)\n");
         exit(1);
     }
 
     if (!$platformId) {
-        fwrite(STDERR, "ERROR: PLATFORM_ID environment variable is required\n");
+        fwrite(STDERR, "ERROR: PLATFORM_ID (or DB_GATEWAY_PLATFORM) is required\n");
         exit(1);
     }
 
     if ($requireSchema && !$schemaName && !$mainSchemaName && !$tenantSchemaName) {
-        fwrite(STDERR, "ERROR: SCHEMA_NAME (or MAIN_SCHEMA_NAME/TENANT_SCHEMA_NAME) environment variable is required (or use --schema-name=...)\n");
+        fwrite(STDERR, "ERROR: a schema name is required: DB_GATEWAY_SCHEMA_NAME (or SCHEMA_NAME / MAIN_SCHEMA_NAME / TENANT_SCHEMA_NAME) (or use --schema-name=...)\n");
         exit(1);
     }
 

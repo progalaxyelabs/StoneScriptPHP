@@ -56,7 +56,7 @@ if ($argc === 1 || ($argc === 2 && in_array($argv[1], ['--help', '-h', 'help']))
     echo "  php generate auth:email-password\n";
     echo "  php generate auth:google\n\n";
     echo "This will create:\n";
-    echo "  - Database migration in migrations/\n";
+    echo "  - Database migration in src/postgresql/main/postgresql/migrations/\n";
     echo "  - Route handlers in src/App/Routes/Auth/\n";
     echo "  - Updates src/config/routes.php\n";
     echo "  - Updates composer.json (if needed)\n";
@@ -100,9 +100,14 @@ if (in_array($provider, ['google', 'linkedin', 'apple'], true)) {
 echo "Generating $provider authentication...\n\n";
 
 // Create necessary directories
+// SQL goes where the gateway commands read it: src/postgresql/main/postgresql/migrations
+// (flat ROOT/migrations only for a project that already uses the flat layout - see helpers/schema-layout.php).
+require_once __DIR__ . '/helpers/schema-layout.php';
 $dirs = [
     'routes' => SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Routes' . DIRECTORY_SEPARATOR . 'Auth',
-    'migrations' => ROOT_PATH . 'migrations',
+    'migrations' => sspUseNestedMainLayout(SRC_PATH)
+        ? SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'main' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'migrations'
+        : ROOT_PATH . 'migrations',
 ];
 
 foreach ($dirs as $name => $dir) {
@@ -237,9 +242,9 @@ if ($provider === 'email-password') {
 
 echo "\n✅ $provider authentication scaffolding complete!\n\n";
 echo "Next steps:\n";
-echo "1. Run migrations to create database tables:\n";
-echo "   php stone migrate up\n\n";
-echo "2. Check migration status:\n";
+echo "1. Apply the migration to create the database tables:\n";
+echo "   php stone gateway:migrate-main\n\n";
+echo "2. Check gateway connectivity:\n";
 echo "   php stone migrate status\n\n";
 
 if ($provider === 'email-password') {

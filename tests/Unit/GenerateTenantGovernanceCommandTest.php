@@ -63,6 +63,10 @@ class GenerateTenantGovernanceCommandTest extends TestCase
             mkdir($mainBase . 'functions', 0755, true);
             mkdir($mainBase . 'migrations', 0755, true);
             file_put_contents($mainBase . 'migrations/037_prior.pgsql', "-- seed\n");
+        } else {
+            // A project already on the flat layout (it has schema files there) keeps it.
+            mkdir($fixture . 'src/postgresql/tables', 0755, true);
+            file_put_contents($fixture . 'src/postgresql/tables/existing.pgsql', "-- existing flat table\n");
         }
 
         return $fixture;

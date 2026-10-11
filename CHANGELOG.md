@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.2.0]
+
+Minor release: the opt-in tenant URL guard now honours a route's declared access, and the CLI works on a new project
+out of the box. No breaking change for a correctly configured application; the two behaviour changes below only
+remove refusals/failures that were never intended.
+
+### Changed
+
+- **`tenant_url_match` / `TenantUrlMatchMiddleware` honours `access`.** A route declared `access => public` (or the legacy
+  `is_public => true`) has no tenant claim to match and now passes the guard whether or not a token is attached, so a
+  public flow under `/tenant/{tenantId}/` (for example an invitation preview/accept authorised by its own unguessable
+  token) works with the guard enabled. A public route must authorise by its own credential and never treat the URL
+  tenant id as identity. Every `authentication` / `authorization` route is enforced exactly as before and fails closed
+  (`tenant_context_required` / `tenant_mismatch`, before the handler runs); route metadata without any access
+  information is treated as non-public. Where `access` and a stale `is_public` disagree, `access` wins.
+- **`StoreAccessMiddleware` honours `access` too.** With `store_access` enabled, a public tenant-path route (for example
+  an invitation preview/accept) is no longer refused with 401; every other tenant-path route is still membership-checked
+  and fails closed. Route metadata without access information is treated as non-public.
+- **Gateway CLI commands read configuration through `Env`**, the way the application does. `.env` is loaded without
+  `putenv`, so `gateway:*` commands (which read only `getenv()`) never saw values that lived in `.env`. They now accept the
+  application's names: `DB_GATEWAY_PLATFORM` (platform), `DB_GATEWAY_SCHEMA_NAME` (main schema),
+  `DB_GATEWAY_TENANT_SCHEMA_NAME` (tenant schema), `DB_GATEWAY_ADMIN_TOKEN`, `DB_GATEWAY_PLATFORM_TOKEN`. The legacy names
+  (`PLATFORM_ID`, `MAIN_SCHEMA_NAME`, `TENANT_SCHEMA_NAME`, `ADMIN_TOKEN`) keep working. If a legacy name and its
+  application-name counterpart are both set to DIFFERENT values, the command stops with exit 1 naming both keys (never
+  the values); equal values, or only one set, resolve normally. `gateway:register-tenant` resolves the tenant schema as
+  `--schema-name`, then `TENANT_SCHEMA_NAME` / `DB_GATEWAY_TENANT_SCHEMA_NAME`, then `SCHEMA_NAME`, never the main
+  schema's name, and fails with exit 1 if none is set. Main and tenant schema names that resolve to the same value stop
+  every gateway command with exit 1. Unknown `--options` (and a schema-name option the command ignores) are rejected with
+  exit 2 instead of being silently dropped; `.env.example` now documents the `DB_GATEWAY_*` names. The same lookup serves `tenants:check-ids` (no `SCHEMA_NAME`
+  fallback for the tenant schema) and `validate schema-contract` (`DATABASE_*`). The cross-DB-link opt-in
+  (`GATEWAY_CROSS_DB_LINK_*`) is still read from the process environment only, never from `.env` or secret files.
+- **`generate invitations`, `generate auth:*`** write SQL where the gateway commands read it,
+  `src/postgresql/main/postgresql/{functions,migrations}`, instead of the flat `src/postgresql/functions` and
+  `ROOT/migrations` that no gateway command packs. A project that already uses the flat layout keeps it. The audit,
+  soft-delete, tenant-governance and data-export generators use the same detection, so a fresh project gets the nested layout.
+  "Next steps" messages point at `gateway:migrate-main` (there is no `migrate up`).
+
+### Security
+
+- **Audit public handlers under a tenant URL.** With `tenant_url_match` (or `store_access`) enabled, public routes whose
+  pattern contains `{tenantId}` are exempt from the tenant check. A public handler must authorise by its own credential
+  (for example the invitation token) and must never treat the URL tenant id as identity. `Application::run()` logs a
+  warning at boot (once per worker process) listing every such route when `tenant_url_match` or `store_access` is on, and
+  `php stone env:check` lists them too; review each one when upgrading. Under `store_access` a public tenant-path route
+  now runs anonymously against the main database: no membership check and no URL-tenant database.
+
+### Fixed
+
+- `php stone generate model` searches the nested main directory before the flat one, so a stale flat copy cannot
+  shadow the deployed function in a mixed layout.
+- `php stone generate auth:<provider>` always failed with "Invalid number of arguments" when run through `stone`; the provider
+  token is now passed through.
+- `php stone migrate` with no argument tried to load a removed script and printed a misleading "run composer install". It
+  now prints help and exits 2 (as does an unknown subcommand; `migrate help` exits 0); `migrate register` is refused (exit 1) with a pointer to `gateway:register-main` / `gateway:migrate-main`.
+- `stone` always exited 0. A command that fails now exits non-zero: `php stone test` returns PHPUnit's status, and a
+  script that reports failure without exiting sets `$stoneExitCode`, which `stone` returns.
+- Removed an internal narrative comment from `stone`.
+
 ## [12.1.0]
 
 Minor release: new public API (mode-aware typed-auth wiring, `Env::resetForTesting()`, `gateway:migrate-vendor-main

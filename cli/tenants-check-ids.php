@@ -15,7 +15,7 @@
  * ids are only the past; a generator that can emit a refused id breaks provisioning later. With
  * --sample-generator and no --file, stdin is not read. BLOCKING pre-flight: do not roll out until it exits 0.
  *
- * --platform defaults to PLATFORM_ID / DB_GATEWAY_PLATFORM, --schema to TENANT_SCHEMA_NAME / SCHEMA_NAME
+ * --platform defaults to PLATFORM_ID / DB_GATEWAY_PLATFORM, --schema to TENANT_SCHEMA_NAME / DB_GATEWAY_TENANT_SCHEMA_NAME
  * (both feed the 63-byte database-name check). Exit code: 0 all fine, 1 violations found, 2 usage error.
  */
 
@@ -23,10 +23,11 @@ if (!defined('ROOT_PATH')) {
     define('ROOT_PATH', dirname(__DIR__) . DIRECTORY_SEPARATOR);
 }
 require_once rtrim(ROOT_PATH, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
+require_once __DIR__ . '/helpers/cli-env.php';
 
 use StoneScriptPHP\Tenancy\TenantIdRule;
 
-$opt = ['file' => null, 'platform' => getenv('PLATFORM_ID') ?: (getenv('DB_GATEWAY_PLATFORM') ?: ''), 'schema' => getenv('TENANT_SCHEMA_NAME') ?: (getenv('SCHEMA_NAME') ?: '')];
+$opt = ['file' => null, 'platform' => cliEnvPair('PLATFORM_ID', 'DB_GATEWAY_PLATFORM', 2) ?? '', 'schema' => cliEnvPair('TENANT_SCHEMA_NAME', 'DB_GATEWAY_TENANT_SCHEMA_NAME', 2) ?? ''];
 $sample = null;
 $generatorClass = \StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute::class;
 foreach (array_slice($_SERVER['argv'] ?? [], 1) as $arg) {
@@ -41,7 +42,7 @@ foreach (array_slice($_SERVER['argv'] ?? [], 1) as $arg) {
     }
 }
 if ($opt['platform'] === '' || $opt['schema'] === '') {
-    fwrite(STDERR, "ERROR: --platform and --schema (or PLATFORM_ID and TENANT_SCHEMA_NAME/SCHEMA_NAME) are required for the database-name length check.\n");
+    fwrite(STDERR, "ERROR: --platform and --schema (or PLATFORM_ID and TENANT_SCHEMA_NAME) are required for the database-name length check.\n");
     exit(2);
 }
 

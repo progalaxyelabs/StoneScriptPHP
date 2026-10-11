@@ -19,7 +19,7 @@
 
 require_once __DIR__ . '/helpers/gateway-common.php';
 
-$options = parseGatewayOptions($argv);
+$options = parseGatewayOptions($argv, [], ['--schema=']);
 $env = loadGatewayEnv($options, false, false);
 
 // Parse optional --schema=<name> filter

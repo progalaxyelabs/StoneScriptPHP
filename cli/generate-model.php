@@ -45,10 +45,12 @@ if ($argc !== 2) {
 $filename = str_replace('..', '.', $argv[1]);
 
 // Search directories in priority order (supports gateway-compatible directory structure)
+// Nested main first (where the gateway commands and the generators read/write), then the flat
+// directory, then tenant: a stale flat copy never shadows the deployed nested one.
 $search_dirs = [
+    ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'main' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR,
     ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR,
     ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'tenant' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR,
-    ROOT_PATH . 'src' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'main' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR,
 ];
 
 // Filter to only existing directories

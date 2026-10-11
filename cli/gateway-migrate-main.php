@@ -11,9 +11,8 @@
  *
  * Environment variables (required):
  *   DB_GATEWAY_URL           - Gateway URL (e.g., http://localhost:9000)
- *   PLATFORM_ID              - Platform identifier (e.g., myapp)
- *   MAIN_SCHEMA_NAME         - Main schema name, use a descriptive name like "main" (not a version-tagged name like "main_v1") [preferred]
- *   SCHEMA_NAME              - Schema name fallback (e.g., "main"); avoid version-tagged names like "v1_0"
+ *   DB_GATEWAY_PLATFORM      - Platform identifier (legacy name PLATFORM_ID also accepted)
+ *   DB_GATEWAY_SCHEMA_NAME   - Main schema name, a descriptive name like "main" (legacy name MAIN_SCHEMA_NAME also accepted)
  *   DATABASE_ID              - Database to migrate (default: main)
  *   DB_GATEWAY_PLATFORM_TOKEN - Platform token (required by gateway v4.1.0+; auto-provisioned if absent and DB_GATEWAY_ADMIN_TOKEN is set)
  *
@@ -22,8 +21,7 @@
  *   --delay=<s>              Delay between retries in seconds (default: 5)
  *   --quiet                  Suppress output
  *   --database-id=<id>       Override DATABASE_ID
- *   --main-schema-name=<n>   Override MAIN_SCHEMA_NAME
- *   --schema-name=<n>        Override SCHEMA_NAME (fallback)
+ *   --main-schema-name=<n>   Override the main schema name
  *
  * Granular safety flags (least-privilege — unlock only the operation you intend):
  *   --allow-drop-table            Permit dropping tables
@@ -38,14 +36,14 @@
 
 require_once __DIR__ . '/helpers/gateway-common.php';
 
-$options = parseGatewayOptions($argv);
+$options = parseGatewayOptions($argv, ['main-schema-name']);
 $env = loadGatewayEnv($options);
 
-// Use MAIN_SCHEMA_NAME for the main database; falls back to SCHEMA_NAME for backward compat
+// Main database schema: MAIN_SCHEMA_NAME, else DB_GATEWAY_SCHEMA_NAME
 $mainSchemaName = $env['main_schema_name'];
 
 if (!$mainSchemaName) {
-    fwrite(STDERR, "ERROR: MAIN_SCHEMA_NAME (or SCHEMA_NAME) environment variable is required (or use --main-schema-name=...)\n");
+    fwrite(STDERR, "ERROR: DB_GATEWAY_SCHEMA_NAME (or MAIN_SCHEMA_NAME) is required (or use --main-schema-name=...)\n");
     exit(1);
 }
 

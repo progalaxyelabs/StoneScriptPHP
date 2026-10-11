@@ -35,7 +35,7 @@ final class GenerateAuthGoogleRouteTest extends TestCase
                 unlink($f);
             }
         }
-        foreach (['src/App/Routes/Auth', 'src/App/Routes', 'src/App', 'src', 'migrations'] as $d) {
+        foreach (['src/App/Routes/Auth', 'src/App/Routes', 'src/App', 'src/postgresql/main/postgresql/migrations', 'src/postgresql/main/postgresql', 'src/postgresql/main', 'src/postgresql', 'src', 'migrations'] as $d) {
             if (is_dir($this->proj . '/' . $d)) {
                 foreach (scandir($this->proj . '/' . $d) as $e) {
                     if ($e !== '.' && $e !== '..' && is_file($this->proj . '/' . $d . '/' . $e)) {

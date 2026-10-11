@@ -199,7 +199,8 @@ if (!is_dir($templatesPath)) {
 
 // ── Layout detection — identical approach to generate-tenant-governance.php.
 $nestedMainBase = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'main' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR;
-$useNested = is_dir($nestedMainBase);
+require_once __DIR__ . '/helpers/schema-layout.php';
+$useNested = sspUseNestedMainLayout(SRC_PATH);
 
 if ($useNested) {
     $tablesDir     = $nestedMainBase . 'tables';
@@ -383,7 +384,7 @@ if (file_exists($manifestDst)) {
 
 echo "\n✅ Audit scaffolding complete!\n\n";
 echo "Next steps:\n";
-echo "1. Run migrations: php stone gateway:migrate-main (or php stone migrate up /\n";
+echo "1. Run migrations: php stone gateway:migrate-main\n";
 echo "   gateway:migrate-tenant, whichever database you generated this against).\n";
 echo "   Watch the migration output for 'audit: table \"...\" does not exist'\n";
 echo "   WARNINGs — that means a configured table wasn't there yet and its\n";

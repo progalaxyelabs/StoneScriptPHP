@@ -52,4 +52,34 @@ final class BootCheck
         }
         return null;
     }
+
+    /**
+     * Public routes whose pattern carries the tenant URL param. The tenant guards (`tenant_url_match`,
+     * `store_access`) exempt public routes, so each of these handlers must authorise by its own
+     * credential and never treat the URL tenant id as identity.
+     *
+     * @param array<int,array<string,mixed>> $routeMeta As returned by Router::getRouteMeta()
+     * @return string[] "METHOD /pattern" entries
+     */
+    public static function publicTenantRoutes(array $routeMeta, string $param = 'tenantId'): array
+    {
+        $out = [];
+        foreach ($routeMeta as $route) {
+            if (str_contains((string) ($route['path'] ?? ''), '{' . $param . '}')
+                && \StoneScriptPHP\Routing\RouteAccess::isPublicRoute($route)) {
+                $out[] = ($route['method'] ?? '') . ' ' . $route['path'];
+            }
+        }
+        return $out;
+    }
+
+    /** The one-line operator warning for publicTenantRoutes(), or null when there is nothing to audit. */
+    public static function publicTenantRoutesWarning(array $routes, string $param = 'tenantId'): ?string
+    {
+        if ($routes === []) {
+            return null;
+        }
+        return 'these PUBLIC routes carry {' . $param . '} and are exempt from the tenant check; each handler must '
+            . 'authorise by its own credential, never the URL tenant: ' . implode(', ', $routes);
+    }
 }

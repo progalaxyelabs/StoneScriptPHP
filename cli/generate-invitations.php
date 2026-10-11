@@ -70,8 +70,9 @@ if ($argc >= 2 && in_array($argv[1], ['--help', '-h', 'help'], true)) {
     echo "involved in invitation storage.\n\n";
     echo "Usage: php stone generate invitations\n\n";
     echo "This will create:\n";
-    echo "  - migrations/{N}_create_platform_invitations.pgsql\n";
-    echo "  - src/postgresql/functions/{create,get,mark}_platform_invitation*.pgsql\n";
+    echo "  - src/postgresql/main/postgresql/migrations/{N}_create_platform_invitations.pgsql\n";
+    echo "  - src/postgresql/main/postgresql/functions/{create,get,mark}_platform_invitation*.pgsql\n";
+    echo "    (a project that already uses the flat layout keeps migrations/ + src/postgresql/functions/)\n";
     echo "  - src/App/Database/Functions/Fn*.php (via php stone generate model)\n";
     echo "  - src/App/Routes/Invitations/*.php (repository + 3 route handlers)\n";
     echo "  - config/invitations.php\n";
@@ -90,12 +91,22 @@ if (!is_dir($templatesPath)) {
 }
 
 // ── 1. Directories ──────────────────────────────────────────────────────
+// SQL goes where the gateway commands read it: src/postgresql/main/postgresql/{functions,migrations}
+// (the flat layout is used only when the project already has one - see helpers/schema-layout.php).
+require_once __DIR__ . '/helpers/schema-layout.php';
+$nestedMainBase = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'main' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR;
+$useNested = sspUseNestedMainLayout(SRC_PATH);
+$sqlRel = $useNested ? 'src/postgresql/main/postgresql/' : 'src/postgresql/';
+$migrationsRel = $useNested ? $sqlRel . 'migrations' : 'migrations';
+
 $dirs = [
-    'migrations' => ROOT_PATH . 'migrations',
+    'migrations' => $useNested ? $nestedMainBase . 'migrations' : ROOT_PATH . 'migrations',
     // First-priority search dir per cli/generate-model.php's own $search_dirs
-    // list — keeps `php stone generate model <file>` (called below, step 4)
+    // list - keeps `php stone generate model <file>` (called below, step 4)
     // able to find these without any extra flag.
-    'functions'  => SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'functions',
+    'functions'  => $useNested
+        ? $nestedMainBase . 'functions'
+        : SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'functions',
     'routes'     => SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Routes' . DIRECTORY_SEPARATOR . 'Invitations',
     'config'     => ROOT_PATH . 'config',
 ];
@@ -197,12 +208,12 @@ foreach (scandir($dirs['migrations']) ?: [] as $entry) {
 }
 
 if ($existingMigration !== null) {
-    echo "  Skipped (already exists): migrations/$existingMigration\n";
+    echo "  Skipped (already exists): $migrationsRel/$existingMigration\n";
 } else {
     [$migrationFilename, $migrationNote] = resolveMigrationFilename($dirs['migrations']);
     $migrationDestination = $dirs['migrations'] . DIRECTORY_SEPARATOR . $migrationFilename;
     copy($templatesPath . 'migrations' . DIRECTORY_SEPARATOR . 'create_platform_invitations.pgsql.template', $migrationDestination);
-    echo "  ✓ Created: migrations/$migrationFilename\n";
+    echo "  ✓ Created: $migrationsRel/$migrationFilename\n";
     echo "    ($migrationNote)\n";
 }
 
@@ -219,12 +230,12 @@ foreach ($functionFiles as $fn) {
     $dst = $dirs['functions'] . DIRECTORY_SEPARATOR . $fn;
 
     if (file_exists($dst)) {
-        echo "  Skipped (already exists): src/postgresql/functions/$fn\n";
+        echo "  Skipped (already exists): {$sqlRel}functions/$fn\n";
         continue;
     }
 
     copy($src, $dst);
-    echo "  ✓ Created: src/postgresql/functions/$fn\n";
+    echo "  ✓ Created: {$sqlRel}functions/$fn\n";
 }
 
 // ── 4. Model wrappers (php stone generate model) ────────────────────────
@@ -245,6 +256,7 @@ if (!file_exists($stoneBinary)) {
         exec($cmd, $modelOutput, $modelReturnCode);
 
         if ($modelReturnCode !== 0) {
+            $stoneExitCode = 1; // surfaced by `stone` as the process exit status
             echo "  ⚠️  Failed to generate model wrapper for $fn:\n";
             foreach ($modelOutput as $line) {
                 echo "     $line\n";
@@ -426,6 +438,7 @@ foreach ($filesToValidate as $file) {
 }
 
 if (!empty($syntaxErrors)) {
+    $stoneExitCode = 1; // surfaced by `stone` as the process exit status
     echo "  ⚠️  Syntax errors detected:\n";
     foreach ($syntaxErrors as $error) {
         echo "\n  " . basename($error['file']) . ":\n  " . $error['error'] . "\n";
@@ -436,7 +449,7 @@ if (!empty($syntaxErrors)) {
 
 echo "\n✅ Invitation system scaffolding complete!\n\n";
 echo "Next steps:\n";
-echo "1. Run migrations: php stone migrate up\n";
+echo "1. Apply the schema: php stone gateway:migrate-main\n";
 echo "2. Wire config/invitations.php's 'role_resolver' and 'membership_writer'\n";
 echo "   closures to this platform's own role model and membership table.\n";
 echo "3. Add this platform's own authorization check to the top of\n";

@@ -83,14 +83,16 @@ function cc_arg(array $argv, string $name, ?string $default): ?string
     return $default;
 }
 
+require_once __DIR__ . '/helpers/cli-env.php';
+
 $strict = in_array('--strict', $argv, true);
 $json   = in_array('--json', $argv, true);
 
-$host     = cc_arg($argv, 'host', getenv('DATABASE_HOST') ?: '127.0.0.1');
-$port     = cc_arg($argv, 'port', getenv('DATABASE_PORT') ?: '5432');
-$dbname   = cc_arg($argv, 'dbname', getenv('DATABASE_DBNAME') ?: null);
-$user     = cc_arg($argv, 'user', getenv('DATABASE_USER') ?: 'postgres');
-$password = cc_arg($argv, 'password', getenv('DATABASE_PASSWORD') ?: '');
+$host     = cc_arg($argv, 'host', (cliEnv('DATABASE_HOST') ?? '127.0.0.1'));
+$port     = cc_arg($argv, 'port', (cliEnv('DATABASE_PORT') ?? '5432'));
+$dbname   = cc_arg($argv, 'dbname', (cliEnv('DATABASE_DBNAME') ?? null));
+$user     = cc_arg($argv, 'user', (cliEnv('DATABASE_USER') ?? 'postgres'));
+$password = cc_arg($argv, 'password', (cliEnv('DATABASE_PASSWORD') ?? ''));
 
 if (empty($dbname)) {
     fwrite(STDERR, "Error: no database name given. Pass --dbname=NAME or set DATABASE_DBNAME.\n");

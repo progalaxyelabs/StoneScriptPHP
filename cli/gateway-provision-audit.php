@@ -38,7 +38,7 @@
 
 require_once __DIR__ . '/helpers/gateway-common.php';
 
-$options = parseGatewayOptions($argv);
+$options = parseGatewayOptions($argv, []);
 $env = loadGatewayEnv($options, false, false);
 
 if (!$env['admin_token']) {

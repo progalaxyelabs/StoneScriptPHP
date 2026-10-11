@@ -8,7 +8,7 @@
  * applies migrations and deploys functions.
  *
  * Usage:
- *   php stone migrate          - Register/update schema with gateway
+ *   php stone migrate          - Show help (use the gateway:* commands to register/migrate)
  *   php stone migrate status   - Show gateway connection status
  */
 
@@ -40,10 +40,10 @@ $argv = $_SERVER['argv'];
 $argc = $_SERVER['argc'];
 
 // Parse command line arguments
-$command = $argv[1] ?? 'register';
+$command = $argv[1] ?? '';
 
 // Allow help command without .env file
-if ($command !== 'help' && !file_exists($rootPath . '.env')) {
+if (!in_array($command, ['help', ''], true) && !file_exists($rootPath . '.env')) {
     echo "Error: .env file not found. Run: php stone setup\n";
     exit(1);
 }
@@ -51,26 +51,12 @@ if ($command !== 'help' && !file_exists($rootPath . '.env')) {
 try {
     switch ($command) {
         case 'register':
-        case '':
-            // Default: Register schema with gateway
-            echo "=== StoneScriptPHP Schema Registration ===\n\n";
-
-            $env = Env::get_instance();
-            echo "Gateway URL: {$env->DB_GATEWAY_URL}\n";
-            echo "Platform: {$env->DB_GATEWAY_PLATFORM}\n";
-            echo "Tenant ID: " . ($env->DB_GATEWAY_TENANT_ID ?? '<main>') . "\n\n";
-
-            // Call gateway:register script
-            echo "Registering schema with gateway...\n\n";
-            $registerScript = $rootPath . 'vendor/progalaxyelabs/stonescriptphp/cli/gateway-register.php';
-
-            if (!file_exists($registerScript)) {
-                throw new Exception("gateway-register.php not found. Please run: composer install");
-            }
-
-            // Include and execute the registration script
-            require $registerScript;
-            break;
+            // The old schema-registration flow lived in a script that no longer ships.
+            echo "Error: 'php stone migrate register' was removed.\n\n";
+            echo "Use the gateway commands instead:\n";
+            echo "  php stone gateway:register-main   # one-time: register the platform + create the main database\n";
+            echo "  php stone gateway:migrate-main    # apply schema changes to the main database\n";
+            exit(1);
 
         case 'status':
             // Show gateway connection status
@@ -94,28 +80,31 @@ try {
 
             echo "Connected: " . ($client->isConnected() ? 'Yes' : 'Not yet') . "\n\n";
 
-            echo "To register/update schema, run: php stone migrate\n";
+            echo "To register/migrate the schema, run: php stone gateway:register-main (once), then php stone gateway:migrate-main\n";
             exit(0);
             break;
 
         case 'help':
         default:
+            // Unknown subcommand (or none): print the help but fail, so scripts notice. Explicit
+            // `help` is a success.
+            $helpExit = ($command === 'help') ? 0 : 2;
             echo "StoneScriptPHP Migration Tool (v3+ Gateway Mode)\n";
             echo "=================================================\n\n";
             echo "Usage: php stone migrate [command]\n\n";
             echo "Available commands:\n";
-            echo "  (default)  Register schema with gateway (applies migrations & deploys functions)\n";
             echo "  status     Show gateway connection status\n";
-            echo "  help       Show this help message\n";
+            echo "  help       Show this help message (also the default)\n";
             echo "\n";
             echo "Examples:\n";
-            echo "  php stone migrate          # Register/update schema with gateway\n";
-            echo "  php stone migrate status   # Check gateway connection\n";
+            echo "  php stone migrate status                # Check gateway connection\n";
+            echo "  php stone gateway:register-main         # One-time: register platform + create main database\n";
+            echo "  php stone gateway:migrate-main          # Apply schema changes to the main database\n";
+            echo "  php stone gateway:migrate-tenant --database-id=<id>   # Migrate one tenant database\n";
             echo "\n";
-            echo "Note: StoneScriptPHP v3+ uses gateway-only mode.\n";
-            echo "Migrations are applied automatically when you register your schema.\n";
+            echo "Note: StoneScriptPHP uses gateway-only mode; schema changes go through the gateway:* commands.\n";
             echo "\n";
-            exit(0);
+            exit($helpExit);
     }
 } catch (Exception $e) {
     echo "Error: " . $e->getMessage() . "\n";

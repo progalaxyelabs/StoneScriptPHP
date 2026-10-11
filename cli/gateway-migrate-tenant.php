@@ -11,8 +11,7 @@
  * Environment variables (required):
  *   DB_GATEWAY_URL             - Gateway URL (e.g., http://localhost:9000)
  *   PLATFORM_ID                - Platform identifier (e.g., myapp)
- *   TENANT_SCHEMA_NAME         - Tenant schema version name (e.g., v1_0) [preferred]
- *   SCHEMA_NAME                - Schema version name (fallback if TENANT_SCHEMA_NAME not set)
+ *   DB_GATEWAY_TENANT_SCHEMA_NAME - Tenant schema name, e.g. "tenant" (legacy name TENANT_SCHEMA_NAME also accepted)
  *   DB_GATEWAY_PLATFORM_TOKEN  - Platform token (required by gateway v4.1.0+; auto-provisioned if absent and DB_GATEWAY_ADMIN_TOKEN is set)
  *
  * Options:
@@ -21,19 +20,18 @@
  *   --delay=<s>                Delay between retries in seconds (default: 5)
  *   --quiet                    Suppress output
  *   --force                    Bypass schema validation (use with caution)
- *   --tenant-schema-name=<n>   Override TENANT_SCHEMA_NAME
- *   --schema-name=<n>          Override SCHEMA_NAME (fallback)
+ *   --tenant-schema-name=<n>   Override the tenant schema name
  */
 
 require_once __DIR__ . '/helpers/gateway-common.php';
 
-$options = parseGatewayOptions($argv);
+$options = parseGatewayOptions($argv, ['tenant-schema-name']);
 $env = loadGatewayEnv($options, false);
 
 $tenantSchemaName = $env['tenant_schema_name'];
 
 if (!$tenantSchemaName) {
-    fwrite(STDERR, "ERROR: TENANT_SCHEMA_NAME (or SCHEMA_NAME) environment variable is required (or use --tenant-schema-name=...)\n");
+    fwrite(STDERR, "ERROR: DB_GATEWAY_TENANT_SCHEMA_NAME (or TENANT_SCHEMA_NAME) is required (or use --tenant-schema-name=...)\n");
     exit(1);
 }
 

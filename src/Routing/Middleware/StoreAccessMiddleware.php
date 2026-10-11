@@ -80,6 +80,13 @@ class StoreAccessMiddleware implements MiddlewareInterface
             return $next($request);
         }
 
+        // A public route has no identity to check membership for (e.g. an invitation preview/accept
+        // authorised by its own unguessable token): pass it through. Everything else stays enforced
+        // and fails closed; route metadata without access information is NOT treated as public.
+        if (\StoneScriptPHP\Routing\RouteAccess::isPublicRoute($request['route'] ?? [])) {
+            return $next($request);
+        }
+
         // FAIL CLOSED: tenant-scoped route, so the canonical {tenantId} param
         // MUST be present and resolved. A missing/empty value — or a param named
         // anything other than `tenantId` (param-name drift, e.g. a botched

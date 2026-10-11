@@ -73,9 +73,16 @@ class GatewayOptionsTest extends TestCase
         $this->assertFalse($o['skip_verification']);
     }
 
-    public function test_unknown_flag_does_not_populate_allow(): void
+    public function test_unknown_flag_is_rejected_with_exit_2_and_unlocks_nothing(): void
     {
-        $o = parseGatewayOptions(['stone', 'gateway:migrate-main', '--allow-everything']);
-        $this->assertSame([], $o['allow']);
+        $code = 'require ' . var_export(dirname(__DIR__, 2) . '/cli/helpers/gateway-common.php', true) . ';'
+            . 'parseGatewayOptions(["stone", "gateway:migrate-main", "--allow-everything"]); echo "RETURNED";';
+        $proc = proc_open([PHP_BINARY, '-r', $code], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $this->assertSame(2, proc_close($proc));
+        $this->assertStringNotContainsString('RETURNED', $out);
+        $this->assertStringContainsString("unknown option '--allow-everything'", $out);
     }
 }

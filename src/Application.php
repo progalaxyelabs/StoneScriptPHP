@@ -87,6 +87,15 @@ class Application
     /** @var float Request start time for logging */
     private static float $startTime;
 
+    /** Set after the public-tenant-route boot warning has been logged by this worker process. */
+    private static bool $publicTenantRoutesWarned = false;
+
+    /** @internal Test seam: allow the once-per-process boot warning to fire again. */
+    public static function resetPublicTenantRoutesWarningForTesting(): void
+    {
+        self::$publicTenantRoutesWarned = false;
+    }
+
     /**
      * Run the application with the given config
      *
@@ -410,6 +419,21 @@ class Application
         // platform's explicit route for the same METHOD+path always wins (§
         // PluginInterface precedence). Empty $plugins (the default) is a no-op merge.
         $router->loadRoutes(self::mergePluginRoutes($appRoutes, $plugins));
+
+        // tenant_url_match exempts public routes, so a public handler under /tenant/{tenantId}/ is
+        // reachable without any tenant check. Name them at boot so the operator audits each one.
+        if ((!empty($tenantUrlMatchConfig['enabled']) || !empty($storeAccessConfig['enabled'])) && !self::$publicTenantRoutesWarned) {
+            // Once per worker process: PHP-FPM runs this on every request and the list never changes.
+            self::$publicTenantRoutesWarned = true;
+            $tenantParam = (string) ($tenantUrlMatchConfig['param'] ?? 'tenantId');
+            $warning = \StoneScriptPHP\Support\BootCheck::publicTenantRoutesWarning(
+                \StoneScriptPHP\Support\BootCheck::publicTenantRoutes($router->getRouteMeta(), $tenantParam),
+                $tenantParam
+            );
+            if ($warning !== null) {
+                log_warning('tenant guards (tenant_url_match / store_access): ' . $warning . ' (also shown by `php stone env:check`)');
+            }
+        }
 
         // Fail-fast wiring guard (strict single-mode): if protected routes exist
         // but the typed-auth middleware are not (fully) wired, refuse to boot rather

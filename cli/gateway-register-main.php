@@ -11,12 +11,17 @@
  * Usage:
  *   php stone gateway:register-main [options]
  *
- * Environment variables (required):
- *   DB_GATEWAY_URL         - Gateway URL (e.g., http://localhost:9000)
- *   PLATFORM_ID            - Platform identifier (e.g., myapp)
- *   MAIN_SCHEMA_NAME       - Main schema name, use a descriptive name like "main" (not a version-tagged name like "main_v1") [preferred]
- *   SCHEMA_NAME            - Schema name fallback (e.g., "main"); avoid version-tagged names like "v1_0"
- *   DB_GATEWAY_ADMIN_TOKEN - Admin token for platform registration and token provisioning
+ * Configuration is read through the framework's Env (the real environment, `.env`, `<NAME>_FILE`
+ * and /run/secrets), exactly as the application reads it.
+ *
+ * Required:
+ *   DB_GATEWAY_URL           - Gateway URL (e.g., http://localhost:9000)
+ *   DB_GATEWAY_PLATFORM      - Platform identifier (legacy name PLATFORM_ID also accepted)
+ *   DB_GATEWAY_SCHEMA_NAME   - Main schema name, a descriptive name like "main" (not version-tagged);
+ *                              legacy name MAIN_SCHEMA_NAME also accepted
+ *   If a legacy name and its DB_GATEWAY_* counterpart are both set to different values the command
+ *   stops (exit 1) naming both keys.
+ *   DB_GATEWAY_ADMIN_TOKEN   - Admin token for platform registration and token provisioning
  *
  * Environment variables (optional):
  *   DATABASE_ID              - Database identifier (default: main)
@@ -28,8 +33,7 @@
  *   --quiet                  Suppress output
  *   --force                  Skip checksum check and always run all steps
  *   --database-id=<id>       Override DATABASE_ID
- *   --main-schema-name=<n>   Override MAIN_SCHEMA_NAME
- *   --schema-name=<n>        Override SCHEMA_NAME (fallback)
+ *   --main-schema-name=<n>   Override the main schema name
  *
  * Idempotency:
  *   A SHA-256 hash of src/postgresql/ is saved to .cache/.gateway-schema-hash-main
@@ -39,14 +43,14 @@
 
 require_once __DIR__ . '/helpers/gateway-common.php';
 
-$options = parseGatewayOptions($argv);
+$options = parseGatewayOptions($argv, ['main-schema-name']);
 $env = loadGatewayEnv($options);
 
-// Use MAIN_SCHEMA_NAME for the main database; falls back to SCHEMA_NAME for backward compat
+// Main database schema: MAIN_SCHEMA_NAME, else DB_GATEWAY_SCHEMA_NAME
 $mainSchemaName = $env['main_schema_name'];
 
 if (!$mainSchemaName) {
-    fwrite(STDERR, "ERROR: MAIN_SCHEMA_NAME (or SCHEMA_NAME) environment variable is required (or use --main-schema-name=...)\n");
+    fwrite(STDERR, "ERROR: DB_GATEWAY_SCHEMA_NAME (or MAIN_SCHEMA_NAME) is required (or use --main-schema-name=...)\n");
     exit(1);
 }
 

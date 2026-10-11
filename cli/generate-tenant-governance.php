@@ -90,7 +90,8 @@ if (!is_dir($templatesPath)) {
 // fall back to flat. Either way, generate-model.php's own $search_dirs
 // already covers both functions locations, so the model step finds them.
 $nestedMainBase = SRC_PATH . 'postgresql' . DIRECTORY_SEPARATOR . 'main' . DIRECTORY_SEPARATOR . 'postgresql' . DIRECTORY_SEPARATOR;
-$useNested = is_dir($nestedMainBase);
+require_once __DIR__ . '/helpers/schema-layout.php';
+$useNested = sspUseNestedMainLayout(SRC_PATH);
 
 if ($useNested) {
     $tablesDir     = $nestedMainBase . 'tables';
@@ -328,7 +329,7 @@ if ($syntaxOk) {
 
 echo "\n✅ Tenant governance scaffolding complete!\n\n";
 echo "Next steps:\n";
-echo "1. Run migrations: php stone gateway:migrate-main (or php stone migrate up)\n";
+echo "1. Run migrations: php stone gateway:migrate-main\n";
 echo "2. Wire config/auth.php's resolvers to the framework class:\n";
 echo "     use StoneScriptPHP\\Auth\\TenantGovernance\\TenantGovernanceResolver;\n";
 echo "     \$governance = new TenantGovernanceResolver();\n";

@@ -41,7 +41,7 @@ class GenerateInvitationsCommandTest extends TestCase
      * `php stone generate invitations` actually needs to run: the `cli/`
      * scripts, `src/Templates/Invitations/`, and the `stone` binary itself.
      *
-     * @param bool $withPriorMigration Seed migrations/001_create_users_table.sql
+     * @param bool $withPriorMigration Seed src/postgresql/main/postgresql/migrations/001_create_users_table.sql
      *   (simulates a project that already ran `php stone generate auth:*`)
      *   so the sequential-numbering path is exercised.
      * @param bool $withRoutesPhp Seed a minimal flat v4.0 src/config/routes.php.
@@ -70,11 +70,12 @@ class GenerateInvitationsCommandTest extends TestCase
         // (verified by reading both — pure procedural file/string handling).
         file_put_contents($fixture . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php', "<?php\n// stub for test fixture\n");
 
-        mkdir($fixture . 'migrations', 0755, true);
+        // SQL lives where the gateway commands read it: src/postgresql/main/postgresql/.
+        mkdir($fixture . 'src/postgresql/main/postgresql/migrations', 0755, true);
         if ($withPriorMigration) {
             copy(
                 $frameworkRoot . 'src/Templates/Migrations/base/001_create_users_table.sql',
-                $fixture . 'migrations' . DIRECTORY_SEPARATOR . '001_create_users_table.sql'
+                $fixture . 'src/postgresql/main/postgresql/migrations/001_create_users_table.sql'
             );
         }
 
@@ -124,7 +125,7 @@ class GenerateInvitationsCommandTest extends TestCase
         $this->assertStringContainsString('Invitation system scaffolding complete', $outputText);
 
         // Migration — sequential numbering continued from 001.
-        $migrationFile = $fixture . 'migrations/002_create_platform_invitations.sql';
+        $migrationFile = $fixture . 'src/postgresql/main/postgresql/migrations/002_create_platform_invitations.sql';
         $this->assertFileExists($migrationFile);
         $migrationSql = file_get_contents($migrationFile);
         $this->assertStringContainsString('CREATE TABLE IF NOT EXISTS platform_invitations', $migrationSql);
@@ -140,7 +141,7 @@ class GenerateInvitationsCommandTest extends TestCase
             'get_platform_invitation_by_token_hash.pgsql',
             'mark_platform_invitation_accepted.pgsql',
         ] as $fn) {
-            $this->assertFileExists($fixture . 'src/postgresql/functions/' . $fn);
+            $this->assertFileExists($fixture . 'src/postgresql/main/postgresql/functions/' . $fn);
         }
 
         // Model wrappers (php stone generate model output).
@@ -201,7 +202,7 @@ class GenerateInvitationsCommandTest extends TestCase
 
         // Exactly one invitations migration must exist after two runs — not two.
         $migrationCount = 0;
-        foreach (scandir($fixture . 'migrations') ?: [] as $entry) {
+        foreach (scandir($fixture . 'src/postgresql/main/postgresql/migrations') ?: [] as $entry) {
             if (str_contains($entry, 'create_platform_invitations')) {
                 $migrationCount++;
             }
@@ -225,7 +226,7 @@ class GenerateInvitationsCommandTest extends TestCase
         $this->assertSame(0, $exitCode, "generator exited non-zero:\n$outputText");
 
         $migrationFiles = array_values(array_filter(
-            scandir($fixture . 'migrations') ?: [],
+            scandir($fixture . 'src/postgresql/main/postgresql/migrations') ?: [],
             fn($f) => str_contains($f, 'create_platform_invitations')
         ));
         $this->assertCount(1, $migrationFiles);

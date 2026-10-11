@@ -35,10 +35,10 @@
  *   php stone gateway:migrate-vendor-main [options]
  *
  * Environment variables: same as gateway:migrate-main (DB_GATEWAY_URL,
- * PLATFORM_ID, MAIN_SCHEMA_NAME/SCHEMA_NAME, DATABASE_ID, DB_GATEWAY_PLATFORM_TOKEN).
+ * DB_GATEWAY_PLATFORM, DB_GATEWAY_SCHEMA_NAME (legacy PLATFORM_ID / MAIN_SCHEMA_NAME), DATABASE_ID, DB_GATEWAY_PLATFORM_TOKEN).
  *
  * Options: same as gateway:migrate-main (--retry, --delay, --quiet,
- * --database-id, --main-schema-name, --schema-name, --allow-*, --force,
+ * --database-id, --main-schema-name, --allow-*, --force,
  * --dangerously-skip-verification), plus:
  *
  *   --list                 Print the staged vendor features and exit (changes nothing).
@@ -77,13 +77,13 @@ if ($listOnly) {
     exit(0);
 }
 
-$options = parseGatewayOptions($argv);
+$options = parseGatewayOptions($argv, ['main-schema-name'], ['--only=', '--list']);
 $env = loadGatewayEnv($options);
 
 $mainSchemaName = $env['main_schema_name'];
 
 if (!$mainSchemaName) {
-    fwrite(STDERR, "ERROR: MAIN_SCHEMA_NAME (or SCHEMA_NAME) environment variable is required (or use --main-schema-name=...)\n");
+    fwrite(STDERR, "ERROR: DB_GATEWAY_SCHEMA_NAME (or MAIN_SCHEMA_NAME) is required (or use --main-schema-name=...)\n");
     exit(1);
 }
 

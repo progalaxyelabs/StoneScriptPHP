@@ -119,7 +119,7 @@ try {
 
             if ($count < 4) {
                 echo "Error: RBAC tables not found. Please run migrations first:\n";
-                echo "  php stone migrate up\n";
+                echo "  php stone gateway:migrate-main\n";
                 exit(1);
             }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Auth\Middleware;
 
 use StoneScriptPHP\Routing\MiddlewareInterface;
+use StoneScriptPHP\Routing\RouteAccess;
 use StoneScriptPHP\ApiResponse;
 
 /**
@@ -52,6 +53,21 @@ use StoneScriptPHP\ApiResponse;
  * carry `{tenantId}` in their pattern and are skipped automatically — mirroring
  * how `StoreAccessMiddleware` self-skips non-tenant-scoped routes by pattern.
  *
+ * ## Public routes (since 12.2.0)
+ *
+ * A route declared `access => public` (or legacy `is_public => true`) carries no tenant
+ * claim to match: the caller is, by definition, not yet acting inside a tenant (e.g. an
+ * invitee previewing/accepting an invitation by an unguessable token). The guard therefore
+ * passes such routes through untouched, whether or not a token is attached — a token a
+ * caller happens to hold for tenant A must not block a public flow addressed at tenant B.
+ * The URL tenant id on a public route is NOT authoritative; the handler must authorise by
+ * its own credential (e.g. the invitation token) and never trust the URL id as identity.
+ *
+ * Every non-public route (`authentication`, `authorization`) is still enforced and fails
+ * closed. A request with no matched route metadata (`$request['route']` absent `access` and
+ * `is_public`) is treated as non-public. The check runs before the handler, so a rejected
+ * request has no handler side effect.
+ *
  * ## Preconditions
  *
  * - MUST run AFTER JwtAuthMiddleware / ValidateJwtMiddleware (jwt_claims required)
@@ -81,6 +97,12 @@ class TenantUrlMatchMiddleware implements MiddlewareInterface
         // middleware safe to wire globally (see class docblock).
         $pattern = $request['route']['pattern'] ?? null;
         if ($pattern === null || !str_contains($pattern, '{' . $this->urlParamName . '}')) {
+            return $next($request);
+        }
+
+        // Public routes have no tenant claim to match — pass through (see class docblock).
+        // Absence of metadata is NOT treated as public: fail closed.
+        if (RouteAccess::isPublicRoute($request['route'] ?? [])) {
             return $next($request);
         }
 

@@ -59,6 +59,23 @@ try {
         . " (only matters if the app passes 'typed_auth' => true)";
 }
 
+// Public routes under the tenant URL param are exempt from tenant_url_match / store_access. Report them once
+// here (CI / deploy) so they are audited; this reads routes.php only, so it cannot tell whether the guards
+// are enabled - hence a warning, not a failure.
+$routesFile = defined('CONFIG_PATH') ? CONFIG_PATH . 'routes.php' : null;
+if ($routesFile !== null && is_file($routesFile)) {
+    try {
+        $checkRouter = new \StoneScriptPHP\Routing\Router();
+        $checkRouter->loadRoutes(require $routesFile);
+        $publicTenant = BootCheck::publicTenantRoutesWarning(BootCheck::publicTenantRoutes($checkRouter->getRouteMeta()));
+        if ($publicTenant !== null) {
+            $warnings[] = $publicTenant . " (matters if the app enables 'tenant_url_match' or 'store_access')";
+        }
+    } catch (\Throwable $e) {
+        $warnings[] = 'could not read ' . basename($routesFile) . ' to list public tenant routes: ' . get_class($e);
+    }
+}
+
 echo "\nOK: environment loads cleanly (AUTH_MODE={$env->AUTH_MODE}, DB_MODE={$env->DB_MODE}).\n";
 foreach ($warnings as $w) {
     echo "WARN: $w\n";

@@ -137,7 +137,7 @@ try {
 
     if ($count < 3) {
         echo "Error: Required tables not found. Please run migrations first:\n";
-        echo "  php stone migrate up\n";
+        echo "  php stone gateway:migrate-main\n";
         exit(1);
     }
 
@@ -151,7 +151,7 @@ try {
     if (pg_num_rows($result) === 0) {
         echo "Error: Email/password authentication not enabled. Please run:\n";
         echo "  php stone generate auth:email-password\n";
-        echo "  php stone migrate up\n";
+        echo "  php stone gateway:migrate-main\n";
         exit(1);
     }
 

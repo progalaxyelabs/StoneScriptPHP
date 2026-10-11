@@ -49,6 +49,22 @@ final class RouteAccess
         self::TOKEN_REFRESH,
     ];
 
+    /**
+     * Whether matched-route metadata (as placed in `$request['route']` by the router) declares a
+     * public route. `access` wins over a stale `is_public`; metadata with neither is NOT public
+     * (callers fail closed).
+     *
+     * @param array<string,mixed> $route
+     */
+    public static function isPublicRoute(array $route): bool
+    {
+        $access = $route['access'] ?? null;
+        if (is_string($access) && $access !== '') {
+            return $access === self::PUBLIC;
+        }
+        return ($route['is_public'] ?? false) === true;
+    }
+
     public static function isValidAccess(?string $access): bool
     {
         return $access !== null && in_array($access, self::ACCESS_VALUES, true);

@@ -487,7 +487,7 @@ function ssp_parse_vendor_main_args(array $argv): array
         '--allow-drop-table', '--allow-drop-column', '--allow-column-type-change',
         '--allow-add-not-null-column', '--allow-set-not-null',
     ];
-    $valued = ['--retry=', '--delay=', '--database-id=', '--schema-name=', '--main-schema-name=', '--tenant-schema-name='];
+    $valued = ['--retry=', '--delay=', '--database-id=', '--main-schema-name='];
 
     $only = [];
     $list = false;
