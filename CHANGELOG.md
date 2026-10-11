@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.0.1]
+
+### Fixed
+
+- The `stone` CLI defined `CONFIG_PATH` as `src/App/Config/`, while the runtime (`src/bootstrap.php`), the skeleton and
+  every platform keep config in `src/config/`. Any command that read `CONFIG_PATH` therefore looked in the wrong
+  directory. Visible symptom: `php stone auth:check-origins` could report `ALLOWED_ORIGINS` empty (exit 1) while the
+  running app had origins configured in `src/config/allowed-origins.php`. `stone` and the fallback definitions in
+  `cli/generate-common.php`, `cli/generate-auth.php` and `cli/generate-invitations.php` now all use `src/config/`.
+- Every `stone` command now loads `src/config/allowed-origins.php` exactly as the runtime does. If that file is not a
+  plain `return [...]` of string literals (for example it merges `getenv()`), the CLI now prints the same warning the
+  runtime already logs, and both fall back to the `ALLOWED_ORIGINS` environment variable. Convert the file to a literal
+  list to silence it.
+
+### Changed
+
+- `composer.json` carries an explicit `version` field (without the `v` prefix), bumped in the same commit as each
+  release tag.
+
 ## [12.0.0]
 
 Major release. It bundles seven changes. Four of them change behaviour on every platform without a flag (the OAuth

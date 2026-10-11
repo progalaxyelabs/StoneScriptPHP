@@ -31,7 +31,7 @@ define('IS_VENDOR_MODE', $isVendorMode);
 // Define project paths
 // SRC_PATH points to the project's src/ directory (where App\ namespace lives)
 define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
-define('CONFIG_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Config' . DIRECTORY_SEPARATOR);
+define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
 
 require_once $projectRoot . '/vendor/autoload.php';
 

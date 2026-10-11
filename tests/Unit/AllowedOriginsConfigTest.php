@@ -104,13 +104,13 @@ final class AllowedOriginsConfigTest extends TestCase
     public function test_multi_entry_array_literal_is_accepted(): void
     {
         $path = $this->makeTempPhpFile(
-            "<?php\nreturn [\n    'http://localhost:3040',\n    'https://www.progalaxy.in',\n];\n"
+            "<?php\nreturn [\n    'http://localhost:3040',\n    'https://www.example.com',\n];\n"
         );
         $env = $this->newEnvWithoutConstructor();
 
         $result = $this->loadOriginsFromFile->invoke($env, $path);
 
-        $this->assertSame('http://localhost:3040,https://www.progalaxy.in', $result);
+        $this->assertSame('http://localhost:3040,https://www.example.com', $result);
     }
 
     public function test_legacy_array_syntax_is_accepted(): void

@@ -48,5 +48,5 @@ if (!defined('SRC_PATH')) {
     define('SRC_PATH', ROOT_PATH . 'src' . DIRECTORY_SEPARATOR);
 }
 if (!defined('CONFIG_PATH')) {
-    define('CONFIG_PATH', SRC_PATH . 'App' . DIRECTORY_SEPARATOR . 'Config' . DIRECTORY_SEPARATOR);
+    define('CONFIG_PATH', SRC_PATH . 'config' . DIRECTORY_SEPARATOR);
 }
