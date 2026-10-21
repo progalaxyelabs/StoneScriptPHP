@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "8fea7a7094db584d7d7ecfbf46c01695",
+    "content-hash": "e9b7eda196b53d3d48c64fa798669de7",
     "packages": [
         {
             "name": "firebase/php-jwt",
@@ -211,16 +211,16 @@
         },
         {
             "name": "progalaxyelabs/stonescriptdb-gateway-client",
-            "version": "v3.1.1",
+            "version": "4.0.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client.git",
-                "reference": "855a186a82af47864e72492fb149681418659a1b"
+                "reference": "732f9555c5078421939f7237976e95347226ccbd"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/progalaxyelabs/stonescriptdb-gateway-client/zipball/855a186a82af47864e72492fb149681418659a1b",
-                "reference": "855a186a82af47864e72492fb149681418659a1b",
+                "url": "https://api.github.com/repos/progalaxyelabs/stonescriptdb-gateway-client/zipball/732f9555c5078421939f7237976e95347226ccbd",
+                "reference": "732f9555c5078421939f7237976e95347226ccbd",
                 "shasum": ""
             },
             "require": {
@@ -260,9 +260,9 @@
             ],
             "support": {
                 "issues": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/issues",
-                "source": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/tree/v3.1.1"
+                "source": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/tree/4.0.0"
             },
-            "time": "2026-07-04T15:00:34+00:00"
+            "time": "2026-10-21T00:00:00+00:00"
         },
         {
             "name": "symfony/polyfill-ctype",
