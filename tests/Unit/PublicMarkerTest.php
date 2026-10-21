@@ -87,6 +87,45 @@ final class PublicMarkerTest extends TestCase
         $this->assertSame([422, 'Not allowed'], [$r->status, $r->message]);
     }
 
+    /** @return array<string,array{0:string}> */
+    public static function badPrefixes(): array
+    {
+        return [
+            'empty' => [''],
+            'whitespace only' => ['          '],
+            'tabs and newlines' => ["\t\n \t\n \t\n"],
+            'too short' => ['Fail: '],
+            'seven characters' => ['Error: '],
+            'contains a placeholder' => ['Failed to create order for %s: '],
+            'contains percent' => ['Failed 100% to create: '],
+            'too long' => [str_repeat('a', 121)],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('badPrefixes')]
+    public function testAllowPublicPrefixRejectsUnsafePrefixes(string $prefix): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        DbErrorMapper::allowPublicPrefix($prefix);
+    }
+
+    public function testRejectedPrefixIsNotRegisteredAndEightCharactersIsAccepted(): void
+    {
+        try {
+            DbErrorMapper::allowPublicPrefix('Oops: ');
+        } catch (\InvalidArgumentException) {
+        }
+        $this->assertSame(500, DbErrorMapper::resolve($this->gw('Oops: [public:x:409] hi'))->status, 'a rejected prefix registers nothing');
+
+        DbErrorMapper::allowPublicPrefix('Order X: '); // 9 characters
+        $this->assertSame(409, DbErrorMapper::resolve($this->gw('Order X: [public:x:409] hi'))->status);
+        DbErrorMapper::clearPublicPrefixes();
+        DbErrorMapper::allowPublicPrefix('Order 1:'); // exactly 8 characters: the minimum
+        $this->assertSame(409, DbErrorMapper::resolve($this->gw('Order 1:[public:x:409] hi'))->status);
+        $this->expectException(\InvalidArgumentException::class);
+        DbErrorMapper::allowPublicPrefix('Order1:'); // 7 characters
+    }
+
     public function testUserMarkerBeforeTheAuthorsTextIsNotPublic(): void
     {
         // RAISE 'Phone % is already registered to %', p_phone, v_owner   with p_phone = '[public:x:409] x'

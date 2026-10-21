@@ -31,13 +31,19 @@ final class PublicRaiseLint
         return array_values(array_unique(array_map(static fn (array $h): int => $h['line'], self::scanDetailed($sql))));
     }
 
+    /** True when the file opts out of the lint (`-- stonescript-lint: ignore-file`). `validate sqlintegrity` reports these. */
+    public static function isIgnored(string $sql): bool
+    {
+        return preg_match('/^\s*--\s*stonescript-lint:\s*ignore-file\b/m', $sql) === 1;
+    }
+
     /**
      * @return list<array{line:int, rule:string, message:string}>
      */
     public static function scanDetailed(string $sql): array
     {
         // A deliberately unsafe fixture can opt out: `-- stonescript-lint: ignore-file` on its own line.
-        if (preg_match('/^\s*--\s*stonescript-lint:\s*ignore-file\b/m', $sql) === 1) {
+        if (self::isIgnored($sql)) {
             return [];
         }
         $src = self::stripComments($sql);

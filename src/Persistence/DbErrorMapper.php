@@ -198,10 +198,28 @@ final class DbErrorMapper
      * Register an exact literal prefix that a platform's own wrapper puts BEFORE the `[public:...]` marker, e.g.
      * `DbErrorMapper::allowPublicPrefix('Failed to create order: ')`. Only registered literals are honoured; no other
      * text may precede the marker.
+     *
+     * A registered prefix must be used ONLY by wrappers that ALWAYS wrap a `[public...]` message, never by a RAISE
+     * that interpolates after it: anything after the prefix is read as the marker and published verbatim.
+     *
+     * @throws \InvalidArgumentException for a prefix shorter than 8 characters, containing `%` (a format placeholder
+     *         means a value follows), whitespace-only, or longer than 120 characters
      */
     public static function allowPublicPrefix(string $prefix): void
     {
-        if ($prefix !== '' && strlen($prefix) <= 120 && !in_array($prefix, self::$publicPrefixes, true)) {
+        if (trim($prefix) === '') {
+            throw new \InvalidArgumentException('A public prefix must not be empty or whitespace-only.');
+        }
+        if (strlen($prefix) < 8) {
+            throw new \InvalidArgumentException('A public prefix must be at least 8 characters: a short prefix is too easy to imitate.');
+        }
+        if (strlen($prefix) > 120) {
+            throw new \InvalidArgumentException('A public prefix must be at most 120 characters.');
+        }
+        if (str_contains($prefix, '%')) {
+            throw new \InvalidArgumentException('A public prefix must not contain %: it must be an exact literal, never a format with a value.');
+        }
+        if (!in_array($prefix, self::$publicPrefixes, true)) {
             self::$publicPrefixes[] = $prefix;
         }
     }

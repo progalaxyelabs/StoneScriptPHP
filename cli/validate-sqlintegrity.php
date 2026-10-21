@@ -807,6 +807,19 @@ if (!$json && !empty($layoutErrors)) {
 
 $schemasToCheck = $schemaFilter !== null ? [$schemaFilter] : ['main', 'tenant'];
 
+// Files that opted out of the RAISE lint with `-- stonescript-lint: ignore-file`. Every one is reported as a WARNING;
+// under --strict one outside the allow-list (src/config/sqlintegrity.php: ['lint_ignore_allowed' => ['tests/fixtures/*']],
+// fnmatch patterns relative to the project root) fails the run.
+$lintIgnoreAllowed = [];
+$lintCfgFile = ROOT_PATH . 'src/config/sqlintegrity.php';
+if (is_file($lintCfgFile)) {
+    $lintCfg = require $lintCfgFile;
+    if (is_array($lintCfg) && is_array($lintCfg['lint_ignore_allowed'] ?? null)) {
+        $lintIgnoreAllowed = array_values(array_filter($lintCfg['lint_ignore_allowed'], 'is_string'));
+    }
+}
+$lintIgnored = [];
+
 // Aggregated across all schemas
 $errors        = [];
 $warnings      = [];
@@ -846,8 +859,20 @@ foreach ($schemasToCheck as $schema) {
         $fnBodies              = parseFunctionBodies($file);
         $fnBodiesByFile[$file] = $fnBodies;
 
+        $fileSql = (string) file_get_contents($file);
+        if (\StoneScriptPHP\Persistence\PublicRaiseLint::isIgnored($fileSql)) {
+            $rel = ltrim(str_replace(rtrim(ROOT_PATH, '/'), '', $file), '/');
+            $allowed = false;
+            foreach ($lintIgnoreAllowed as $pattern) {
+                if (fnmatch($pattern, $rel)) {
+                    $allowed = true;
+                    break;
+                }
+            }
+            $lintIgnored[$file] = ['file' => $file, 'relative' => $rel, 'allowed' => $allowed];
+        }
         // RAISE message rules: a [public...] RAISE must not interpolate, no RAISE may start with an interpolated value
-        foreach (\StoneScriptPHP\Persistence\PublicRaiseLint::scanDetailed((string) file_get_contents($file)) as $hit) {
+        foreach (\StoneScriptPHP\Persistence\PublicRaiseLint::scanDetailed($fileSql) as $hit) {
             $errors[] = [
                 'type'    => 'unsafe_raise_' . $hit['rule'],
                 'schema'  => $schema,
@@ -937,6 +962,7 @@ if ($json) {
             'line'    => $c['line'],
             'clause'  => $c['clause'],
         ], $columnErrors),
+        'lint_ignored'      => array_map(fn($i) => ['file' => $i['relative'], 'allowed' => $i['allowed']], array_values($lintIgnored)),
         'notices'           => array_map(fn($n) => [
             'file'    => relativePath($n['file']),
             'fn'      => $n['fn'],
@@ -944,8 +970,9 @@ if ($json) {
             'msg'     => $n['msg'],
         ], $columnNotices),
     ], JSON_PRETTY_PRINT) . "\n";
-    $hasFailure  = !empty($layoutErrors) || !empty($errors) || !empty($columnErrors) || ($strict && !empty($warnings));
-    $hasWarnings = !empty($warnings);
+    $lintIgnoredBad = array_filter($lintIgnored, fn($i) => !$i['allowed']);
+    $hasFailure  = !empty($layoutErrors) || !empty($errors) || !empty($columnErrors) || ($strict && (!empty($warnings) || !empty($lintIgnoredBad)));
+    $hasWarnings = !empty($warnings) || !empty($lintIgnoredBad); // allow-listed fixture opt-outs warn but never change the exit code
     exit($hasFailure ? 1 : ($hasWarnings ? 2 : 0));
 }
 
@@ -970,6 +997,15 @@ if (!empty($warnings)) {
         echo "$tag [" . $w['schema'] . "] in " . Color::yellow($w['fn'] . "()") . "\n";
         echo "        " . $w['message'] . "\n";
         echo "        → " . relativePath($w['file']) . ":" . $w['line'] . "\n\n";
+    }
+}
+
+// RAISE-lint opt-outs: always a WARNING; an ERROR under --strict unless the path is on the project's allow-list
+foreach ($lintIgnored as $i) {
+    if ($strict && !$i['allowed']) {
+        echo Color::red("  ERROR") . " RAISE lint is switched off for " . $i['relative'] . " (-- stonescript-lint: ignore-file) and the path is not in lint_ignore_allowed.\n\n";
+    } else {
+        echo Color::yellow("  WARN ") . " RAISE lint is switched off for " . $i['relative'] . " (-- stonescript-lint: ignore-file)" . ($i['allowed'] ? " [allowed fixture path]" : "") . ".\n\n";
     }
 }
 
@@ -1001,8 +1037,9 @@ $warnCount      = count($warnings);
 $colErrCount    = count($columnErrors);
 $noticeCount    = count($columnNotices);
 
-$hasFailure  = $layoutErrCount > 0 || $errCount > 0 || $colErrCount > 0 || ($strict && $warnCount > 0);
-$hasWarnings = $warnCount > 0;
+$lintIgnoredBadCount = count(array_filter($lintIgnored, fn($i) => !$i['allowed']));
+$hasFailure  = $layoutErrCount > 0 || $errCount > 0 || $colErrCount > 0 || ($strict && ($warnCount > 0 || $lintIgnoredBadCount > 0));
+$hasWarnings = $warnCount > 0 || $lintIgnoredBadCount > 0; // allow-listed fixture opt-outs warn but never change the exit code
 
 if (!$hasFailure && !$hasWarnings) {
     echo Color::green("✓ All clear.") . " "
@@ -1021,6 +1058,7 @@ if ($errCount > 0)        $summary[] = Color::red("$errCount table/fn ref error(
 if ($colErrCount > 0)     $summary[] = Color::red("$colErrCount column-name error(s)");
 if ($warnCount > 0)       $summary[] = ($strict ? Color::red("$warnCount warning(s) [--strict]") : Color::yellow("$warnCount warning(s)"));
 if ($noticeCount > 0)     $summary[] = Color::yellow("$noticeCount notice(s) (parser skipped)");
+if (!empty($lintIgnored)) $summary[] = ($strict && $lintIgnoredBadCount > 0 ? Color::red(count($lintIgnored) . " RAISE-lint opt-out(s) [--strict]") : Color::yellow(count($lintIgnored) . " RAISE-lint opt-out(s)"));
 
 echo implode(', ', $summary) . " — schemas: " . implode('+', $schemasToCheck)
     . ", $totalFnFiles function file(s) checked.\n";

@@ -26,7 +26,9 @@ and query parameters no longer reach stdout, stderr, logs, exception messages, `
   (`SQLSTATE[xxxxx]: `, `<Class>: <n> ERROR:  `, `ERROR:  `, `pg_query(): Query failed: `) are stripped ONLY at the very start
   (never a search for `ERROR:`, which a user value could contain); the primary line ends at the first newline, ` | ` or
   inline DETAIL/HINT/CONTEXT; the line must START with the marker, or with an exact literal prefix the platform registered
-  with `DbErrorMapper::allowPublicPrefix('Failed to create order: ')` (no arbitrary prefix text); the text ends at the end
+  with `DbErrorMapper::allowPublicPrefix('Failed to create order: ')` (no arbitrary prefix text; it throws for a prefix
+  shorter than 8 characters, containing `%`, or whitespace-only, and a registered prefix must be used only by wrappers that
+  ALWAYS wrap a `[public...]` message, never by a RAISE that interpolates after it); the text ends at the end
   of that line or at ` (SQLSTATE`. A user value that is marker-shaped and echoed anywhere else (`RAISE 'Phone % is already
   registered to %'`) therefore cannot become a public response. The pgandroid bridge form
   `SQLSTATE[P0001]: [public:gone:410] msg` is supported. The whole rule is one self-contained function,
@@ -37,6 +39,9 @@ and query parameters no longer reach stdout, stderr, logs, exception messages, `
   (task #10086), after which the marker can be retired.
   `Persistence\PublicRaiseLint` enforces both rules (plain, E'', dollar-quoted and `format()` / `||` forms of `RAISE` and
   `USING MESSAGE = ...`) and **runs by default in `php stone validate sqlintegrity`**, as an error.
+  A file can opt out with `-- stonescript-lint: ignore-file`; `validate sqlintegrity` prints every opted-out file as a
+  WARNING, and `--strict` fails on any opt-out outside the project's allow-list
+  (`src/config/sqlintegrity.php`: `return ['lint_ignore_allowed' => ['tests/fixtures/*']];`, fnmatch patterns relative to the project root).
   **`[public:...]` text is published to the API client VERBATIM: never interpolate values into it (no `%`).**
 
 - **Allow-list, not scrubbing.** Diagnostics are rebuilt from identifier-shaped fields only (SQLSTATE, schema, table,
