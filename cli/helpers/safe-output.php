@@ -32,6 +32,20 @@ if (!function_exists('gw_safe_body')) {
                 $parts[] = $k . '=' . $d[$k];
             }
         }
+        // Identifiers recovered from the PostgreSQL primary line of `cause` (never its free text), and the
+        // migration file / function name from the gateway's fixed `message` wording.
+        if (isset($d['cause']) && is_string($d['cause']) && class_exists(\StoneScriptPHP\Persistence\SafeDbContext::class)) {
+            $ctx = \StoneScriptPHP\Persistence\SafeDbContext::fromText($d['cause']);
+            $ctx = array_diff_key($ctx, array_flip(['function']));
+            $extra = trim(\StoneScriptPHP\Persistence\SafeDbContext::suffix($ctx), ' []');
+            if ($extra !== '') {
+                $parts[] = $extra;
+            }
+        }
+        if (isset($d['message']) && is_string($d['message'])
+            && preg_match('/^(?:Migration ([A-Za-z0-9_.\-]{1,100}) failed|Query for function \'([A-Za-z0-9_.\-]{1,63})\' failed)$/', $d['message'], $m) === 1) {
+            $parts[] = 'item=' . ($m[1] !== '' ? $m[1] : $m[2]);
+        }
         $withheld = isset($d['cause']) || isset($d['message']) || isset($d['detail']);
         $out = implode(' ', $parts);
         if ($withheld) {

@@ -59,6 +59,13 @@ final class SafeDbContext
                 $out[$k] = $v;
             }
         }
+        // The gateway's trailing SCHEMA/TABLE/COLUMN segments, only for PostgreSQL-raised errors (see GatewayException).
+        $state = $out['sqlstate'] ?? null;
+        if ($state !== null && !isset($out['app_code']) && in_array(substr($state, 0, 2), ['22', '23', '42', '40', '53', '55', '57', '25', '2B', '0A'], true)) {
+            foreach (GatewayException::parseTrailing($raw) as $k => $v) {
+                $out[$k] ??= $v;
+            }
+        }
         return $out;
     }
 

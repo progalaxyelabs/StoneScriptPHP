@@ -53,6 +53,17 @@ and query parameters no longer reach stdout, stderr, logs, exception messages, `
   code and must be migrated to codes.
 - `Persistence\SafeDbContext`, `Db\EngineUnavailableException`, `DbErrorMapper::sqlStateOf()`, `cli/helpers/cli-guard.php`.
 
+### Verified against a real gateway
+
+`tests/E2E` drives client 4.0 and framework 13.0 through a REAL StoneScriptDB gateway 4.8.2 in front of a REAL
+PostgreSQL 15 (`tests/E2E/run-e2e.sh`; `tests/E2E/gateway-stack.sh` brings the containers up). It covers unique / FK /
+not-null / check / bad-uuid / bad-int / missing function / missing table failures, `RAISE EXCEPTION` code-shaped,
+bracketed, sentence-shaped, value-interpolating, detail-only and smuggling shapes, uncaught child processes, and seed
+and migration failures through the real CLI. Without the stack the suite SKIPS LOUDLY (STDERR banner); with
+`STONESCRIPT_E2E_REQUIRE=1` a missing stack is a failure. Real-format findings fixed: migrations and seeders join the
+error with ` - ` (not ` | `); the gateway's trailing `SCHEMA/TABLE/COLUMN` segments carry the table for PostgreSQL-raised
+errors; the CLI now shows `sqlstate=`, `constraint=` and the failing migration file from a failed response body.
+
 ### UPGRADE from 12.x
 
 1. `composer require progalaxyelabs/stonescriptphp:^13.0` (pulls client `^4.0`).
