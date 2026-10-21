@@ -717,7 +717,7 @@ class Migrations
             pg_query($this->connection, "BEGIN");
 
             try {
-                $result = pg_query($this->connection, $sql);
+                $result = @pg_query($this->connection, $sql); // @: the E_WARNING carries the full PG message incl. DETAIL; the failure is reported via SafeDbContext below
 
                 if (!$result) {
                     throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Migration SQL failed", pg_last_error($this->connection)));
@@ -725,7 +725,7 @@ class Migrations
 
                 // Record migration
                 $insertQuery = "INSERT INTO migrations (migration, batch) VALUES ($1, $2)";
-                $insertResult = pg_query_params($this->connection, $insertQuery, [$migration, $nextBatch]);
+                $insertResult = @pg_query_params($this->connection, $insertQuery, [$migration, $nextBatch]);
 
                 if (!$insertResult) {
                     throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Failed to record migration", pg_last_error($this->connection)));

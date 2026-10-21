@@ -18,6 +18,9 @@ $rootPath = rtrim(ROOT_PATH, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
 // Load composer autoloader
 require_once $rootPath . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
+require_once __DIR__ . '/helpers/cli-guard.php';
+cli_install_guard();
+
 
 use StoneScriptPHP\Env;
 
@@ -169,7 +172,7 @@ try {
 
     // Check if email already exists
     $checkQuery = "SELECT user_id FROM users WHERE email = $1";
-    $result = pg_query_params($conn, $checkQuery, [$email]);
+    $result = @pg_query_params($conn, $checkQuery, [$email]);
 
     if (pg_num_rows($result) > 0) {
         echo "Error: User with email '$email' already exists.\n";
@@ -186,7 +189,7 @@ try {
     $insertUserQuery = "INSERT INTO users (email, display_name, password_hash, email_verified)
                        VALUES ($1, $2, $3, true)
                        RETURNING user_id";
-    $result = pg_query_params($conn, $insertUserQuery, [$email, $name, $passwordHash]);
+    $result = @pg_query_params($conn, $insertUserQuery, [$email, $name, $passwordHash]);
 
     if (!$result) {
         throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Failed to create user", pg_last_error($conn)));
@@ -196,7 +199,7 @@ try {
 
     // Assign super_admin role
     $assignRoleQuery = "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)";
-    $result = pg_query_params($conn, $assignRoleQuery, [$userId, $superAdminRoleId]);
+    $result = @pg_query_params($conn, $assignRoleQuery, [$userId, $superAdminRoleId]);
 
     if (!$result) {
         throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Failed to assign super_admin role", pg_last_error($conn)));

@@ -24,6 +24,9 @@ $rootPath = rtrim(ROOT_PATH, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
 // Load composer autoloader
 require_once $rootPath . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
+require_once __DIR__ . '/helpers/cli-guard.php';
+cli_install_guard();
+
 
 use StoneScriptPHP\Env;
 use StoneScriptPHP\Database;

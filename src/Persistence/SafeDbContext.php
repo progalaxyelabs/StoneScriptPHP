@@ -4,17 +4,22 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Persistence;
 
+use StoneScriptDB\GatewayException;
+
 /**
  * Allow-list extraction of diagnosable, VALUE-FREE facts from database error text.
  *
  * PostgreSQL error text (message, DETAIL, HINT, CONTEXT, custom `RAISE EXCEPTION` text) routinely echoes
- * customer data. Rather than trying to scrub it with regexes, everything that is printed or logged is
- * rebuilt from a closed set of identifier-shaped fields:
+ * customer data. Everything printed or logged is rebuilt from a closed set of identifier-shaped fields:
  *
- *   sqlstate, schema, table, column, constraint, function
+ *   sqlstate, schema, table, column, constraint, function, app_code
  *
- * Each captured value must itself look like a PostgreSQL identifier (or a 5-char SQLSTATE); anything else is
- * dropped. The surrounding raw text is discarded and never forwarded.
+ * Rules (shared with {@see GatewayException::parsePrimary()}):
+ *  - only the PostgreSQL PRIMARY message line is read, never DETAIL / HINT / CONTEXT;
+ *  - table / column / constraint come only from PostgreSQL's own fixed phrasings, matched against the whole line;
+ *  - `app_code` is only an anchored code-shaped token at the start of the line (see the application error code
+ *    contract on GatewayException); a free-text sentence yields nothing;
+ *  - every captured value must look like an identifier, and must not look like a secret.
  */
 final class SafeDbContext
 {
@@ -22,28 +27,36 @@ final class SafeDbContext
     public const SQLSTATE = '/^[0-9A-Z]{5}$/';
 
     /**
-     * @return array<string,string> subset of sqlstate, constraint, column, table, schema
+     * The PostgreSQL primary message inside driver-wrapped text:
+     *   `SQLSTATE[23505]: Unique violation: 7 ERROR:  msg\nDETAIL: ...`  (PDO)
+     *   `ERROR:  msg\nDETAIL: ...`                                      (pg_last_error)
+     *   `SQLSTATE[23505]: msg`                                          (bridge contract)
+     *   `msg | DETAIL: ...`                                             (gateway cause)
+     */
+    public static function primaryOf(string $raw): string
+    {
+        if (preg_match('/\bERROR:\s+(.*)/', $raw, $m) === 1) {
+            $raw = $m[1];
+        } elseif (preg_match('/^SQLSTATE\[[0-9A-Za-z]{5}\]:\s*(.*)/s', $raw, $m) === 1) {
+            $raw = $m[1];
+        }
+        return GatewayException::primaryLine($raw);
+    }
+
+    /**
+     * @return array<string,string> subset of sqlstate, constraint, column, table, function, app_code
      */
     public static function fromText(string $raw, ?string $sqlstate = null): array
     {
         $out = [];
         if ($sqlstate !== null && preg_match(self::SQLSTATE, $sqlstate) === 1) {
             $out['sqlstate'] = $sqlstate;
-        } elseif (preg_match('/SQLSTATE[\[ ]\(?([0-9A-Z]{5})\b/', $raw, $m) === 1) {
+        } elseif (preg_match('/^SQLSTATE\[([0-9A-Z]{5})\]/', $raw, $m) === 1) {
             $out['sqlstate'] = $m[1];
         }
-        $patterns = [
-            'constraint' => '/constraint "([^"\s]+)"/',
-            'column' => '/(?:null value in column|\bCOLUMN:|column) "?([A-Za-z_][A-Za-z0-9_$]*)"?/',
-            'table' => '/\bTABLE: ([A-Za-z_][A-Za-z0-9_$]*)|\brelation "([^"\s]+)"/',
-            'schema' => '/\bSCHEMA: ([A-Za-z_][A-Za-z0-9_$]*)/',
-        ];
-        foreach ($patterns as $field => $re) {
-            if (preg_match($re, $raw, $m) === 1) {
-                $v = $m[1] !== '' ? $m[1] : ($m[2] ?? '');
-                if (preg_match(self::IDENT, $v) === 1) {
-                    $out[$field] = $v;
-                }
+        foreach (GatewayException::parsePrimary(self::primaryOf($raw), $out['sqlstate'] ?? null) as $k => $v) {
+            if (!isset($out[$k])) {
+                $out[$k] = $v;
             }
         }
         return $out;
@@ -52,13 +65,7 @@ final class SafeDbContext
     /** ` [sqlstate=23505 constraint=users_email_key]` or '' */
     public static function suffix(array $ctx): string
     {
-        $parts = [];
-        foreach (['database', 'function', 'sqlstate', 'schema', 'table', 'column', 'constraint', 'correlation_id'] as $k) {
-            if (isset($ctx[$k]) && is_string($ctx[$k])) {
-                $parts[] = ($k === 'correlation_id' ? 'ref' : $k) . '=' . $ctx[$k];
-            }
-        }
-        return $parts === [] ? '' : ' [' . implode(' ', $parts) . ']';
+        return GatewayException::formatSafeSuffix($ctx);
     }
 
     /** Value-free one-liner for raw database error text, e.g. from pg_last_error(). */
@@ -68,7 +75,7 @@ final class SafeDbContext
         return $prefix . ($suffix !== '' ? $suffix : ' (details withheld)');
     }
 
-    /** Value-free description of a PDOException (SQLSTATE from errorInfo, identifiers from the text). */
+    /** Value-free description of a PDOException (SQLSTATE from errorInfo, identifiers from the primary line). */
     public static function summarizePdo(string $prefix, \PDOException $e): string
     {
         $state = is_array($e->errorInfo) && isset($e->errorInfo[0]) ? (string) $e->errorInfo[0] : null;
@@ -91,12 +98,35 @@ final class SafeDbContext
     /** Raw PostgreSQL cause carried by a gateway/transport exception, if any. In-process use ONLY, never output. */
     public static function rawCauseOf(\Throwable $e): ?string
     {
-        if ($e instanceof \StoneScriptDB\GatewayException) {
+        if ($e instanceof GatewayException) {
             return $e->getRawCauseForDebug();
         }
         if ($e instanceof \StoneScriptPHP\Db\DbTransportException) {
             return $e->getRawCauseForDebug();
         }
         return null;
+    }
+
+    /**
+     * Run a pg_* call without letting PHP emit its E_WARNING (which carries the full PostgreSQL message, DETAIL
+     * included, to stdout/stderr/logs) and return the failure as a value-free summary instead.
+     *
+     * @param callable():mixed $call
+     * @param string|null $error set to a safe summary on failure, else null
+     */
+    public static function quiet(callable $call, ?string &$error = null, string $prefix = 'Database call failed'): mixed
+    {
+        $warning = null;
+        set_error_handler(static function (int $no, string $str) use (&$warning): bool {
+            $warning = $str;
+            return true;
+        });
+        try {
+            $result = $call();
+        } finally {
+            restore_error_handler();
+        }
+        $error = ($result === false && $warning !== null) ? self::summarize($prefix, $warning) : null;
+        return $result;
     }
 }

@@ -229,6 +229,12 @@ final class DbErrorMapper
         return $e->getMessage();
     }
 
+    /** SQLSTATE of a database failure in the chain (null when unknown). Safe to log. */
+    public static function sqlStateOf(\Throwable $e): ?string
+    {
+        return self::sqlState($e);
+    }
+
     /** SQLSTATE from a PDOException in the chain, or from an embedded `SQLSTATE[xxxxx]`. */
     private static function sqlState(\Throwable $e): ?string
     {

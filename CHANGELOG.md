@@ -7,47 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [12.2.1]
+## [13.0.0]
 
-Security patch: PostgreSQL error text (message, `DETAIL`, `HINT`, `CONTEXT`, custom `RAISE EXCEPTION` text and values
-it echoes) and query parameters no longer reach stdout, stderr, logs, exception messages, `previous` chains,
-`__toString()` or uncaught-exception output. Requires `progalaxyelabs/stonescriptdb-gateway-client` ^3.1.2.
+MAJOR release: database error messages are now identifier-only. Requires `progalaxyelabs/stonescriptdb-gateway-client`
+`^4.0`. **Nothing changes for an application until it upgrades to 13.x / client 4.x.**
+
+PostgreSQL error text (message, `DETAIL`, `HINT`, `CONTEXT`, custom `RAISE EXCEPTION` text and the values it echoes)
+and query parameters no longer reach stdout, stderr, logs, exception messages, `previous` chains, `__toString()`,
+`print_r` / `var_dump` / `var_export`, `(array)` casts or uncaught-exception output.
 
 ### Security
 
 - **Allow-list, not scrubbing.** Diagnostics are rebuilt from identifier-shaped fields only (SQLSTATE, schema, table,
-  column, constraint, function, database, correlation id) by the new `Persistence\SafeDbContext`. `LogSanitizer` is now
-  documented as a last-resort backstop (it also masks international-format phone numbers) and no longer the barrier.
-- **Gateway mode:** `Database::fn()` wraps a `GatewayException` whose message, `__toString()`, dumps and
-  serialization are value-free (client 3.1.2). The raw cause is reachable in-process only via
-  `GatewayException::getRawCauseForDebug()`.
-- **Direct / pgandroid transports:** `DbTransportException::fromDriverFailure()` no longer copies the driver message
-  or chains the `PDOException` as `previous`; the message is identifier-only and the raw text is held privately
-  (`getRawCauseForDebug()`).
+  column, constraint, function, database, application error code, correlation id) by `Persistence\SafeDbContext`,
+  which reads ONLY the PostgreSQL primary message line (never DETAIL/HINT/CONTEXT) and takes table/column/constraint
+  only from PostgreSQL's own fixed phrasings. `LogSanitizer` is a last-resort backstop (it also masks international
+  phone numbers), not the barrier.
+- **Gateway mode:** `Database::fn()` chains a value-free `GatewayException` (client 4.0). The raw cause is not stored on
+  the exception object; `GatewayException::getRawCauseForDebug()` is the only way to read it (debug only).
+- **Direct / pgandroid transports:** `DbTransportException::fromDriverFailure()` never copies driver text into the
+  message (a connection failure gets a fixed sentence plus SQLSTATE/reason; a query failure gets identifiers), does not
+  chain the `PDOException`, and keeps the raw text off the object (`getRawCauseForDebug()`). pgandroid classifies by
+  the bridge's error TYPE (`Db\EngineUnavailableException`, new) or its SQLSTATE; an untyped bridge Throwable with no
+  SQLSTATE is still a connection failure (pinned contract), with no driver text in the message.
+  `DbTransportException::__unserialize()` now restores `isConnectionFailure`.
 - **Uncaught exceptions:** `ExceptionHandler::register()` sets `zend.exception_ignore_args=1`; `handleException()`
-  cannot throw (a failure inside it falls back to a fixed, value-free line instead of PHP printing the raw chain); a
-  fatal "Uncaught ..." error message is logged as a fixed string. `Logger::log_php_exception()` logs a
-  `LogSanitizer::describe()` chain and an argument-free trace (it used `getTraceAsString()`, which embeds argument
-  values).
-- **Parameters:** `#[\SensitiveParameter]` on `Database::fn()/fnTyped()` and every transport's `callFunction()` so
-  query values never appear in stack traces.
-- **CLI:** gateway commands (`gateway:migrate-*`, `register-*`, `provision-*`, `list-schemas`, `list-databases`,
-  seeds, `migrate`, `tenant:*`, `create:admin`) print a gateway response body through an allow-list renderer
-  (`gw_safe_body()`), per-database migration failures as identifiers plus the failing file/function name, and
-  `pg_last_error()` / `PDOException` text through `SafeDbContext`.
+  cannot throw (a failure inside it falls back to a fixed, value-free line); a fatal "Uncaught ..." message is logged as
+  a fixed string; `Logger::log_php_exception()` logs `LogSanitizer::describe()` and an argument-free trace.
+- **Parameters:** `#[\SensitiveParameter]` on `Database::fn()/fnTyped()` and every transport's `callFunction()`.
+- **CLI:** gateway response bodies go through an allow-list renderer (`gw_safe_body()`); per-database migration failures
+  show identifiers plus the failing file/function; `pg_query()` E_WARNINGs (full PostgreSQL text) are suppressed at the
+  user-SQL call sites (`Migrations`, `seed`, `create:admin`, `validate-schema-contract`) and every DB-touching CLI script
+  installs `cli/helpers/cli-guard.php`, which turns any `pg_*` warning and any uncaught exception into a value-free
+  line even when the framework bootstrap is not loaded.
+- `PostgresRefreshTokenStore::ensureSchema()` decides "schema missing" from the SQLSTATE (42883 / 42P01 / 42703) or
+  `DbErrorMapper::causeContains()`, no longer by regex on the exception message.
 
-### Changed (breaking for code that string-matches error text)
+### Added
 
-- Exception messages from `Database::fn()` no longer contain PostgreSQL text. Use `DbErrorMapper::causeContains()`,
-  `GatewayException::getConstraint()/getColumn()/getSqlState()`, or (debug only) `getRawCauseForDebug()`.
-  `GatewayException::getCause()` still works but is deprecated and returns the raw text: never log it.
-- `DbTransportException` no longer has the `PDOException` as `previous`; read `getSqlState()` /
-  `getSafeContext()` instead.
-- `LogSanitizer::describe()` no longer appends `[gateway cause: ...]`.
-- A migration/seed failure at the CLI shows `error [table=.. column=..]` rather than the PostgreSQL sentence. Run the
-  failing statement in `psql` to see the full text.
-- Gateway servers do not yet send `sqlstate`/`constraint`/`correlation_id` fields; until they do, constraint, column,
-  table and schema names are lifted from the cause text (shape-validated) and the client generates the `ref=` id.
+- **Application error code contract.** Signal business errors with `RAISE EXCEPTION '<code>'` or
+  `'<code>: <free text>'`. The code is a token at the very start of the primary message
+  (`[A-Za-z][A-Za-z0-9_.-]{0,63}` followed by `:` or end of line) or a bracketed tag (`[ER102]`, `[public:code:status]`).
+  Exposed as `GatewayException::getAppErrorCode()` / `DbTransportException::getAppErrorCode()` and `code=<token>` in the
+  message. Only the code is surfaced; free text is debug-only. Sentence-style RAISEs ("Insufficient stock ...") yield no
+  code and must be migrated to codes.
+- `Persistence\SafeDbContext`, `Db\EngineUnavailableException`, `DbErrorMapper::sqlStateOf()`, `cli/helpers/cli-guard.php`.
+
+### UPGRADE from 12.x
+
+1. `composer require progalaxyelabs/stonescriptphp:^13.0` (pulls client `^4.0`).
+2. Replace message-text matching (`str_contains($e->getMessage(), 'duplicate key')`, `'not found'`, ...) with
+   `getAppErrorCode()`, `getSqlState()`, `getConstraint()`, `DbErrorMapper::causeContains()` (in-process) or
+   `getRawCauseForDebug()` (debug only, never log).
+3. Change sentence-style `RAISE EXCEPTION 'Insufficient stock for %', x` to `RAISE EXCEPTION 'insufficient_stock: item %', x`
+   and branch on the code. `DbErrorMapper` and `[public:code:status]` markers keep working unchanged.
+4. CLI: a migration/seed failure now prints `error [table=.. column=..]`; run the statement in `psql` for the full text.
+5. `GatewayException::getCause()` is deprecated (still returns raw text). `DbTransportException` no longer has the
+   `PDOException` as `previous`; `LogSanitizer::describe()` no longer appends `[gateway cause: ...]`.
+6. Gateway servers do not yet send structured `sqlstate` / `app_code` / `constraint` / `correlation_id`; until they do
+   (tracked separately) the client parses the anchored primary line only, and generates a `client_ref=` id (not a
+   gateway id) when none is sent.
 
 ## [12.2.0]
 

@@ -78,7 +78,10 @@ class PgandroidTransportTest extends TestCase
             $this->fail('Expected DbTransportException');
         } catch (DbTransportException $e) {
             $this->assertTrue($e->isConnectionFailure());
-            $this->assertStringContainsString('native bridge unreachable', $e->getMessage());
+            // Driver text never enters the message: a fixed sentence classifies the failure.
+            $this->assertStringNotContainsString('native bridge unreachable', $e->getMessage());
+            $this->assertStringContainsString('database unavailable', $e->getMessage());
+            $this->assertSame('native bridge unreachable', $e->getRawCauseForDebug());
         }
     }
 
@@ -231,7 +234,9 @@ class PgandroidTransportTest extends TestCase
             $this->fail('Expected DbTransportException');
         } catch (DbTransportException $e) {
             $this->assertTrue($e->isConnectionFailure());
-            $this->assertStringContainsString('androidserver_db_exec() is not registered', $e->getMessage());
+            $this->assertStringNotContainsString('androidserver_db_exec', $e->getMessage());
+            $this->assertStringContainsString('reason=bridge_not_registered', $e->getMessage());
+            $this->assertStringContainsString('androidserver_db_exec() is not registered', (string) $e->getRawCauseForDebug());
         }
     }
 

@@ -19,10 +19,16 @@ use Throwable;
  */
 class DbTransportException extends \Exception
 {
+    /** @var \WeakMap<DbTransportException,string>|null raw driver text, kept OFF the exception object */
+    private static ?\WeakMap $rawCauses = null;
+
+    /** @var array<string,string> allow-listed identifier-only diagnostics */
+    private array $safe = [];
+
     /**
      * @param string $message
      * @param bool $isConnectionFailure True when the underlying database is
-     *   unreachable (connection refused/lost/timed out) — the direct/
+     *   unreachable (connection refused/lost/timed out) - the direct/
      *   pgandroid analogue of the gateway's `connection_failed` error code.
      *   False for a query-level failure (bad SQL, business-rule exception,
      *   constraint violation) that reached a live connection.
@@ -38,21 +44,17 @@ class DbTransportException extends \Exception
         parent::__construct($message, $code, $previous);
     }
 
-    /** Raw database/engine error text. Debug and in-process classification ONLY; never output or log it. */
-    private ?string $rawCause = null;
-
-    /** @var array<string,string> allow-listed identifier-only diagnostics */
-    private array $safe = [];
-
     public function isConnectionFailure(): bool
     {
         return $this->isConnectionFailure;
     }
 
     /**
-     * Wrap a raw driver failure WITHOUT letting its text escape: the message is rebuilt from allow-listed
-     * identifiers (SQLSTATE, constraint, column, table, schema), the driver exception is NOT chained as
-     * `previous` (its message and trace would print the raw text), and the raw text is kept privately.
+     * Wrap a raw driver failure WITHOUT letting its text escape. The driver message never enters this exception's
+     * message: a connection failure gets a fixed sentence (plus SQLSTATE / reason), a query failure gets
+     * allow-listed identifiers (SQLSTATE, constraint, column, table, application error code) parsed from the
+     * PostgreSQL primary line only. The driver exception is NOT chained as `previous`, and the raw text is kept in
+     * a weak registry (not a property) reachable only via {@see getRawCauseForDebug()}.
      */
     public static function fromDriverFailure(string $prefix, Throwable $driver, bool $isConnectionFailure): self
     {
@@ -60,26 +62,43 @@ class DbTransportException extends \Exception
         $state = $driver instanceof \PDOException && is_array($driver->errorInfo) && isset($driver->errorInfo[0])
             ? (string) $driver->errorInfo[0] : null;
         $safe = \StoneScriptPHP\Persistence\SafeDbContext::fromText($raw, $state);
+        if ($driver instanceof EngineUnavailableException) {
+            $safe['reason'] = $driver->reason();
+        }
+
         if ($isConnectionFailure) {
-            // Connection-level failures (refused, lost, engine not initialised) carry no row values, and their text
-            // is what an operator needs. It still goes through the best-effort scrubber.
-            $text = \StoneScriptPHP\Persistence\LogSanitizer::forLog($raw);
-            $e = new self($prefix . ': ' . $text, true);
+            $head = $prefix . ': database unavailable';
+            $rest = array_intersect_key($safe, ['sqlstate' => 1, 'reason' => 1]);
         } else {
-            // Query-level failures: rebuilt from allow-listed identifiers only. `SQLSTATE[xxxxx]` keeps its
-            // historical position so message-based SQLSTATE detection keeps working.
-            $rest = $safe;
+            // `SQLSTATE[xxxxx]` keeps its historical position so message-based detection keeps working.
             $head = $prefix;
+            $rest = $safe;
             if (isset($safe['sqlstate'])) {
                 $head .= ': SQLSTATE[' . $safe['sqlstate'] . ']';
                 unset($rest['sqlstate']);
             }
-            $suffix = \StoneScriptPHP\Persistence\SafeDbContext::suffix($rest);
-            $e = new self($head . ($suffix !== '' ? $suffix : (isset($safe['sqlstate']) ? '' : ' (details withheld)')), false);
         }
-        $e->rawCause = $raw;
-        $e->safe = $safe;
+        $suffix = self::suffixOf($rest);
+        $e = new self($head . ($suffix !== '' ? $suffix : ($isConnectionFailure || isset($safe['sqlstate']) ? '' : ' (details withheld)')), $isConnectionFailure);
+        self::$rawCauses ??= new \WeakMap();
+        self::$rawCauses[$e] = $raw;
+        $e->safe = $isConnectionFailure ? array_intersect_key($safe, ['sqlstate' => 1, 'reason' => 1]) : $safe;
         return $e;
+    }
+
+    /** @param array<string,string> $ctx */
+    private static function suffixOf(array $ctx): string
+    {
+        $parts = [];
+        if (isset($ctx['reason'])) {
+            $parts[] = 'reason=' . $ctx['reason'];
+            unset($ctx['reason']);
+        }
+        $std = \StoneScriptDB\GatewayException::formatSafeSuffix($ctx);
+        if ($std !== '') {
+            $parts[] = trim($std, ' []');
+        }
+        return $parts === [] ? '' : ' [' . implode(' ', $parts) . ']';
     }
 
     /** @return array<string,string> */
@@ -93,10 +112,16 @@ class DbTransportException extends \Exception
         return $this->safe['sqlstate'] ?? null;
     }
 
+    /** Application error code a function raised (see GatewayException), else null. Safe to log. */
+    public function getAppErrorCode(): ?string
+    {
+        return $this->safe['app_code'] ?? null;
+    }
+
     /** DEBUG-ONLY raw driver text (may contain customer data). Never log or print. */
     public function getRawCauseForDebug(): ?string
     {
-        return $this->rawCause;
+        return self::$rawCauses[$this] ?? null;
     }
 
     public function __toString(): string
@@ -130,6 +155,8 @@ class DbTransportException extends \Exception
     {
         $this->message = (string) ($data['message'] ?? '');
         $this->code = (int) ($data['code'] ?? 0);
+        // Promoted readonly property: uninitialised on an unserialised object, so it can be set exactly once here.
+        $this->isConnectionFailure = (bool) ($data['conn'] ?? false);
         $this->safe = is_array($data['safe'] ?? null) ? $data['safe'] : [];
     }
 }

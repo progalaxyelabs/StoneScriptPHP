@@ -41,6 +41,9 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/generate-common.php'; // provides detect_root_path()
+require_once __DIR__ . '/helpers/cli-guard.php';
+cli_install_guard();
+
 
 if (!defined('ROOT_PATH')) {
     define('ROOT_PATH', detect_root_path());
@@ -161,7 +164,7 @@ function fetch_live_function_signature($conn, string $fnName): array|string
           AND n.nspname NOT IN ('pg_catalog', 'information_schema')
         ORDER BY p.oid DESC
     ";
-    $result = pg_query($conn, $sql);
+    $result = @pg_query($conn, $sql);
     if ($result === false) {
         return \StoneScriptPHP\Persistence\SafeDbContext::summarize('query failed', pg_last_error($conn));
     }

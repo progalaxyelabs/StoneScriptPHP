@@ -14,6 +14,9 @@
  */
 
 require_once __DIR__ . '/generate-common.php';
+require_once __DIR__ . '/helpers/cli-guard.php';
+cli_install_guard();
+
 
 use StoneScriptPHP\Tenancy\TenantProvisioner;
 use StoneScriptPHP\Tenancy\Tenant;

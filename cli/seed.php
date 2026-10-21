@@ -21,6 +21,9 @@ if (!defined('SRC_PATH')) {
 
 // Load composer autoloader
 require_once $rootPath . 'vendor' . DIRECTORY_SEPARATOR . 'autoload.php';
+require_once __DIR__ . '/helpers/cli-guard.php';
+cli_install_guard();
+
 
 use StoneScriptPHP\Env;
 
@@ -86,7 +89,7 @@ function runSeeder($conn, $seederPath, $seederName) {
     pg_query($conn, "BEGIN");
 
     try {
-        $result = pg_query($conn, $sql);
+        $result = @pg_query($conn, $sql);
 
         if (!$result) {
             throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Seeder SQL failed", pg_last_error($conn)));

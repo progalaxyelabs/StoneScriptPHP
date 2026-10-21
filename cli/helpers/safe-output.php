@@ -27,7 +27,7 @@ if (!function_exists('gw_safe_body')) {
         }
         $parts = [];
         $ident = '/^[A-Za-z0-9_.\-:]{1,80}$/';
-        foreach (['error', 'status', 'job_id', 'database', 'database_name', 'function', 'migration', 'sqlstate', 'schema', 'table', 'column', 'constraint', 'correlation_id', 'request_id'] as $k) {
+        foreach (['error', 'status', 'job_id', 'database', 'database_name', 'function', 'migration', 'sqlstate', 'app_code', 'schema', 'table', 'column', 'constraint', 'correlation_id', 'request_id'] as $k) {
             if (isset($d[$k]) && is_string($d[$k]) && preg_match($ident, $d[$k]) === 1) {
                 $parts[] = $k . '=' . $d[$k];
             }

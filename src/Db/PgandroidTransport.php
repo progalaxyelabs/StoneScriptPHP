@@ -89,7 +89,8 @@ final class PgandroidTransport implements DbTransport
     {
         $this->bridge = $bridge ?? function (string $fn, string $paramsJson): string {
             if (!function_exists('androidserver_db_exec')) {
-                throw new \Exception(
+                throw new EngineUnavailableException(
+                    'bridge_not_registered',
                     "PgandroidTransport: androidserver_db_exec() is not registered. " .
                     "DB_MODE=pgandroid is only valid inside the android-server C++ embed host, " .
                     "which registers this bridge function at startup."
@@ -166,6 +167,12 @@ final class PgandroidTransport implements DbTransport
      */
     private function isConnectionFailure(Throwable $e): bool
     {
+        // Classified by the bridge's error TYPE first: an EngineUnavailableException is an explicit
+        // "engine unusable" signal and needs no message inspection.
+        if ($e instanceof EngineUnavailableException) {
+            return true;
+        }
+
         $sqlstate = $this->extractSqlstate($e->getMessage());
 
         if ($sqlstate === null) {

@@ -86,18 +86,32 @@ final class NoPgDetailLeakTest extends TestCase
     {
         $this->startStub();
         foreach (['framework', 'bare'] as $mode) {
+            $logDir = sys_get_temp_dir() . '/nopg-logs-' . $mode . '-' . bin2hex(random_bytes(3));
+            mkdir($logDir, 0775, true);
             [$out, $err, $code] = $this->runChild(
-                [__DIR__ . '/../Fixtures/uncaught_db_failure.php', "http://127.0.0.1:{$this->port}", $mode]
+                [__DIR__ . '/../Fixtures/uncaught_db_failure.php', "http://127.0.0.1:{$this->port}", $mode],
+                ['STONESCRIPTPHP_LOG_DIR' => $logDir]
             );
             $this->assertNotSame(0, $code, "$mode: the call must fail");
             $this->assertNoSentinel($out, "$mode stdout");
             $this->assertNoSentinel($err, "$mode stderr");
-            // diagnosable: still names the failing function / constraint somewhere (stdout or stderr)
-            $combined = $out . $err;
-            $this->assertTrue(
-                str_contains($combined, 'users_email_key') || str_contains($combined, 'create_user') || $mode === 'framework',
-                "$mode: identifiers should remain visible"
-            );
+
+            $logs = '';
+            foreach (glob($logDir . '/*') ?: [] as $f) {
+                $logs .= (string) file_get_contents($f);
+            }
+            if ($mode === 'framework') {
+                // the handler really ran and really wrote a log: assert on it, and on its identifiers
+                $this->assertNotSame('', $logs, 'framework handler must write a log file');
+                $this->assertNoSentinel($logs, 'framework log file');
+                $this->assertStringContainsString('constraint=users_email_key', $logs);
+                $this->assertStringContainsString('function=create_user', $logs);
+                $this->assertStringContainsString('"correlation_id"', $logs . $out);
+            } else {
+                // bare PHP prints the value-free chain itself: identifiers must be visible there
+                $this->assertStringContainsString('constraint=users_email_key', $out . $err);
+                $this->assertStringContainsString('function=create_user', $out . $err);
+            }
         }
     }
 
@@ -210,5 +224,173 @@ final class NoPgDetailLeakTest extends TestCase
         $this->assertSame('1', ini_get('zend.exception_ignore_args'));
         restore_exception_handler();
         restore_error_handler();
+    }
+
+    public function testCliGuardNeutralisesPgWarningsAndUncaughtPdo(): void
+    {
+        foreach (['warning', 'uncaught'] as $scenario) {
+            [$out, $err, $code] = $this->runChild([__DIR__ . '/../Fixtures/cli_guard_probe.php', $scenario]);
+            $this->assertNoSentinel($out, "$scenario stdout");
+            $this->assertNoSentinel($err, "$scenario stderr");
+            $this->assertStringNotContainsString('sentineluser', $out . $err);
+            $this->assertStringNotContainsString('jane_sentinel_db', $out . $err);
+            if ($scenario === 'uncaught') {
+                $this->assertSame(1, $code);
+                $this->assertStringContainsString('sqlstate=23505', $err);
+                $this->assertStringContainsString('constraint=users_email_key', $err);
+            } else {
+                $this->assertStringContainsString('Database warning in pg_query()', $err);
+                $this->assertStringContainsString('constraint=users_email_key', $err);
+            }
+        }
+    }
+
+    public function testQuietWrapperTurnsPgWarningIntoSafeSummary(): void
+    {
+        $r = SafeDbContext::quiet(static function () {
+            trigger_error("pg_query(): Query failed: ERROR:  duplicate key value violates unique constraint \"users_email_key\"\nDETAIL:  Key (email)=(jane.sentinel@example.test) already exists.", E_USER_WARNING);
+            return false;
+        }, $error, 'Seeder SQL failed');
+        $this->assertFalse($r);
+        $this->assertNoSentinel((string) $error, 'quiet');
+        $this->assertStringContainsString('constraint=users_email_key', (string) $error);
+    }
+
+    public function testPgandroidBridgeWithoutSqlstateKeepsDriverTextOutOfTheMessage(): void
+    {
+        $t = new \StoneScriptPHP\Db\PgandroidTransport(static function (): string {
+            throw new \RuntimeException('engine said: password for jane.sentinel@example.test rejected; +919876500123');
+        });
+        try {
+            $t->callFunction('f', []);
+            $this->fail('expected');
+        } catch (DbTransportException $e) {
+            $this->assertTrue($e->isConnectionFailure());
+            foreach ([$e->getMessage(), (string) $e, print_r($e, true), serialize($e), LogSanitizer::describe($e)] as $x) {
+                $this->assertNoSentinel($x, 'pgandroid');
+            }
+            $this->assertStringContainsString('database unavailable', $e->getMessage());
+        }
+        // typed signal needs no message inspection
+        $t = new \StoneScriptPHP\Db\PgandroidTransport(static function (): string {
+            throw new \StoneScriptPHP\Db\EngineUnavailableException('engine_not_initialized', 'jane.sentinel@example.test');
+        });
+        try {
+            $t->callFunction('f', []);
+            $this->fail('expected');
+        } catch (DbTransportException $e) {
+            $this->assertTrue($e->isConnectionFailure());
+            $this->assertStringContainsString('reason=engine_not_initialized', $e->getMessage());
+            $this->assertNoSentinel($e->getMessage(), 'typed');
+        }
+    }
+
+    public function testRawCauseNotOnTheTransportExceptionObject(): void
+    {
+        $pdo = new \PDOException('SQLSTATE[23505]: x ERROR:  duplicate key value violates unique constraint "users_email_key"' . "\nDETAIL:  Key (email)=(jane.sentinel@example.test) already exists.");
+        $e = DbTransportException::fromDriverFailure('Direct database function call failed', $pdo, false);
+        $this->assertNotNull($e->getRawCauseForDebug());
+        $this->assertNoSentinel(var_export($e, true), 'var_export');
+        $this->assertNoSentinel(print_r((array) $e, true), '(array)');
+        foreach ((new \ReflectionObject($e))->getProperties() as $p) {
+            if (!$p->isStatic()) {
+                $p->setAccessible(true);
+                $this->assertNoSentinel(print_r($p->getValue($e), true), $p->getName());
+            }
+        }
+    }
+
+    public function testUnserializeRestoresConnectionFailureFlag(): void
+    {
+        $e = DbTransportException::fromDriverFailure('x', new \RuntimeException('down'), true);
+        $u = unserialize(serialize($e));
+        $this->assertTrue($u->isConnectionFailure());
+        $this->assertNull($u->getRawCauseForDebug());
+        $e2 = DbTransportException::fromDriverFailure('x', new \RuntimeException('SQLSTATE[23505]: dup'), false);
+        $this->assertFalse(unserialize(serialize($e2))->isConnectionFailure());
+    }
+
+    public function testRefreshTokenEnsureSchemaDecidesFromSqlstateNotMessageText(): void
+    {
+        $store = new \StoneScriptPHP\Auth\RefreshTokens\PostgresRefreshTokenStore();
+        // real GatewayException, as a gateway would produce it for a missing function
+        $missing = new GatewayException('Gateway returned HTTP 500: query_failed', 500, null, [
+            'error' => 'query_failed',
+            'cause' => 'function auth_rt_inspect(text, integer) does not exist | HINT: jane.sentinel@example.test',
+        ]);
+        \StoneScriptPHP\Database::fake(['auth_rt_inspect' => static function () use ($missing) { throw $missing; }]);
+        try {
+            $store::resetVerification();
+            try {
+                $store->ensureSchema();
+                $this->fail('expected');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString('schema is missing', $e->getMessage());
+                $this->assertNoSentinel($e->getMessage() . (string) $e, 'missing schema');
+            }
+            // a different failure (a business error, not a missing schema) must NOT be reported as missing schema
+            $other = new GatewayException('Gateway returned HTTP 500: query_failed', 500, null, [
+                'error' => 'query_failed', 'cause' => 'deadlock detected | DETAIL: jane.sentinel@example.test',
+            ]);
+            \StoneScriptPHP\Database::fake(['auth_rt_inspect' => static function () use ($other) { throw $other; }]);
+            $store::resetVerification();
+            try {
+                $store->ensureSchema();
+                $this->fail('expected');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString('unavailable', $e->getMessage());
+                $this->assertNoSentinel($e->getMessage() . (string) $e, 'outage');
+            }
+        } finally {
+            \StoneScriptPHP\Database::clearFakeMode();
+            $store::resetVerification();
+        }
+    }
+
+    /** @return array<string,array{0:string,1:?string,2:?string}> raw driver text, expected app_code, expected sqlstate */
+    public static function appCodeProvider(): array
+    {
+        return [
+            'bridge code' => ['SQLSTATE[P0001]: not_found', 'not_found', 'P0001'],
+            'bridge code + text' => ['SQLSTATE[P0001]: slug_taken: slug acme is taken', 'slug_taken:', 'P0001'],
+            'pdo code' => ["SQLSTATE[P0001]: Raise exception: 7 ERROR:  RATE_LIMITED\nCONTEXT:  PL/pgSQL function f() line 3", 'RATE_LIMITED', 'P0001'],
+            'bracket tag' => ["ERROR:  [ER102] Stock short\nDETAIL: x", '[ER102]', null],
+            'sentence' => ["SQLSTATE[P0001]: Insufficient stock for item", null, 'P0001'],
+            'value sentence' => ["ERROR:  User +919876500123 exists", null, null],
+            'code only in detail' => ["ERROR:  Something failed\nDETAIL:  not_found", null, null],
+            'code only in hint' => ["SQLSTATE[P0001]: Something failed\nHINT:  slug_taken", null, 'P0001'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('appCodeProvider')]
+    public function testAppErrorCodeExtraction(string $raw, ?string $code, ?string $state): void
+    {
+        $ctx = SafeDbContext::fromText($raw);
+        $this->assertSame($code, $ctx['app_code'] ?? null);
+        $this->assertSame($state, $ctx['sqlstate'] ?? null);
+        $e = DbTransportException::fromDriverFailure('Direct database function call failed', new \RuntimeException($raw), false);
+        $this->assertSame($code, $e->getAppErrorCode());
+        if ($code !== null) {
+            $this->assertStringContainsString('code=' . $code, $e->getMessage());
+        }
+        $this->assertNoSentinel($e->getMessage(), 'app code message');
+    }
+
+    public function testSmugglingThroughDriverTextIsNotLifted(): void
+    {
+        $cases = [
+            "SQLSTATE[23505]: x ERROR:  duplicate key value violates unique constraint \"users_name_key\"\nDETAIL:  Key (name)=(Rahul column Sharma) already exists.",
+            "SQLSTATE[P0001]: Raise exception: 7 ERROR:  Duplicate for constraint \"smuggled_ident\"",
+            "SQLSTATE[P0001]: Order for column \"smuggled_col\" is invalid",
+            "ERROR:  oops | TABLE: smuggled_tbl | COLUMN: smuggled_col",
+            "ERROR:  x\nDETAIL:  null value in column \"smuggled_col\" violates not-null constraint",
+        ];
+        foreach ($cases as $raw) {
+            $e = DbTransportException::fromDriverFailure('failed', new \RuntimeException($raw), false);
+            $all = $e->getMessage() . json_encode($e->getSafeContext());
+            foreach (['Sharma', 'Rahul', 'smuggled_ident', 'smuggled_col', 'smuggled_tbl'] as $s) {
+                $this->assertStringNotContainsString($s, $all, "leaked $s from: $raw");
+            }
+        }
     }
 }

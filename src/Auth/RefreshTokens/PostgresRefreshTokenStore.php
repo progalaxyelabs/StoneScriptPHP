@@ -57,13 +57,18 @@ final class PostgresRefreshTokenStore implements RotatingRefreshTokenStore
         try {
             self::call('auth_rt_inspect', [str_repeat('0', 64), 0]);
         } catch (\Throwable $e) {
-            if (preg_match('/does not exist|undefined (function|table)|no such (function|table)/i', $e->getMessage()) !== 1) {
+            // Missing schema = undefined function (42883) / undefined table (42P01) / undefined column (42703).
+            // Decided from the SQLSTATE (gateway-supplied or inferred from PostgreSQL's fixed phrasing) and, for
+            // transports that give no SQLSTATE, the in-process raw cause. Never from the exception message text.
+            $missing = in_array(\StoneScriptPHP\Persistence\DbErrorMapper::sqlStateOf($e), ['42883', '42P01', '42703'], true)
+                || \StoneScriptPHP\Persistence\DbErrorMapper::causeContains($e, 'does not exist');
+            if (!$missing) {
                 // a database outage is not a missing schema: do not mislead the operator, and do not cache a verdict
-                throw new \RuntimeException('Refresh-token store unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()), 0, $e);
+                throw new \RuntimeException('Refresh-token store unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e), 0, $e);
             }
             $msg = 'Refresh-token schema is missing or unusable (table auth_refresh_tokens / functions auth_rt_*). '
                 . 'Run `php stone gateway:migrate-vendor-main --only=RefreshTokens` BEFORE enabling REFRESH_TOKEN_STORE=postgres. Cause: '
-                . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage());
+                . \StoneScriptPHP\Persistence\LogSanitizer::describe($e);
             try {
                 log_critical($msg);
             } catch (\Throwable) {
