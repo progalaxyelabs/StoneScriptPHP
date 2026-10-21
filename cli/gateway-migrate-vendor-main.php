@@ -58,7 +58,7 @@ require_once __DIR__ . '/helpers/vendor-schema-sync.php';
 try {
     $parsedArgs = ssp_parse_vendor_main_args($_SERVER["argv"] ?? $argv);
 } catch (InvalidArgumentException $e) {
-    fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
+    fwrite(STDERR, 'ERROR: ' . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
     exit(1);
 }
 $onlyFeatures = $parsedArgs['only'];
@@ -103,7 +103,7 @@ if ($onlyFeatures !== []) {
     try {
         $sel = ssp_materialize_selected_vendor_schema(ROOT_PATH . 'src/postgresql', 'vendor-selected', $onlyFeatures);
     } catch (RuntimeException $e) {
-        fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
+        fwrite(STDERR, 'ERROR: ' . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
     register_shutdown_function(static function (): void {

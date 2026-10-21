@@ -7,6 +7,7 @@
  */
 
 require_once __DIR__ . '/cli-env.php';
+require_once __DIR__ . '/safe-output.php';
 require_once __DIR__ . '/schema-archive-builder.php';
 
 /**
@@ -343,7 +344,7 @@ function stepProvisionPlatformToken(string $gatewayUrl, string $platformId, ?str
         $token = $response['token'] ?? null;
         if (!$token) {
             fwrite(STDERR, "ERROR: Gateway returned success but no 'token' field in response.\n");
-            fwrite(STDERR, "  Response: {$resp['body']}\n");
+            fwrite(STDERR, "  Response: " . gw_safe_body($resp['body']) . "\n");
             exit(1);
         }
         if (!$quiet) {
@@ -361,7 +362,7 @@ function stepProvisionPlatformToken(string $gatewayUrl, string $platformId, ?str
 
     fwrite(STDERR, "ERROR: Failed to provision platform token (HTTP {$resp['code']})\n");
     if ($resp['body']) {
-        fwrite(STDERR, "  {$resp['body']}\n");
+        fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
     }
     exit(1);
 }
@@ -506,7 +507,7 @@ function stepRegisterPlatform(string $gatewayUrl, string $platformId, bool $quie
         }
     } else {
         fwrite(STDERR, "ERROR: Failed to register platform (HTTP {$resp['code']})\n");
-        if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+        if ($resp['body']) fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
         exit(1);
     }
 }
@@ -554,7 +555,7 @@ function stepUploadSchema(string $gatewayUrl, string $platformId, string $schema
         }
     } else {
         fwrite(STDERR, "ERROR: Failed to upload schema (HTTP {$resp['code']})\n");
-        if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+        if ($resp['body']) fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
         exit(1);
     }
 }
@@ -625,7 +626,7 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
             } else {
                 if (!$quiet) {
                     echo "  Failed (HTTP {$resp['code']})\n";
-                    if ($resp['body']) echo "  {$resp['body']}\n";
+                    if ($resp['body']) echo "  " . gw_safe_body($resp['body']) . "\n";
                 }
             }
 
@@ -734,7 +735,7 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
             } else {
                 if (!$quiet) {
                     echo "  Failed (HTTP {$resp['code']})\n";
-                    if ($resp['body']) echo "  {$resp['body']}\n";
+                    if ($resp['body']) echo "  " . gw_safe_body($resp['body']) . "\n";
                 }
             }
 
@@ -851,7 +852,7 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
         $jobId = $conflictResponse['job_id'] ?? null;
         if (!$jobId) {
             fwrite(STDERR, "ERROR: Gateway returned 409 but no job_id in response body\n");
-            if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+            if ($resp['body']) fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
             exit(1);
         }
         if (!$quiet) {
@@ -863,7 +864,7 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
 
     if ($resp['code'] !== 202) {
         fwrite(STDERR, "ERROR: Unexpected HTTP {$resp['code']} from POST /v2/migrate-all\n");
-        if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+        if ($resp['body']) fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
         exit(1);
     }
 
@@ -875,7 +876,7 @@ function stepMigrateAllDatabases(string $gatewayUrl, string $platformId, string 
 
     if (!$jobId) {
         fwrite(STDERR, "ERROR: Gateway returned 202 but no job_id in response body\n");
-        if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+        if ($resp['body']) fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
         exit(1);
     }
 
@@ -934,7 +935,7 @@ function gatewayInitiateMigrateAll(string $gatewayUrl, array $body, ?string $pla
 
         // Exhausted retries.
         fwrite(STDERR, "ERROR: Failed to initiate migrate-all after {$attempt} attempt(s) (HTTP {$resp['code']})\n");
-        if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+        if ($resp['body']) fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
         exit(1);
     }
 }
@@ -1008,7 +1009,7 @@ function gatewayPollMigrateAllJob(string $gatewayUrl, string $jobId, string $pla
 
         if ($resp['code'] !== 200) {
             fwrite(STDERR, "ERROR: Unexpected HTTP {$resp['code']} while polling job {$jobId}\n");
-            if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+            if ($resp['body']) fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
             exit(1);
         }
 
@@ -1047,7 +1048,7 @@ function gatewayPollMigrateAllJob(string $gatewayUrl, string $jobId, string $pla
                 $reResp = gatewayInitiateMigrateAll($gatewayUrl, $initiateBody, $platformToken, 3, 5, $quiet);
                 if ($reResp['code'] !== 202) {
                     fwrite(STDERR, "ERROR: Re-initiate after interrupt returned HTTP {$reResp['code']}\n");
-                    if ($reResp['body']) fwrite(STDERR, "  {$reResp['body']}\n");
+                    if ($reResp['body']) fwrite(STDERR, "  " . gw_safe_body($reResp['body']) . "\n");
                     exit(1);
                 }
                 $reInit = json_decode($reResp['body'], true) ?? [];
@@ -1155,7 +1156,7 @@ function printMigrateAllSummary(array $response, bool $quiet): void
         echo "\n  Failed databases:\n";
         foreach ($failedDbs as $r) {
             $dbName = $r['database'] ?? 'unknown';
-            $err    = $r['error'] ?? 'no error detail';
+            $err    = gw_safe_error_text($r['error'] ?? null);
             echo "    - {$dbName}: {$err}\n";
         }
     }
@@ -1181,11 +1182,11 @@ function checkMigrateAllFailures(array $response, bool $quiet): void
     $failedDbs = [];
     foreach ($results as $r) {
         if (($r['status'] ?? '') !== 'completed') {
-            $failedDbs[] = ($r['database'] ?? 'unknown') . ': ' . ($r['error'] ?? 'no error detail');
+            $failedDbs[] = ($r['database'] ?? 'unknown') . ': ' . gw_safe_error_text($r['error'] ?? null);
         }
     }
 
-    $errorMsg = $response['error'] ?? null;
+    $errorMsg = isset($response['error']) ? gw_safe_error_text($response['error']) : null;
 
     fwrite(STDERR, "\nERROR: migrate-all finished with status '{$status}'\n");
     if ($errorMsg) {
@@ -1273,7 +1274,7 @@ function stepProvisionAudit(string $gatewayUrl, string $platformId, ?string $adm
         $dbName = $response['database_name'] ?? null;
         if (!$dbName) {
             fwrite(STDERR, "ERROR: Gateway returned success but no 'database_name' field in response.\n");
-            fwrite(STDERR, "  Response: {$resp['body']}\n");
+            fwrite(STDERR, "  Response: " . gw_safe_body($resp['body']) . "\n");
             exit(1);
         }
         if (!$quiet) {
@@ -1285,7 +1286,7 @@ function stepProvisionAudit(string $gatewayUrl, string $platformId, ?string $adm
 
     if ($resp['code'] === 400) {
         $response = json_decode($resp['body'], true);
-        $message = $response['message'] ?? $resp['body'];
+        $message = gw_safe_body($resp['body']);
         fwrite(STDERR, "ERROR: {$message}\n");
         fwrite(STDERR, "  Is AUDIT_DATABASE_URL configured on the gateway itself? See the gateway operator's own\n");
         fwrite(STDERR, "  one-time setup (gateway_audit_user role creation, AUDIT_DATABASE_URL env var) --\n");
@@ -1294,6 +1295,6 @@ function stepProvisionAudit(string $gatewayUrl, string $platformId, ?string $adm
     }
 
     fwrite(STDERR, "ERROR: Failed to provision audit database (HTTP {$resp['code']})\n");
-    fwrite(STDERR, "  Response: {$resp['body']}\n");
+    fwrite(STDERR, "  Response: " . gw_safe_body($resp['body']) . "\n");
     exit(1);
 }

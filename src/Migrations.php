@@ -588,7 +588,7 @@ class Migrations
 
         $result = pg_query($this->connection, $query);
         if (!$result) {
-            throw new Exception("Failed to create migrations table: " . pg_last_error($this->connection));
+            throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Failed to create migrations table", pg_last_error($this->connection)));
         }
     }
 
@@ -720,7 +720,7 @@ class Migrations
                 $result = pg_query($this->connection, $sql);
 
                 if (!$result) {
-                    throw new Exception(pg_last_error($this->connection));
+                    throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Migration SQL failed", pg_last_error($this->connection)));
                 }
 
                 // Record migration
@@ -728,7 +728,7 @@ class Migrations
                 $insertResult = pg_query_params($this->connection, $insertQuery, [$migration, $nextBatch]);
 
                 if (!$insertResult) {
-                    throw new Exception("Failed to record migration: " . pg_last_error($this->connection));
+                    throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Failed to record migration", pg_last_error($this->connection)));
                 }
 
                 pg_query($this->connection, "COMMIT");

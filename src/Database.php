@@ -340,7 +340,7 @@ class Database
      *     Generated `Fn*::run()` wrappers for `RETURNS TABLE` functions
      *     already target `result_as_typed_table()`.
      */
-    public static function fn(string $function_name, array $params): array
+    public static function fn(string $function_name, #[\SensitiveParameter] array $params): array
     {
         $start_time = microtime(true);
         $data = self::_fn($function_name, $params);
@@ -376,7 +376,7 @@ class Database
      *   {@see fn()} returns; consume via result_as_typed_table()/
      *   result_as_object() as usual.
      */
-    public static function fnTyped(string $function_name, object $params): array
+    public static function fnTyped(string $function_name, #[\SensitiveParameter] object $params): array
     {
         return self::fn($function_name, self::objectToPositionalParams($params));
     }
@@ -438,7 +438,7 @@ class Database
      *   returns properties in declaration order, which for a constructor-
      *   promoted class matches constructor-parameter order).
      */
-    private static function objectToPositionalParams(object $params): array
+    private static function objectToPositionalParams(#[\SensitiveParameter] object $params): array
     {
         $reflect = new ReflectionClass($params);
         $positional = [];
@@ -450,7 +450,7 @@ class Database
         return $positional;
     }
 
-    private static function _fn(string $function_name, array $params): array
+    private static function _fn(string $function_name, #[\SensitiveParameter] array $params): array
     {
         // Serialize typed/object params to their PG-wire (JSON text) form
         // BEFORE anything else, so both the real transport and fake mode see
@@ -484,6 +484,9 @@ class Database
                 );
             }
 
+            // $e is chained as `previous` so DbErrorMapper can classify it in-process. That is safe: GatewayException
+            // (client >= 3.1.2) carries identifier-only text in its message, __toString and dumps; the raw cause is
+            // reachable only through its explicit debug accessor.
             throw new Exception("Database function call failed: " . \StoneScriptPHP\Persistence\LogSanitizer::sanitize($e->getMessage()), $e->getCode(), $e);
         } catch (DbTransportException $e) {
             // Transport-agnostic equivalent of the GatewayException handling
@@ -529,7 +532,7 @@ class Database
      * @param array<int|string, mixed> $params
      * @return array<int|string, mixed>
      */
-    private static function serializeParams(array $params): array
+    private static function serializeParams(#[\SensitiveParameter] array $params): array
     {
         $out = [];
         foreach ($params as $key => $value) {
@@ -592,7 +595,7 @@ class Database
      *   gateway call or returning an empty result, so a test author is never
      *   left wondering whether an unstubbed call quietly hit the network.
      */
-    private static function resolveFakeResponse(string $function_name, array $params): array
+    private static function resolveFakeResponse(string $function_name, #[\SensitiveParameter] array $params): array
     {
         if (!array_key_exists($function_name, self::$fakeResponses)) {
             throw new Exception(

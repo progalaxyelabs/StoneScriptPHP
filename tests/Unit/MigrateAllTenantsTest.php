@@ -177,7 +177,9 @@ class MigrateAllTenantsTest extends TestCase
 
         $this->assertStringContainsString('Databases failed:    1', $output);
         $this->assertStringContainsString('myapp_tenant_bad', $output);
-        $this->assertStringContainsString('column "foo" of relation "bar" does not exist', $output);
+        // Raw gateway/PostgreSQL cause text is withheld from CLI output; only identifiers are shown.
+        $this->assertStringContainsString('table=bar', $output);
+        $this->assertStringContainsString('column=foo', $output);
     }
 
     // =========================================================================

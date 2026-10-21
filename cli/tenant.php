@@ -47,7 +47,7 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
 } catch (PDOException $e) {
-    echo Color::red("Error: Failed to connect to database - {$e->getMessage()}\n");
+    echo Color::red("Error: Failed to connect to database - " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
     exit(1);
 }
 
@@ -116,7 +116,7 @@ function tenantCreate(TenantProvisioner $provisioner, array $args): void
         echo "  Database: {$tenant->dbName}\n";
 
     } catch (Exception $e) {
-        echo Color::red("✗ Failed to create tenant: {$e->getMessage()}\n");
+        echo Color::red("✗ Failed to create tenant: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
 }
@@ -157,7 +157,7 @@ function tenantList(PDO $authDb, array $config): void
         echo "Total: " . count($tenants) . " tenant(s)\n";
 
     } catch (PDOException $e) {
-        echo Color::red("Error: {$e->getMessage()}\n");
+        echo Color::red("Error: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
 }
@@ -205,7 +205,7 @@ function tenantStatus(PDO $authDb, TenantProvisioner $provisioner, array $args, 
         echo str_repeat('-', 60) . "\n";
 
     } catch (PDOException $e) {
-        echo Color::red("Error: {$e->getMessage()}\n");
+        echo Color::red("Error: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
 }
@@ -238,7 +238,7 @@ function tenantMigrate(TenantProvisioner $provisioner, array $args): void
         }
 
     } catch (Exception $e) {
-        echo Color::red("✗ Migration failed: {$e->getMessage()}\n");
+        echo Color::red("✗ Migration failed: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
 }
@@ -269,7 +269,7 @@ function tenantSeed(TenantProvisioner $provisioner, array $args): void
         }
 
     } catch (Exception $e) {
-        echo Color::red("✗ Seeding failed: {$e->getMessage()}\n");
+        echo Color::red("✗ Seeding failed: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
 }
@@ -299,7 +299,7 @@ function tenantSuspend(TenantProvisioner $provisioner, array $args): void
         }
 
     } catch (Exception $e) {
-        echo Color::red("✗ Error: {$e->getMessage()}\n");
+        echo Color::red("✗ Error: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
 }
@@ -329,7 +329,7 @@ function tenantActivate(TenantProvisioner $provisioner, array $args): void
         }
 
     } catch (Exception $e) {
-        echo Color::red("✗ Error: {$e->getMessage()}\n");
+        echo Color::red("✗ Error: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
 }
@@ -380,7 +380,7 @@ function tenantDelete(TenantProvisioner $provisioner, array $args): void
         }
 
     } catch (Exception $e) {
-        echo Color::red("✗ Error: {$e->getMessage()}\n");
+        echo Color::red("✗ Error: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
         exit(1);
     }
 }

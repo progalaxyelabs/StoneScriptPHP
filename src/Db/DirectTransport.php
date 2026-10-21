@@ -60,7 +60,7 @@ final class DirectTransport implements DbTransport
         }
     }
 
-    public function callFunction(string $function_name, array $params): array
+    public function callFunction(string $function_name, #[\SensitiveParameter] array $params): array
     {
         if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $function_name)) {
             throw new \Exception("DirectTransport: invalid database function name '{$function_name}'");
@@ -84,10 +84,10 @@ final class DirectTransport implements DbTransport
 
             return $rows;
         } catch (PDOException $e) {
-            throw new DbTransportException(
-                "Direct database function call failed: " . $e->getMessage(),
-                isConnectionFailure: $this->isConnectionFailure($e),
-                previous: $e
+            throw DbTransportException::fromDriverFailure(
+                'Direct database function call failed',
+                $e,
+                $this->isConnectionFailure($e)
             );
         }
     }
@@ -108,11 +108,7 @@ final class DirectTransport implements DbTransport
                 'password' => $this->password ?? '',
             ]);
         } catch (PDOException $e) {
-            throw new DbTransportException(
-                "Direct database connection failed: " . $e->getMessage(),
-                isConnectionFailure: true,
-                previous: $e
-            );
+            throw DbTransportException::fromDriverFailure('Direct database connection failed', $e, true);
         }
     }
 

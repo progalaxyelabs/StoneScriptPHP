@@ -102,7 +102,7 @@ final class PgandroidTransport implements DbTransport
         };
     }
 
-    public function callFunction(string $function_name, array $params): array
+    public function callFunction(string $function_name, #[\SensitiveParameter] array $params): array
     {
         // Normalize associative params to positional order — same convention
         // GatewayClient::callFunction() / DirectTransport already apply.
@@ -124,10 +124,10 @@ final class PgandroidTransport implements DbTransport
             // Only a genuinely engine-unusable condition (not initialized,
             // OOM) is a connection failure. See the class-level "PINNED
             // BRIDGE ERROR-SIGNALING CONTRACT" docblock above.
-            throw new DbTransportException(
-                'pgandroid bridge call failed: ' . $e->getMessage(),
-                isConnectionFailure: $this->isConnectionFailure($e),
-                previous: $e
+            throw DbTransportException::fromDriverFailure(
+                'pgandroid bridge call failed',
+                $e,
+                $this->isConnectionFailure($e)
             );
         }
 

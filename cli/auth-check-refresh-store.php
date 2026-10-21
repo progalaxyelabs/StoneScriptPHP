@@ -21,6 +21,6 @@ try {
     echo "OK: refresh-token schema is applied and usable.\n";
     exit(0);
 } catch (\Throwable $e) {
-    fwrite(STDERR, "NOT READY: " . $e->getMessage() . "\n");
+    fwrite(STDERR, "NOT READY: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n");
     exit(1);
 }

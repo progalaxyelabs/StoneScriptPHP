@@ -41,7 +41,7 @@ if ($resp['code'] === 404) {
 
 if ($resp['code'] !== 200) {
     fwrite(STDERR, "ERROR: Failed to list schemas (HTTP {$resp['code']})\n");
-    if ($resp['body']) fwrite(STDERR, "  {$resp['body']}\n");
+    if ($resp['body']) fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
     exit(1);
 }
 

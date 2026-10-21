@@ -107,6 +107,6 @@ try {
             exit($helpExit);
     }
 } catch (Exception $e) {
-    echo "Error: " . $e->getMessage() . "\n";
+    echo "Error: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n";
     exit(1);
 }

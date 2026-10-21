@@ -163,7 +163,7 @@ function fetch_live_function_signature($conn, string $fnName): array|string
     ";
     $result = pg_query($conn, $sql);
     if ($result === false) {
-        return 'query failed: ' . pg_last_error($conn);
+        return \StoneScriptPHP\Persistence\SafeDbContext::summarize('query failed', pg_last_error($conn));
     }
     $rows = pg_fetch_all($result) ?: [];
     if (count($rows) === 0) {

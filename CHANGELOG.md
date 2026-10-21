@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.2.1]
+
+Security patch: PostgreSQL error text (message, `DETAIL`, `HINT`, `CONTEXT`, custom `RAISE EXCEPTION` text and values
+it echoes) and query parameters no longer reach stdout, stderr, logs, exception messages, `previous` chains,
+`__toString()` or uncaught-exception output. Requires `progalaxyelabs/stonescriptdb-gateway-client` ^3.1.2.
+
+### Security
+
+- **Allow-list, not scrubbing.** Diagnostics are rebuilt from identifier-shaped fields only (SQLSTATE, schema, table,
+  column, constraint, function, database, correlation id) by the new `Persistence\SafeDbContext`. `LogSanitizer` is now
+  documented as a last-resort backstop (it also masks international-format phone numbers) and no longer the barrier.
+- **Gateway mode:** `Database::fn()` wraps a `GatewayException` whose message, `__toString()`, dumps and
+  serialization are value-free (client 3.1.2). The raw cause is reachable in-process only via
+  `GatewayException::getRawCauseForDebug()`.
+- **Direct / pgandroid transports:** `DbTransportException::fromDriverFailure()` no longer copies the driver message
+  or chains the `PDOException` as `previous`; the message is identifier-only and the raw text is held privately
+  (`getRawCauseForDebug()`).
+- **Uncaught exceptions:** `ExceptionHandler::register()` sets `zend.exception_ignore_args=1`; `handleException()`
+  cannot throw (a failure inside it falls back to a fixed, value-free line instead of PHP printing the raw chain); a
+  fatal "Uncaught ..." error message is logged as a fixed string. `Logger::log_php_exception()` logs a
+  `LogSanitizer::describe()` chain and an argument-free trace (it used `getTraceAsString()`, which embeds argument
+  values).
+- **Parameters:** `#[\SensitiveParameter]` on `Database::fn()/fnTyped()` and every transport's `callFunction()` so
+  query values never appear in stack traces.
+- **CLI:** gateway commands (`gateway:migrate-*`, `register-*`, `provision-*`, `list-schemas`, `list-databases`,
+  seeds, `migrate`, `tenant:*`, `create:admin`) print a gateway response body through an allow-list renderer
+  (`gw_safe_body()`), per-database migration failures as identifiers plus the failing file/function name, and
+  `pg_last_error()` / `PDOException` text through `SafeDbContext`.
+
+### Changed (breaking for code that string-matches error text)
+
+- Exception messages from `Database::fn()` no longer contain PostgreSQL text. Use `DbErrorMapper::causeContains()`,
+  `GatewayException::getConstraint()/getColumn()/getSqlState()`, or (debug only) `getRawCauseForDebug()`.
+  `GatewayException::getCause()` still works but is deprecated and returns the raw text: never log it.
+- `DbTransportException` no longer has the `PDOException` as `previous`; read `getSqlState()` /
+  `getSafeContext()` instead.
+- `LogSanitizer::describe()` no longer appends `[gateway cause: ...]`.
+- A migration/seed failure at the CLI shows `error [table=.. column=..]` rather than the PostgreSQL sentence. Run the
+  failing statement in `psql` to see the full text.
+- Gateway servers do not yet send `sqlstate`/`constraint`/`correlation_id` fields; until they do, constraint, column,
+  table and schema names are lifted from the cause text (shape-validated) and the client generates the `ref=` id.
+
 ## [12.2.0]
 
 Minor release: the opt-in tenant URL guard now honours a route's declared access, and the CLI works on a new project

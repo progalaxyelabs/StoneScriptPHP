@@ -189,7 +189,7 @@ try {
     $result = pg_query_params($conn, $insertUserQuery, [$email, $name, $passwordHash]);
 
     if (!$result) {
-        throw new Exception("Failed to create user: " . pg_last_error($conn));
+        throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Failed to create user", pg_last_error($conn)));
     }
 
     $userId = pg_fetch_result($result, 0, 0);
@@ -199,7 +199,7 @@ try {
     $result = pg_query_params($conn, $assignRoleQuery, [$userId, $superAdminRoleId]);
 
     if (!$result) {
-        throw new Exception("Failed to assign super_admin role: " . pg_last_error($conn));
+        throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Failed to assign super_admin role", pg_last_error($conn)));
     }
 
     pg_query($conn, "COMMIT");
@@ -220,6 +220,6 @@ try {
         pg_query($conn, "ROLLBACK");
         pg_close($conn);
     }
-    echo "Error: " . $e->getMessage() . "\n";
+    echo "Error: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n";
     exit(1);
 }

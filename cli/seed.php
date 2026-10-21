@@ -89,7 +89,7 @@ function runSeeder($conn, $seederPath, $seederName) {
         $result = pg_query($conn, $sql);
 
         if (!$result) {
-            throw new Exception(pg_last_error($conn));
+            throw new Exception(\StoneScriptPHP\Persistence\SafeDbContext::summarize("Seeder SQL failed", pg_last_error($conn)));
         }
 
         pg_query($conn, "COMMIT");
@@ -98,7 +98,7 @@ function runSeeder($conn, $seederPath, $seederName) {
 
     } catch (Exception $e) {
         pg_query($conn, "ROLLBACK");
-        echo "✗ Seeder failed: " . $e->getMessage() . "\n";
+        echo "✗ Seeder failed: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n";
         return false;
     }
 }
@@ -158,6 +158,6 @@ try {
             exit(0);
     }
 } catch (Exception $e) {
-    echo "Error: " . $e->getMessage() . "\n";
+    echo "Error: " . \StoneScriptPHP\Persistence\SafeDbContext::message($e) . "\n";
     exit(1);
 }

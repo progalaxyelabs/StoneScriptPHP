@@ -451,13 +451,15 @@ class Logger
      */
     public function log_php_exception(Throwable $exception, string $correlationId = ''): void
     {
-        $this->log(self::CRITICAL, $exception->getMessage(), [
+        // Never getMessage() of a database-origin chain verbatim and never getTraceAsString() (it embeds argument
+        // values): describe() rebuilds the chain from allow-listed identifiers, safeTrace() omits arguments.
+        $this->log(self::CRITICAL, \StoneScriptPHP\Persistence\LogSanitizer::describe($exception), [
             'correlation_id' => $correlationId,
             'exception_class' => get_class($exception),
             'code' => $exception->getCode(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
-            'trace' => DEBUG_MODE ? $exception->getTraceAsString() : 'hidden'
+            'trace' => DEBUG_MODE ? \StoneScriptPHP\Persistence\LogSanitizer::safeTrace($exception) : 'hidden'
         ]);
     }
 

@@ -5,6 +5,12 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Persistence;
 
 /**
+ * LAST-RESORT scrubber for free-form text on its way to a LOG line. It is regex based and therefore
+ * best-effort: it cannot know that `RAISE EXCEPTION 'User % exists', p_phone` carries a phone number. The
+ * real barrier is allow-listing at the source (see {@see SafeDbContext}, GatewayException and
+ * DbTransportException never carry database text in their messages). Do not rely on this class to make raw
+ * database text safe.
+ *
  * Scrubs database error text before it reaches a LOG line. PostgreSQL error text routinely embeds
  * data values: `Key (email)=(a@b.c) already exists`, `invalid input syntax for type uuid: "x"`,
  * `DETAIL: Failing row contains (...)`. Those are customer data and must not land in log files.
@@ -69,20 +75,50 @@ final class LogSanitizer
      */
     public static function forLog(string $text): string
     {
-        return self::maskEmails(self::sanitize($text, true));
+        return self::maskPhones(self::maskEmails(self::sanitize($text, true)));
     }
 
-    /** Sanitised one-line description of a throwable chain, safe for logs. */
+    /** `+919876543210` -> `+<phone>` (international-format numbers only; plain digit runs are left alone). */
+    public static function maskPhones(string $text): string
+    {
+        return preg_replace('/(?<![\w+])\+\d[\d \-]{7,16}\d(?!\d)/', '+<phone>', $text) ?? $text;
+    }
+
+    /**
+     * One-line description of a throwable chain, safe for logs. Database-origin throwables are described from
+     * allow-listed identifiers only (class, SQLSTATE, constraint, column, table, function, correlation id); the
+     * raw cause is never included. Other throwables keep their sanitised message.
+     */
     public static function describe(\Throwable $e): string
     {
         $parts = [];
         for ($cur = $e; $cur !== null; $cur = $cur->getPrevious()) {
-            $line = (new \ReflectionClass($cur))->getShortName() . ': ' . self::sanitize($cur->getMessage());
-            if ($cur instanceof \StoneScriptDB\GatewayException && is_string($cur->getCause()) && $cur->getCause() !== '') {
-                $line .= ' [gateway cause: ' . self::sanitize($cur->getCause()) . ']';
+            $name = (new \ReflectionClass($cur))->getShortName();
+            if ($cur instanceof \StoneScriptDB\GatewayException || $cur instanceof \StoneScriptPHP\Db\DbTransportException) {
+                // Their messages are identifier-only by construction; no regex needed, no cause appended.
+                $msg = $cur->getMessage();
+                $suffix = SafeDbContext::suffix($cur->getSafeContext());
+                if ($suffix !== '' && !str_contains($msg, trim($suffix))) {
+                    $msg .= $suffix;
+                }
+                $parts[] = $name . ': ' . $msg;
+            } elseif ($cur instanceof \PDOException) {
+                $parts[] = $name . ': ' . SafeDbContext::summarizePdo('Database error', $cur);
+            } else {
+                $parts[] = $name . ': ' . self::forLog($cur->getMessage());
             }
-            $parts[] = $line;
         }
         return implode(' | caused by | ', $parts);
+    }
+
+    /** Trace as text WITHOUT argument values (arguments can hold query parameters, i.e. customer data). */
+    public static function safeTrace(\Throwable $e, int $maxFrames = 30): string
+    {
+        $lines = [];
+        foreach (array_slice($e->getTrace(), 0, $maxFrames) as $i => $f) {
+            $lines[] = '#' . $i . ' ' . ($f['file'] ?? '[internal]') . '(' . ($f['line'] ?? 0) . '): '
+                . ($f['class'] ?? '') . ($f['type'] ?? '') . ($f['function'] ?? '') . '()';
+        }
+        return implode("\n", $lines);
     }
 }

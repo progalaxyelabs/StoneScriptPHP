@@ -22,7 +22,7 @@ final class GatewayTransport implements DbTransport
     {
     }
 
-    public function callFunction(string $function_name, array $params): array
+    public function callFunction(string $function_name, #[\SensitiveParameter] array $params): array
     {
         // Intentionally NOT caught/wrapped here — GatewayException must
         // propagate as-is so Database::_fn()'s existing catch(GatewayException)

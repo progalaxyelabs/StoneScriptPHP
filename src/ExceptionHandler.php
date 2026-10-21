@@ -31,6 +31,9 @@ class ExceptionHandler
      */
     public function register(): void
     {
+        // Argument values in stack traces can hold query parameters (customer data). Exceptions created from here
+        // on carry no args, so no trace printed by PHP, a logger or a debugger can show them.
+        @ini_set('zend.exception_ignore_args', '1');
         set_exception_handler([$this, 'handleException']);
         set_error_handler([$this, 'handleError']);
         register_shutdown_function([$this, 'handleShutdown']);
@@ -40,6 +43,33 @@ class ExceptionHandler
      * Handle uncaught exceptions
      */
     public function handleException(Throwable $exception): void
+    {
+        // This handler must never throw: PHP would then print "Fatal error: Uncaught ..." followed by the raw
+        // exception chain on stdout/stderr. Any failure inside falls through to a fixed, value-free line.
+        try {
+            $this->doHandleException($exception);
+        } catch (\Throwable) {
+            $this->lastResort(get_class($exception));
+        }
+    }
+
+    /** Fixed text only: no message, no trace, no previous chain. */
+    private function lastResort(string $class): never
+    {
+        $line = 'Unhandled ' . preg_replace('/[^A-Za-z0-9_\\\\]/', '', $class) . ' (details withheld; see application log)';
+        if (PHP_SAPI === 'cli') {
+            @fwrite(STDERR, $line . "\n");
+        } else {
+            if (!headers_sent()) {
+                http_response_code(500);
+                header('Content-Type: application/json');
+            }
+            echo '{"status":"error","message":"An error occurred","data":null}';
+        }
+        exit(1);
+    }
+
+    private function doHandleException(Throwable $exception): void
     {
         // §5 — stamp error into request-scoped context BEFORE rendering so the
         // shutdown function (RequestLogger::persistRequestLog) can read it.
@@ -106,7 +136,13 @@ class ExceptionHandler
      */
     private function logFatalError(array $error, string $correlationId = ''): void
     {
-        log_critical('Fatal error: ' . $error['message'], [
+        // A fatal "Uncaught X: msg ... Stack trace: ... Next Y: ..." message embeds the whole exception chain,
+        // including any database text. Keep only the fixed prefix; file/line identify the origin.
+        $message = (string) $error['message'];
+        if (str_starts_with($message, 'Uncaught ')) {
+            $message = 'Uncaught exception (details withheld)';
+        }
+        log_critical('Fatal error: ' . $message, [
             'correlation_id' => $correlationId,
             'file' => $error['file'],
             'line' => $error['line'],

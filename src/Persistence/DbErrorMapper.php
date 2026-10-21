@@ -69,7 +69,8 @@ final class DbErrorMapper
             if (stripos($cur->getMessage(), $needle) !== false) {
                 return true;
             }
-            if ($cur instanceof GatewayException && is_string($cur->getCause()) && stripos($cur->getCause(), $needle) !== false) {
+            $raw = SafeDbContext::rawCauseOf($cur);
+            if ($raw !== null && stripos($raw, $needle) !== false) {
                 return true;
             }
         }
@@ -212,15 +213,17 @@ final class DbErrorMapper
         return sprintf('DbErrorMapper: HTTP %s: %s', $mapped !== null ? (string) $mapped->status : '?', LogSanitizer::describe($e));
     }
 
-    /** The PostgreSQL message when the gateway forwarded one, else the exception chain's text. */
+    /**
+     * The PostgreSQL message when the gateway forwarded one, else the exception chain's text.
+     * IN-PROCESS classification only: the result may contain customer data and must never be logged,
+     * printed or returned to a client verbatim.
+     */
     public static function rawCause(\Throwable $e): string
     {
         for ($cur = $e; $cur !== null; $cur = $cur->getPrevious()) {
-            if ($cur instanceof GatewayException) {
-                $cause = $cur->getCause();
-                if (is_string($cause) && $cause !== '') {
-                    return $cause;
-                }
+            $cause = SafeDbContext::rawCauseOf($cur);
+            if ($cause !== null && $cause !== '') {
+                return $cause;
             }
         }
         return $e->getMessage();
@@ -230,11 +233,17 @@ final class DbErrorMapper
     private static function sqlState(\Throwable $e): ?string
     {
         for ($cur = $e; $cur !== null; $cur = $cur->getPrevious()) {
+            if ($cur instanceof DbTransportException && $cur->getSqlState() !== null) {
+                return $cur->getSqlState();
+            }
             if ($cur instanceof \PDOException) {
                 $info = $cur->errorInfo;
                 if (is_array($info) && isset($info[0]) && preg_match('/^[0-9A-Z]{5}$/', (string) $info[0]) === 1) {
                     return (string) $info[0];
                 }
+            }
+            if ($cur instanceof GatewayException && $cur->getSqlState() !== null) {
+                return $cur->getSqlState();
             }
             if (preg_match('/SQLSTATE\[([0-9A-Z]{5})\]/', $cur->getMessage(), $m) === 1) {
                 return $m[1];

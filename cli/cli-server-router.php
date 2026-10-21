@@ -42,7 +42,7 @@ try {
     http_response_code($e->getCode() ?: 500);
     echo json_encode([
         'success' => false,
-        'error' => $e->getMessage()
+        'error' => \StoneScriptPHP\Persistence\SafeDbContext::message($e)
     ]);
 }
 
