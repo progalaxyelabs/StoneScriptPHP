@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION create_org(p_name TEXT)
+RETURNS TABLE (org_id UUID) AS $$
+BEGIN
+    RETURN QUERY INSERT INTO orgs (name) VALUES (p_name) RETURNING id;
+END;
+$$ LANGUAGE plpgsql;

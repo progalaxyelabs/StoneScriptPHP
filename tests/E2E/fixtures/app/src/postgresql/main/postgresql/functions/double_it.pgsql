@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION double_it(p_n INT)
+RETURNS TABLE (result INT) AS $$
+BEGIN
+    RETURN QUERY SELECT p_n * 2;
+END;
+$$ LANGUAGE plpgsql;

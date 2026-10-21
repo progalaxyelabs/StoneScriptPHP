@@ -15,6 +15,10 @@
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
         </testsuite>
+        <!-- Real gateway + PostgreSQL. SKIPS LOUDLY without the stack; see tests/E2E/run-e2e.sh -->
+        <testsuite name="E2E">
+            <directory>tests/E2E</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>
