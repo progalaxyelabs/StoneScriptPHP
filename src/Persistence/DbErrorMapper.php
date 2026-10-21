@@ -191,21 +191,45 @@ final class DbErrorMapper
         return new PublicError(500, PersistenceException::DEFAULT_MESSAGE, public: false);
     }
 
+    /** @var list<string> exact literal prefixes platforms registered for the wrapped developer form */
+    private static array $publicPrefixes = [];
+
     /**
-     * The `[public:code:status] message` RAISE marker, or null. SELF-CONTAINED on purpose (no other helper) so the
-     * same rule can be ported to older release lines unchanged.
+     * Register an exact literal prefix that a platform's own wrapper puts BEFORE the `[public:...]` marker, e.g.
+     * `DbErrorMapper::allowPublicPrefix('Failed to create order: ')`. Only registered literals are honoured; no other
+     * text may precede the marker.
+     */
+    public static function allowPublicPrefix(string $prefix): void
+    {
+        if ($prefix !== '' && strlen($prefix) <= 120 && !in_array($prefix, self::$publicPrefixes, true)) {
+            self::$publicPrefixes[] = $prefix;
+        }
+    }
+
+    public static function clearPublicPrefixes(): void
+    {
+        self::$publicPrefixes = [];
+    }
+
+    /**
+     * The `[public:code:status] message` RAISE marker, or null. SELF-CONTAINED on purpose (it reads only
+     * $publicPrefixes) so the same rule can be ported to older release lines unchanged.
      *
-     * SECURITY. The text after the marker is published to the API client VERBATIM, so the marker must come from the
-     * developer's RAISE and never from a user value that PostgreSQL echoed. Therefore:
-     *  1. only the PRIMARY message line is searched, never DETAIL / HINT / CONTEXT (`Failing row contains (...)`
-     *     echoes user input and other columns) and never past a cause separator (newline, ` | `, inline
-     *     DETAIL:/HINT:/CONTEXT:);
-     *  2. when the SQLSTATE is known it must be P0001 (RAISE EXCEPTION); a system error (22P02 invalid input, 23xxx
-     *     constraint ...) never carries a developer marker;
-     *  3. only plain wording may precede the marker (`Failed to create order: [public:...]`): a quote, parenthesis or
-     *     `=` before it means PostgreSQL is echoing a value (`invalid input syntax for type uuid: "[public:..."`);
-     *  4. the captured text ends at the end of that primary line (or at ` (SQLSTATE`).
-     * Never interpolate values into a `[public...]` RAISE.
+     * SECURITY. The text after the marker is published to the API client VERBATIM, and a message is spoofable: any
+     * interpolated value can carry marker-shaped text. So the marker is accepted only when nothing user-influenced can
+     * sit in front of it:
+     *  1. a known SQLSTATE must be P0001 (RAISE EXCEPTION); a system error (22P02, 23xxx ...) never carries one;
+     *  2. driver prefixes (`SQLSTATE[xxxxx]: `, `<Class text>: <n> ERROR:  `, `ERROR:  `, `pg_query(): Query failed: `)
+     *     are stripped ONLY at the very start, in that fixed order. Never search for `ERROR:` anywhere: a value that
+     *     contains it would move the extraction point;
+     *  3. the primary line ends at the first newline, ` | `, or inline DETAIL:/HINT:/CONTEXT: (never DETAIL / HINT /
+     *     CONTEXT themselves, which echo user input and other columns of the row);
+     *  4. the line must START with the marker, or with one of the exact literal prefixes registered through
+     *     {@see allowPublicPrefix()} followed immediately by the marker. No arbitrary prefix text;
+     *  5. the captured text ends at the end of that line (or at ` (SQLSTATE`).
+     * AUTHORING RULES: a RAISE must never start with an interpolated value, and a `[public...]` RAISE must never
+     * interpolate (see PublicRaiseLint, run by `php stone validate sqlintegrity`). The long-term fix is a structured
+     * "public" signal from the gateway (task #10086); a message-text marker is inherently spoofable.
      *
      * @return array{status: ?int, message: string, code: ?string}|null status null = the marker gave none (400)
      */
@@ -214,8 +238,13 @@ final class DbErrorMapper
         if ($sqlstate !== null && $sqlstate !== 'P0001') {
             return null;
         }
-        // 1. primary line only: strip a driver `ERROR:  ` prefix, then cut at the first separator
-        $line = preg_match('/\bERROR:\s+(.*)/', $raw, $m) === 1 ? $m[1] : $raw;
+        // 2. driver prefixes, only at the very start
+        $line = $raw;
+        $line = preg_replace('/^pg_[a-z_]+\(\): Query failed: /', '', $line) ?? $line;
+        $line = preg_replace('/^SQLSTATE\[[0-9A-Za-z]{5}\]:\s*/', '', $line) ?? $line;
+        $line = preg_replace('/^[A-Z][A-Za-z ]{2,40}: \d+ (?=ERROR:)/', '', $line) ?? $line;
+        $line = preg_replace('/^ERROR:\s+/', '', $line) ?? $line;
+        // 3. primary line only
         $cut = strlen($line);
         foreach (["\n", ' | '] as $sep) { // not " - ": that joins migration/seeder causes only, and is legal inside a message
             $i = strpos($line, $sep);
@@ -227,11 +256,18 @@ final class DbErrorMapper
         if (preg_match('/\s(?:DETAIL|HINT|CONTEXT|STATEMENT|QUERY):\s/', $line, $d, PREG_OFFSET_CAPTURE) === 1) {
             $line = substr($line, 0, $d[0][1]);
         }
-        // 3 + 4: plain wording before, remainder of the line after (bounded by ` (SQLSTATE`)
-        if (preg_match('/^[A-Za-z0-9 _.,:;\-]*\[public(?::([a-z][a-z0-9_]*))?(?::([1-4]\d\d))?\]\s*(.+?)(?=\s\(SQLSTATE|$)/s', $line, $m) !== 1 || trim($m[3]) === '') {
-            return null;
+        // 4. marker at the start, or after an exactly registered literal prefix
+        foreach (array_merge([''], self::$publicPrefixes) as $prefix) {
+            if ($prefix !== '' && !str_starts_with($line, $prefix)) {
+                continue;
+            }
+            $rest = substr($line, strlen($prefix));
+            // 5. text bounded by the end of the line / ` (SQLSTATE`
+            if (preg_match('/^\[public(?::([a-z][a-z0-9_]*))?(?::([1-4]\d\d))?\]\s*(.+?)(?=\s\(SQLSTATE|$)/s', $rest, $m) === 1 && trim($m[3]) !== '') {
+                return ['status' => $m[2] !== '' ? (int) $m[2] : null, 'message' => trim($m[3]), 'code' => $m[1] !== '' ? $m[1] : null];
+            }
         }
-        return ['status' => $m[2] !== '' ? (int) $m[2] : null, 'message' => trim($m[3]), 'code' => $m[1] !== '' ? $m[1] : null];
+        return null;
     }
 
     /** Map to an ApiResponse that always carries a real 4xx/5xx status. Logs the sanitised chain. */

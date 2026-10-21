@@ -17,6 +17,16 @@ use StoneScriptPHP\Persistence\PublicRaiseLint;
  */
 final class PublicMarkerTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        DbErrorMapper::clearPublicPrefixes();
+    }
+
+    protected function tearDown(): void
+    {
+        DbErrorMapper::clearPublicPrefixes();
+    }
+
     private function gw(string $cause): GatewayException
     {
         return new GatewayException('Gateway returned HTTP 500: query_failed', 500, null, ['error' => 'query_failed', 'cause' => $cause]);
@@ -50,19 +60,83 @@ final class PublicMarkerTest extends TestCase
         $this->assertSame(500, DbErrorMapper::classify($e)[0]);
     }
 
-    public function testMidPrimaryLineDeveloperFormStillWorks(): void
+    public function testRegisteredPrefixDeveloperFormWorksAndUnregisteredDoesNot(): void
     {
-        // a wrapper-prefixed RAISE, the form the framework's own parity tests use
-        $r = DbErrorMapper::resolve($this->gw('Failed to create order: [public:insufficient_quantity:409] Insufficient quantity in selected warehouse (SQLSTATE: P0001)'));
+        $cause = 'Failed to create order: [public:insufficient_quantity:409] Insufficient quantity in selected warehouse (SQLSTATE: P0001)';
+
+        // not registered: not public
+        $r = DbErrorMapper::resolve($this->gw($cause));
+        $this->assertSame(500, $r->status);
+        $this->assertStringNotContainsString('Insufficient', $r->message);
+
+        // registered exactly: public, text bounded by the end of the line / (SQLSTATE
+        DbErrorMapper::allowPublicPrefix('Failed to create order: ');
+        $r = DbErrorMapper::resolve($this->gw($cause));
         $this->assertSame(409, $r->status);
-        $this->assertSame('Insufficient quantity in selected warehouse', $r->message, 'text is bounded by the end of the primary line / (SQLSTATE');
+        $this->assertSame('Insufficient quantity in selected warehouse', $r->message);
         $this->assertSame('insufficient_quantity', $r->errorCode);
-        $this->assertTrue($r->public);
+
+        // a different prefix, or the registered one with extra text around it, is still not public
+        foreach (['Failed to create invoice: [public:x:409] hi', 'Oops. Failed to create order: [public:x:409] hi', 'failed to create order: [public:x:409] hi'] as $other) {
+            $this->assertSame(500, DbErrorMapper::resolve($this->gw($other))->status, $other);
+        }
 
         // with a structured P0001 SQLSTATE too
-        $e = new GatewayException('x', 500, null, ['error' => 'query_failed', 'sqlstate' => 'P0001', 'cause' => 'Order rejected: [public:rejected:422] Not allowed | DETAIL: [public:x:404] attacker text']);
+        $e = new GatewayException('x', 500, null, ['error' => 'query_failed', 'sqlstate' => 'P0001', 'cause' => 'Failed to create order: [public:rejected:422] Not allowed | DETAIL: [public:x:404] attacker text']);
         $r = DbErrorMapper::resolve($e);
         $this->assertSame([422, 'Not allowed'], [$r->status, $r->message]);
+    }
+
+    public function testUserMarkerBeforeTheAuthorsTextIsNotPublic(): void
+    {
+        // RAISE 'Phone % is already registered to %', p_phone, v_owner   with p_phone = '[public:x:409] x'
+        $e = $this->gw('Phone [public:x:409] x is already registered to Alice Victim');
+        $r = DbErrorMapper::resolve($e);
+        $this->assertSame(500, $r->status);
+        $this->assertStringNotContainsString('Alice', $r->message);
+        $this->assertNull($r->errorCode);
+
+        // even with a registered prefix, text between the prefix and the marker is not allowed
+        DbErrorMapper::allowPublicPrefix('Failed to create order: ');
+        $r = DbErrorMapper::resolve($this->gw('Failed to create order: Phone [public:x:409] x is already registered to Alice Victim'));
+        $this->assertSame(500, $r->status);
+        $this->assertStringNotContainsString('Alice', $r->message);
+    }
+
+    public function testValueContainingErrorPrefixCannotMoveTheExtractionPoint(): void
+    {
+        foreach ([
+            'Phone ERROR:  [public:x:409] x is registered to Alice Victim',                                            // gateway form
+            "SQLSTATE[P0001]: Raise exception: 7 ERROR:  Phone ERROR:  [public:x:409] x is registered to Alice Victim", // pdo form
+            'pg_query(): Query failed: ERROR:  Phone ERROR:  [public:x:409] x is registered to Alice Victim',           // pg_* warning form
+        ] as $cause) {
+            $r = DbErrorMapper::resolve($this->gw($cause));
+            $this->assertSame(500, $r->status, $cause);
+            $this->assertStringNotContainsString('Alice', $r->message, $cause);
+        }
+        // and the genuine driver forms still work (prefixes stripped only at the very start)
+        $this->assertSame(410, DbErrorMapper::resolve($this->gw("SQLSTATE[P0001]: Raise exception: 7 ERROR:  [public:gone:410] It is gone\nCONTEXT: x"))->status);
+        $this->assertSame(410, DbErrorMapper::resolve($this->gw("ERROR:  [public:gone:410] It is gone"))->status);
+    }
+
+    public function testPgandroidBridgeFormKeepsAWorkingMarker(): void
+    {
+        $e = DbTransportException::fromDriverFailure('pgandroid bridge call failed', new \RuntimeException('SQLSTATE[P0001]: [public:gone:410] msg'), false);
+        $r = DbErrorMapper::resolve($e);
+        $this->assertSame([410, 'msg', 'gone'], [$r->status, $r->message, $r->errorCode]);
+        // a forged one in the echoed value of a system error does not
+        $e = DbTransportException::fromDriverFailure('pgandroid bridge call failed', new \RuntimeException('SQLSTATE[22P02]: invalid input syntax for type uuid: "[public:gone:410] msg"'), false);
+        $this->assertNotSame(410, DbErrorMapper::resolve($e)->status);
+    }
+
+    public function testRaiseStartingWithAPlaceholderIsTheLintsJobNotTheRuntimes(): void
+    {
+        // At runtime `RAISE '% is taken', v` with v = '[public:x:409] hi' is byte-for-byte a developer marker: it
+        // CANNOT be told apart from one. That is why the lint forbids a RAISE that starts with an interpolated value.
+        $r = DbErrorMapper::resolve($this->gw('[public:x:409] hi is taken'));
+        $this->assertSame(409, $r->status, 'documented residual: indistinguishable at runtime');
+        $hits = PublicRaiseLint::scanDetailed("RAISE EXCEPTION '% is taken', p_name;");
+        $this->assertSame('leading-interpolation', $hits[0]['rule'] ?? null);
     }
 
     public function testForgedMarkerInsideFailingRowDetailIsNotPublic(): void
@@ -82,6 +156,7 @@ final class PublicMarkerTest extends TestCase
             'value "[public:x:404] attacker text" is bogus',                                    // echoed in quotes, unknown phrasing
             'malformed thing (see [public:x:404] attacker text)',                               // echoed in parentheses
             'key=[public:x:404] attacker text',                                                 // echoed after =
+            'plain words [public:x:404] attacker text',                                         // arbitrary prefix text
         ];
         foreach ($cases as $cause) {
             $r = DbErrorMapper::resolve($this->gw($cause));
@@ -128,7 +203,41 @@ final class PublicMarkerTest extends TestCase
         $this->assertSame([1], PublicRaiseLint::scan("RAISE '[public] hi %', v;"));
 
         $good = "RAISE EXCEPTION '[public:x:409] already exists';\nRAISE EXCEPTION '[public:x:409] 100%% sure';\nRAISE EXCEPTION 'slug_taken: %', p;\nRAISE EXCEPTION 'plain % value', p;";
-        $this->assertSame([], PublicRaiseLint::scan($good), 'only [public..] messages are linted; %% is a literal percent');
+        $this->assertSame([], PublicRaiseLint::scan($good), 'only [public..] messages are linted for interpolation; %% is a literal percent');
+    }
+
+    /** @return array<string,array{0:string,1:bool}> */
+    public static function lintForms(): array
+    {
+        return [
+            'USING MESSAGE concatenation' => ["RAISE EXCEPTION USING MESSAGE = '[public:x:409] user ' || p_name || ' exists';", true],
+            'USING MESSAGE format()' => ["RAISE EXCEPTION USING MESSAGE = format('[public:x:409] user %s exists', p_name);", true],
+            'USING MESSAGE format() multiline' => ["RAISE EXCEPTION USING\n  ERRCODE = 'P0001',\n  MESSAGE = format(\n    '[public:x:409] user %L', p_name\n  ), HINT = 'x';", true],
+            'USING MESSAGE literal only' => ["RAISE EXCEPTION USING MESSAGE = '[public:x:409] already here', ERRCODE = 'P0001';", false],
+            'E-string with %' => ["RAISE EXCEPTION E'[public:x:409] user % exists\\n', p;", true],
+            'E-string clean' => ["RAISE EXCEPTION E'[public:x:409] already\\nhere';", false],
+            'dollar-quoted with %' => ["RAISE EXCEPTION \$m\$[public:x:409] user % exists\$m\$, p;", true],
+            'dollar-quoted clean' => ["RAISE EXCEPTION \$m\$[public:x:409] already here\$m\$;", false],
+            'SQLSTATE form with %' => ["RAISE SQLSTATE '22012' USING MESSAGE = '[public:x:409] user ' || p;", true],
+            'leading placeholder' => ["RAISE EXCEPTION '% is taken', p;", true],
+            'leading placeholder via USING MESSAGE' => ["RAISE EXCEPTION USING MESSAGE = p_name || ' is taken';", true],
+            'leading placeholder via format()' => ["RAISE EXCEPTION USING MESSAGE = format('%s is taken', p_name);", true],
+            'code first, value later' => ["RAISE EXCEPTION 'slug_taken: %', p_slug;", false],
+            'comment is ignored' => ["-- RAISE EXCEPTION '[public:x:409] user % exists', p;\nRAISE EXCEPTION 'not_found';", false],
+            'text message with the word RAISE' => ["SELECT 'we RAISE concerns';", false],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('lintForms')]
+    public function testLintHandlesEveryMessageForm(string $sql, bool $flagged): void
+    {
+        $this->assertSame($flagged, PublicRaiseLint::scan($sql) !== [], $sql);
+    }
+
+    public function testLintHonoursTheIgnoreFileDirectiveOnlyWhenPresent(): void
+    {
+        $this->assertSame([], PublicRaiseLint::scan("-- stonescript-lint: ignore-file\nRAISE EXCEPTION '% x', p;"));
+        $this->assertNotSame([], PublicRaiseLint::scan("RAISE EXCEPTION '% x', p;"));
     }
 
     public function testBundledFixturesAreLintClean(): void

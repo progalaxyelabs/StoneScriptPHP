@@ -619,6 +619,8 @@ final class PersistenceContractTest extends TestCase
 
     public function test_raise_public_marker_is_surfaced_and_unmarked_raise_is_not(): void
     {
+        // the platform's own wrapper prefix is registered as an exact literal (no arbitrary prefix text is honoured)
+        DbErrorMapper::allowPublicPrefix('Failed to create order: ');
         $this->fake(function (): never {
             throw $this->gatewayError('Failed to create order: [public:insufficient_quantity:409] Insufficient quantity in selected warehouse (SQLSTATE: P0001)');
         });

@@ -35,11 +35,12 @@ final class SafeDbContext
      */
     public static function primaryOf(string $raw): string
     {
-        if (preg_match('/\bERROR:\s+(.*)/', $raw, $m) === 1) {
-            $raw = $m[1];
-        } elseif (preg_match('/^SQLSTATE\[[0-9A-Za-z]{5}\]:\s*(.*)/s', $raw, $m) === 1) {
-            $raw = $m[1];
-        }
+        // Driver prefixes are stripped ONLY at the very start, in a fixed order. Never search for `ERROR:` anywhere:
+        // a user value that contains it would move the extraction point.
+        $raw = preg_replace('/^pg_[a-z_]+\(\): Query failed: /', '', $raw) ?? $raw;
+        $raw = preg_replace('/^SQLSTATE\[[0-9A-Za-z]{5}\]:\s*/', '', $raw) ?? $raw;
+        $raw = preg_replace('/^[A-Z][A-Za-z ]{2,40}: \d+ (?=ERROR:)/', '', $raw) ?? $raw;
+        $raw = preg_replace('/^ERROR:\s+/', '', $raw) ?? $raw;
         return GatewayException::primaryLine($raw);
     }
 

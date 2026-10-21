@@ -93,7 +93,7 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
             'raise sentence' => ['raise:sentence', [
                 'sqlstate' => null, 'app' => null, 'not_msg' => ['code='], 'status' => 500, 'raw' => 'Insufficient stock for item',
             ]],
-            'raise value-interpolating' => ['raise:value_exists', [
+            'raise value-interpolating' => ['unsafe:value_exists', [
                 'sqlstate' => null, 'app' => null, 'not_msg' => ['code='], 'status' => 500, 'raw' => '{E}',
             ]],
             'raise sentence with value' => ['raise:value_only', [
@@ -108,11 +108,16 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
                 'msg' => ['sqlstate=23514'], 'status' => 422, 'raw' => '{A}', 'generic_response' => 'Some of the details',
             ]],
             // values interpolated by RAISE '%' must never be taken for a code
-            'raise bare value Rahul' => ['raise:bare_value@Rahul', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'Rahul'], 'status' => 500, 'raw' => 'Rahul']],
-            'raise bare value jdoe' => ['raise:bare_value@jdoe', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'jdoe'], 'status' => 500, 'raw' => 'jdoe']],
-            'raise bare value dotted' => ['raise:bare_value@john.doe', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'john.doe'], 'status' => 500, 'raw' => 'john.doe']],
-            'raise bare value dashed' => ['raise:bare_value@john-smith', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'john-smith'], 'status' => 500, 'raw' => 'john-smith']],
-            'raise bare value uuid' => ['raise:bare_value@9f86d081-884c-7d65-9a2f-eaa0c55ad015', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', '9f86d081'], 'status' => 500, 'raw' => '9f86d081-884c']],
+            'raise bare value Rahul' => ['unsafe:bare_value@Rahul', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'Rahul'], 'status' => 500, 'raw' => 'Rahul']],
+            'raise bare value jdoe' => ['unsafe:bare_value@jdoe', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'jdoe'], 'status' => 500, 'raw' => 'jdoe']],
+            'raise bare value dotted' => ['unsafe:bare_value@john.doe', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'john.doe'], 'status' => 500, 'raw' => 'john.doe']],
+            'raise bare value dashed' => ['unsafe:bare_value@john-smith', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'john-smith'], 'status' => 500, 'raw' => 'john-smith']],
+            'raise bare value uuid' => ['unsafe:bare_value@9f86d081-884c-7d65-9a2f-eaa0c55ad015', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', '9f86d081'], 'status' => 500, 'raw' => '9f86d081-884c']],
+            // a function echoing two parameters: the first is marker-shaped, the second is another user's name
+            'echo two parameters with marker' => ['echo_two', [
+                'sqlstate' => null, 'app' => null, 'not_msg' => ['code='], 'status' => 500, 'raw' => 'Alice Victim', 'generic_response' => 'nothing was changed',
+                'forbid_response' => ['Alice', 'attacker'],
+            ]],
             'raise smuggling attempt' => ['raise:smuggle', [
                 'sqlstate' => null, 'constraint' => null, 'column' => null, 'app' => null, 'not_msg' => ['code=', 'constraint=', 'column=', 'smuggl' . 'ed'],
                 'status' => 500, 'raw' => '{SK}',
@@ -124,6 +129,14 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
     private function call(string $key): array
     {
         $e = self::EMAIL;
+        if (str_starts_with($key, 'unsafe:')) {
+            [$kind, $val] = array_pad(explode('@', substr($key, 7), 2), 2, $e);
+            return ['raise_unsafe', [$kind, $val]];
+        }
+        if ($key === 'echo_two') {
+            // the caller's phone number is marker-shaped; the "owner" is somebody else's name
+            return ['echo_two', ['[public:x:409] attacker text', 'Alice Victim']];
+        }
         if (str_starts_with($key, 'raise:')) {
             [$kind, $val] = array_pad(explode('@', substr($key, 6), 2), 2, $e);
             return ['raise_it', [$kind, $val]];
@@ -217,6 +230,9 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
         if (isset($x['public_text'])) {
             $this->assertSame($x['public_text'], $r['mapped_message'], 'a [public:..] RAISE publishes exactly its own text');
         }
+        foreach ($x['forbid_response'] ?? [] as $bad) {
+            $this->assertStringNotContainsString($bad, $r['mapped_message'], 'client-facing message');
+        }
         if (isset($x['generic_response'])) {
             $this->assertStringContainsString($x['generic_response'], $r['mapped_message'], 'attacker text must not become the response');
         }
@@ -250,6 +266,21 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
         }
         $this->assertNotSame('', $logs, 'the exception handler wrote a log');
         $this->assertClean($logs, 'uncaught log file');
+    }
+
+    public function testFunctionCallCauseFormatIsPinned(): void
+    {
+        // PINNED FORMAT: /call joins message, DETAIL and the SCHEMA/TABLE/COLUMN tail with ' | ' (migrations and seeders use ' - ')
+        [$fn, $params] = $this->call('unique');
+        try {
+            $this->client()->callFunction($fn, $params);
+            $this->fail('must fail');
+        } catch (GatewayException $e) {
+            $raw = (string) $e->getRawCauseForDebug();
+            $this->assertStringStartsWith('duplicate key value violates unique constraint "users_email_key" | DETAIL: Key (email)=(', $raw);
+            $this->assertStringEndsWith(' | SCHEMA: public | TABLE: users', $raw);
+            $this->assertStringNotContainsString(' - Key (', $raw);
+        }
     }
 
     public function testGatewayItselfLogsNoSentinels(): void

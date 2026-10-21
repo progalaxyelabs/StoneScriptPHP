@@ -87,6 +87,8 @@ final class PersistenceBusinessErrorParityTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('cases')]
     public function test_mechanism_b_function_side_raise_marker_gives_identical_status_and_message(string $raw, int $status, string $message, string $code): void
     {
+        // the platform's own wrapper prefix is registered as an exact literal (no arbitrary prefix text is honoured)
+        DbErrorMapper::allowPublicPrefix('Failed to create order: ');
         // The function is edited to: RAISE EXCEPTION '[public:<code>:<status>] <message>'
         $wrapped = "Failed to create order: [public:$code:$status] $message (SQLSTATE: P0001)";
         Database::fake(['create_order' => function () use ($wrapped): never {

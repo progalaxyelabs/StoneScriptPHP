@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/generate-common.php';   // provides detect_root_path()
 require_once __DIR__ . '/helpers/color.php';
+require_once __DIR__ . '/../src/Persistence/PublicRaiseLint.php'; // RAISE message rules (runs by default)
 require_once __DIR__ . '/sql-integrity-columns.php'; // Phase 2: column checker (pulls in tokenizer + tree)
 
 if (!defined('ROOT_PATH')) {
@@ -844,6 +845,19 @@ foreach ($schemasToCheck as $schema) {
     foreach ($fnFiles as $file) {
         $fnBodies              = parseFunctionBodies($file);
         $fnBodiesByFile[$file] = $fnBodies;
+
+        // RAISE message rules: a [public...] RAISE must not interpolate, no RAISE may start with an interpolated value
+        foreach (\StoneScriptPHP\Persistence\PublicRaiseLint::scanDetailed((string) file_get_contents($file)) as $hit) {
+            $errors[] = [
+                'type'    => 'unsafe_raise_' . $hit['rule'],
+                'schema'  => $schema,
+                'file'    => $file,
+                'fn'      => basename($file),
+                'ref'     => $hit['rule'],
+                'line'    => $hit['line'],
+                'message' => "RAISE rule '{$hit['rule']}': {$hit['message']}.",
+            ];
+        }
 
         foreach ($fnBodies as $fn) {
             $refs = extractReferences($fn['body'], $fn['body_start_line']);

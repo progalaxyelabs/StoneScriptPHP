@@ -22,14 +22,22 @@ and query parameters no longer reach stdout, stderr, logs, exception messages, `
   raw cause for the marker, DETAIL / HINT / CONTEXT included. A user could submit `[public:x:404] hi` as a field value;
   a constraint failure echoes it in `DETAIL: Failing row contains (...)`, and the mapper returned that text, plus the
   other columns of the row the user never supplied, to the API client with a status the attacker chose. The marker is
-  now searched only within the PostgreSQL PRIMARY message line, never in DETAIL / HINT / CONTEXT and never past a cause
-  separator; when the SQLSTATE is known it must be P0001 (a system error such as 22P02 or 23xxx never carries a
-  developer marker); only plain wording may precede the marker (`Failed to create order: [public:...]` still works, a
-  quote, parenthesis or `=` before it means PostgreSQL echoed a value); and the text ends at the end of that line (or
-  at ` (SQLSTATE`). The whole rule is one self-contained function, `DbErrorMapper::publicMarker()`, so it can be
-  ported to older lines unchanged.
+  now accepted only when nothing user-influenced can sit in front of it: a known SQLSTATE must be P0001; driver prefixes
+  (`SQLSTATE[xxxxx]: `, `<Class>: <n> ERROR:  `, `ERROR:  `, `pg_query(): Query failed: `) are stripped ONLY at the very start
+  (never a search for `ERROR:`, which a user value could contain); the primary line ends at the first newline, ` | ` or
+  inline DETAIL/HINT/CONTEXT; the line must START with the marker, or with an exact literal prefix the platform registered
+  with `DbErrorMapper::allowPublicPrefix('Failed to create order: ')` (no arbitrary prefix text); the text ends at the end
+  of that line or at ` (SQLSTATE`. A user value that is marker-shaped and echoed anywhere else (`RAISE 'Phone % is already
+  registered to %'`) therefore cannot become a public response. The pgandroid bridge form
+  `SQLSTATE[P0001]: [public:gone:410] msg` is supported. The whole rule is one self-contained function,
+  `DbErrorMapper::publicMarker()`, so it can be ported to older lines unchanged.
+  **AUTHORING RULES: a RAISE must never start with an interpolated value (`RAISE '% is taken', v` is indistinguishable
+  from a developer marker at runtime), and a `[public...]` RAISE must never interpolate at all.**
+  A message-text marker is inherently spoofable; the long-term fix is a structured "public" signal from the gateway
+  (task #10086), after which the marker can be retired.
+  `Persistence\PublicRaiseLint` enforces both rules (plain, E'', dollar-quoted and `format()` / `||` forms of `RAISE` and
+  `USING MESSAGE = ...`) and **runs by default in `php stone validate sqlintegrity`**, as an error.
   **`[public:...]` text is published to the API client VERBATIM: never interpolate values into it (no `%`).**
-  `Persistence\PublicRaiseLint` flags a `%` in a `[public...]` RAISE; run it over your `src/postgresql` tree in a test.
 
 - **Allow-list, not scrubbing.** Diagnostics are rebuilt from identifier-shaped fields only (SQLSTATE, schema, table,
   column, constraint, function, database, application error code, correlation id) by `Persistence\SafeDbContext`,
@@ -88,7 +96,8 @@ errors; the CLI now shows `sqlstate=`, `constraint=` and the failing migration f
    (`locked`), dotted or dashed names, UUIDs and e-mails are never codes. Audit every `RAISE EXCEPTION` and every
    `str_contains($e->getMessage(), ...)` in your platform against that shape: each platform's migration list (your
    release checklist; the BUILD notes for this release carry the per-platform inventory) names the RAISEs that are
-   sentences or non-conforming and must move to codes before you upgrade. Never `RAISE EXCEPTION '%', value`.
+   sentences or non-conforming and must move to codes before you upgrade. Never `RAISE EXCEPTION '%', value`. If a wrapper puts text before a `[public:...]` marker, register that exact literal with
+   `DbErrorMapper::allowPublicPrefix()`; run `php stone validate sqlintegrity` (it now lints the RAISE rules above).
    Change sentence-style `RAISE EXCEPTION 'Insufficient stock for %', x` to `RAISE EXCEPTION 'insufficient_stock: item %', x`
    and branch on the code. `DbErrorMapper` and `[public:code:status]` markers keep working unchanged.
 4. CLI: a migration/seed failure now prints `error [table=.. column=..]`; run the statement in `psql` for the full text.
