@@ -151,9 +151,10 @@ final class DbErrorMapper
             }
         }
 
-        // Explicit public RAISE marker: `[public:code:status] message`
-        if (preg_match('/\[public(?::([a-z][a-z0-9_]*))?(?::([1-4]\d\d))?\]\s*(.+?)(?=\s\|\s|\s\(SQLSTATE|$)/s', $raw, $m) === 1 && trim($m[3]) !== '') {
-            return new PublicError($m[2] !== '' ? (int) $m[2] : 400, trim($m[3]), null, null, $m[1] !== '' ? $m[1] : null, true, $m[2] !== '');
+        // Explicit public RAISE marker: `[public:code:status] message` (see publicMarker() for the security rules).
+        $marker = self::publicMarker($raw, self::sqlState($e));
+        if ($marker !== null) {
+            return new PublicError($marker['status'] ?? 400, $marker['message'], null, null, $marker['code'], true, $marker['status'] !== null);
         }
 
         $thing = $noun !== null && $noun !== '' ? $noun : 'record';
@@ -188,6 +189,49 @@ final class DbErrorMapper
 
         // Everything else (undefined column/function, syntax error, not-null, unrecognised RAISE ...): generic 500.
         return new PublicError(500, PersistenceException::DEFAULT_MESSAGE, public: false);
+    }
+
+    /**
+     * The `[public:code:status] message` RAISE marker, or null. SELF-CONTAINED on purpose (no other helper) so the
+     * same rule can be ported to older release lines unchanged.
+     *
+     * SECURITY. The text after the marker is published to the API client VERBATIM, so the marker must come from the
+     * developer's RAISE and never from a user value that PostgreSQL echoed. Therefore:
+     *  1. only the PRIMARY message line is searched, never DETAIL / HINT / CONTEXT (`Failing row contains (...)`
+     *     echoes user input and other columns) and never past a cause separator (newline, ` | `, inline
+     *     DETAIL:/HINT:/CONTEXT:);
+     *  2. when the SQLSTATE is known it must be P0001 (RAISE EXCEPTION); a system error (22P02 invalid input, 23xxx
+     *     constraint ...) never carries a developer marker;
+     *  3. only plain wording may precede the marker (`Failed to create order: [public:...]`): a quote, parenthesis or
+     *     `=` before it means PostgreSQL is echoing a value (`invalid input syntax for type uuid: "[public:..."`);
+     *  4. the captured text ends at the end of that primary line (or at ` (SQLSTATE`).
+     * Never interpolate values into a `[public...]` RAISE.
+     *
+     * @return array{status: ?int, message: string, code: ?string}|null status null = the marker gave none (400)
+     */
+    private static function publicMarker(string $raw, ?string $sqlstate): ?array
+    {
+        if ($sqlstate !== null && $sqlstate !== 'P0001') {
+            return null;
+        }
+        // 1. primary line only: strip a driver `ERROR:  ` prefix, then cut at the first separator
+        $line = preg_match('/\bERROR:\s+(.*)/', $raw, $m) === 1 ? $m[1] : $raw;
+        $cut = strlen($line);
+        foreach (["\n", ' | '] as $sep) { // not " - ": that joins migration/seeder causes only, and is legal inside a message
+            $i = strpos($line, $sep);
+            if ($i !== false && $i < $cut) {
+                $cut = $i;
+            }
+        }
+        $line = substr($line, 0, $cut);
+        if (preg_match('/\s(?:DETAIL|HINT|CONTEXT|STATEMENT|QUERY):\s/', $line, $d, PREG_OFFSET_CAPTURE) === 1) {
+            $line = substr($line, 0, $d[0][1]);
+        }
+        // 3 + 4: plain wording before, remainder of the line after (bounded by ` (SQLSTATE`)
+        if (preg_match('/^[A-Za-z0-9 _.,:;\-]*\[public(?::([a-z][a-z0-9_]*))?(?::([1-4]\d\d))?\]\s*(.+?)(?=\s\(SQLSTATE|$)/s', $line, $m) !== 1 || trim($m[3]) === '') {
+            return null;
+        }
+        return ['status' => $m[2] !== '' ? (int) $m[2] : null, 'message' => trim($m[3]), 'code' => $m[1] !== '' ? $m[1] : null];
     }
 
     /** Map to an ApiResponse that always carries a real 4xx/5xx status. Logs the sanitised chain. */

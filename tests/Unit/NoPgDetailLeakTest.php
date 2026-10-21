@@ -358,6 +358,18 @@ final class NoPgDetailLeakTest extends TestCase
             'sentence' => ["SQLSTATE[P0001]: Insufficient stock for item", null, 'P0001'],
             'value sentence' => ["ERROR:  User +919876500123 exists", null, null],
             'code only in detail' => ["ERROR:  Something failed\nDETAIL:  not_found", null, null],
+            'bare name' => ["ERROR:  Rahul", null, null],
+            'bare name 2' => ["SQLSTATE[P0001]: jdoe", null, 'P0001'],
+            'dotted name' => ["ERROR:  john.doe", null, null],
+            'dashed name' => ["ERROR:  john-smith", null, null],
+            'dashed uuid' => ["ERROR:  9f86d081-884c-7d65-9a2f-eaa0c55ad015", null, null],
+            'name then colon' => ["ERROR:  Rahul: hello", null, null],
+            'platform code user_cap' => ["SQLSTATE[P0001]: user_cap", 'user_cap', 'P0001'],
+            'platform code repo_op_busy' => ["SQLSTATE[P0001]: repo_op_busy", 'repo_op_busy', 'P0001'],
+            'platform code tenant_already_exists' => ["SQLSTATE[P0001]: tenant_already_exists", 'tenant_already_exists', 'P0001'],
+            'platform code PY050' => ["SQLSTATE[P0001]: PY050", 'PY050', 'P0001'],
+            'platform code UNKNOWN_PACK' => ["SQLSTATE[P0001]: UNKNOWN_PACK: pack x not found", 'UNKNOWN_PACK:', 'P0001'],
+            'platform code CODE_EXPIRED' => ["SQLSTATE[P0001]: CODE_EXPIRED: pairing code has expired", 'CODE_EXPIRED:', 'P0001'],
             'code only in hint' => ["SQLSTATE[P0001]: Something failed\nHINT:  slug_taken", null, 'P0001'],
         ];
     }

@@ -23,7 +23,7 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
 
     private static function expand(string $t): string
     {
-        return strtr($t, ['{E}' => 'jane.sentinel', '{D}' => 'DETAIL', '{F}' => 'Failing row', '{NP}' => 'is not present in table', '{SK}' => 'smuggled_key']);
+        return strtr($t, ['{E}' => 'jane.sentinel', '{D}' => 'DETAIL', '{F}' => 'Failing row', '{NP}' => 'is not present in table', '{SK}' => 'smuggled_key', '{A}' => 'attacker text']);
     }
 
     private function uniqueEmail(): string
@@ -86,9 +86,9 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
                 'sqlstate' => null, 'app' => '[ER102]', 'msg' => ['code=[ER102]'], 'status' => 500, 'raw' => 'stock short for {E}',
             ]],
             'raise bracket public' => ['raise:tag_public', [
-                'sqlstate' => null, 'app' => '[public:code:409]', 'msg' => ['code=[public:code:409]'], 'status' => 409, 'raw' => 'already here: {E}',
-                // a [public:...] RAISE is the developer deliberately publishing its text to the API client
-                'public_response' => true,
+                // a [public:...] RAISE is the developer deliberately publishing its (value-free) text to the API client
+                'sqlstate' => null, 'app' => '[public:code:409]', 'msg' => ['code=[public:code:409]'], 'status' => 409, 'raw' => 'already here',
+                'public_text' => 'already here',
             ]],
             'raise sentence' => ['raise:sentence', [
                 'sqlstate' => null, 'app' => null, 'not_msg' => ['code='], 'status' => 500, 'raw' => 'Insufficient stock for item',
@@ -102,6 +102,17 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
             'raise code only in secondary fields' => ['raise:detail', [
                 'sqlstate' => null, 'app' => null, 'not_msg' => ['code='], 'status' => 500, 'raw' => '{D}',
             ]],
+            // a user-submitted value carrying the public marker, echoed by PostgreSQL in DETAIL: Failing row contains (...)
+            'check violation with marker in a value' => ['check_attack', [
+                'sqlstate' => '23514', 'constraint' => 'users_age_check', 'table' => 'users', 'app' => null,
+                'msg' => ['sqlstate=23514'], 'status' => 422, 'raw' => '{A}', 'generic_response' => 'Some of the details',
+            ]],
+            // values interpolated by RAISE '%' must never be taken for a code
+            'raise bare value Rahul' => ['raise:bare_value@Rahul', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'Rahul'], 'status' => 500, 'raw' => 'Rahul']],
+            'raise bare value jdoe' => ['raise:bare_value@jdoe', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'jdoe'], 'status' => 500, 'raw' => 'jdoe']],
+            'raise bare value dotted' => ['raise:bare_value@john.doe', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'john.doe'], 'status' => 500, 'raw' => 'john.doe']],
+            'raise bare value dashed' => ['raise:bare_value@john-smith', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', 'john-smith'], 'status' => 500, 'raw' => 'john-smith']],
+            'raise bare value uuid' => ['raise:bare_value@9f86d081-884c-7d65-9a2f-eaa0c55ad015', ['sqlstate' => null, 'app' => null, 'not_msg' => ['code=', '9f86d081'], 'status' => 500, 'raw' => '9f86d081-884c']],
             'raise smuggling attempt' => ['raise:smuggle', [
                 'sqlstate' => null, 'constraint' => null, 'column' => null, 'app' => null, 'not_msg' => ['code=', 'constraint=', 'column=', 'smuggl' . 'ed'],
                 'status' => 500, 'raw' => '{SK}',
@@ -114,7 +125,8 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
     {
         $e = self::EMAIL;
         if (str_starts_with($key, 'raise:')) {
-            return ['raise_it', [substr($key, 6), $e]];
+            [$kind, $val] = array_pad(explode('@', substr($key, 6), 2), 2, $e);
+            return ['raise_it', [$kind, $val]];
         }
         switch ($key) {
             case 'unique':
@@ -128,6 +140,9 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
                 return ['create_user', [$this->uniqueEmail(), null, 3]];
             case 'check':
                 return ['create_user', [$this->uniqueEmail(), 'Neg', -5]];
+            case 'check_attack':
+                // the user supplies a name that looks like the public marker; PostgreSQL echoes it (and the e-mail) in DETAIL
+                return ['create_user', [$this->uniqueEmail(), '[public:x:404] attacker text', -5]];
             case 'baduuid':
                 return ['user_by_uuid', ['not-a-uuid-' . $e]];
             case 'badint':
@@ -198,10 +213,12 @@ final class RealGatewayErrorsTest extends RealGatewayTestCase
         foreach (['message', 'string', 'print_r', 'describe'] as $k) {
             $this->assertClean($r[$k], "framework $k");
         }
-        if (empty($x['public_response'])) {
-            $this->assertClean($r['mapped_message'], 'client-facing mapped message');
-        } else {
-            $this->assertStringContainsString('already here', $r['mapped_message']);
+        $this->assertClean($r['mapped_message'], 'client-facing mapped message');
+        if (isset($x['public_text'])) {
+            $this->assertSame($x['public_text'], $r['mapped_message'], 'a [public:..] RAISE publishes exactly its own text');
+        }
+        if (isset($x['generic_response'])) {
+            $this->assertStringContainsString($x['generic_response'], $r['mapped_message'], 'attacker text must not become the response');
         }
         // the result line is the harness's own report (its fields are asserted one by one above); everything else is real output
         $this->assertClean(preg_replace('/^E2E_RESULT:.*$/m', '', $out) . $err, 'child stdout+stderr');

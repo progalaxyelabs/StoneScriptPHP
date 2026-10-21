@@ -8,7 +8,9 @@ BEGIN
         WHEN 'code_text'    THEN RAISE EXCEPTION 'job_conflict: %', p_val;
         WHEN 'code_colon'   THEN RAISE EXCEPTION 'not_found: workspace id=% not found', p_val;
         WHEN 'tag_er'       THEN RAISE EXCEPTION '[ER102] stock short for %', p_val;
-        WHEN 'tag_public'   THEN RAISE EXCEPTION '[public:code:409] already here: %', p_val;
+        -- [public:...] text is published to the API client VERBATIM: it must never interpolate a value
+        WHEN 'tag_public'   THEN RAISE EXCEPTION '[public:code:409] already here';
+        WHEN 'bare_value'   THEN RAISE EXCEPTION '%', p_val;
         WHEN 'sentence'     THEN RAISE EXCEPTION 'Insufficient stock for item';
         WHEN 'value_exists' THEN RAISE EXCEPTION '% exists', p_val;
         WHEN 'value_only'   THEN RAISE EXCEPTION 'User % exists', p_val;

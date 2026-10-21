@@ -215,12 +215,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client.git",
-                "reference": "82a52a4d0256032a7ef18ab843efe5d5e01358ac"
+                "reference": "f3e858efbe6f24e5f11a7c7813759f1290fd2ce9"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/progalaxyelabs/stonescriptdb-gateway-client/zipball/82a52a4d0256032a7ef18ab843efe5d5e01358ac",
-                "reference": "82a52a4d0256032a7ef18ab843efe5d5e01358ac",
+                "url": "https://api.github.com/repos/progalaxyelabs/stonescriptdb-gateway-client/zipball/f3e858efbe6f24e5f11a7c7813759f1290fd2ce9",
+                "reference": "f3e858efbe6f24e5f11a7c7813759f1290fd2ce9",
                 "shasum": ""
             },
             "require": {

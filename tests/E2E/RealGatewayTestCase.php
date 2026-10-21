@@ -25,7 +25,7 @@ abstract class RealGatewayTestCase extends TestCase
     protected const FORBIDDEN = [
         'jane.sentinel', '919876500123', 'sentinelhashvalue', 'seed.sentinel', 'mig.sentinel',
         'Key (', 'DETAIL', 'HINT', 'Failing row', 'is not present in table',
-        'smuggled_key', 'smuggled_col',
+        'smuggled_key', 'smuggled_col', 'attacker text', '[public:x:404]',
     ];
 
     protected static string $url = '';
