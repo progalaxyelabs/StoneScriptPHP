@@ -173,7 +173,10 @@ class Logger
     const SENSITIVE_KEYS = [
         'password', 'password_hash', 'token', 'secret', 'api_key', 'access_token',
         'refresh_token', 'private_key', 'authorization', 'cookie', 'session',
-        'csrf_token', 'otp_code', 'verification_token', 'reset_token', 'jwt'
+        'csrf_token', 'otp_code', 'verification_token', 'reset_token', 'jwt',
+        // Personal data: never persisted in log context (use opaque ids instead).
+        'email', 'phone', 'mobile', 'address', 'gstin', 'pincode', 'store_name', 'tenant_name', 'owner_name',
+        'first_name', 'last_name', 'full_name', 'display_name', 'customer_name', 'user_name', 'otp'
     ];
 
     /**
@@ -226,7 +229,8 @@ class Logger
         // Sanitize context to remove sensitive data. The message text and every context string also pass through
         // LogSanitizer so no call site can leak database values (Key (col)=(value), DETAIL, quoted literals) or raw emails.
         $sanitized_context = $this->sanitize_context($context);
-        $message = \StoneScriptPHP\Persistence\LogSanitizer::forLog((string) $message);
+        // One line, always: an attacker-controlled value (a token's `iss`, a header) must never forge a log line.
+        $message = \StoneScriptPHP\RequestLogging\FailureText::oneLine(\StoneScriptPHP\Persistence\LogSanitizer::forLog(\StoneScriptPHP\RequestLogging\FailureText::maskPii((string) $message)));
 
         // Build log entry
         $log_entry = [
@@ -471,7 +475,7 @@ class Logger
         $level = $status_code >= 500 ? self::ERROR
             : ($status_code >= 400 ? self::WARNING : self::INFO);
 
-        $this->log($level, sprintf('%s %s', $method, $uri), [
+        $this->log($level, sprintf('%s %s', \StoneScriptPHP\RequestLogging\FailureText::oneLine($method), \StoneScriptPHP\RequestLogging\FailureText::path($uri)), [
             'status_code' => $status_code,
             'duration_ms' => round($duration_ms, 2),
             'ip' => client_ip(),

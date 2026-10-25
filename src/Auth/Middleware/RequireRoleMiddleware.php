@@ -39,7 +39,7 @@ class RequireRoleMiddleware implements MiddlewareInterface
         // Check if request has JWT claims
         if (!isset($request['jwt_claims']) || empty($request['jwt_claims'])) {
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Authentication required');
+            return new ApiResponse('error', 'Unauthorized: Authentication required', null, 401);
         }
 
         $claims = $request['jwt_claims'];
@@ -51,13 +51,13 @@ class RequireRoleMiddleware implements MiddlewareInterface
 
         if ($activeRole === null) {
             http_response_code(403);
-            return new ApiResponse('error', 'Forbidden: Insufficient permissions');
+            return new ApiResponse('error', 'Forbidden: Insufficient permissions', null, 403);
         }
 
         // Check if user's role is in the allowed list
         if (!in_array($activeRole, $this->allowedRoles, true)) {
             http_response_code(403);
-            return new ApiResponse('error', 'Forbidden: Insufficient role permissions');
+            return new ApiResponse('error', 'Forbidden: Insufficient role permissions', null, 403);
         }
 
         // Continue to next middleware

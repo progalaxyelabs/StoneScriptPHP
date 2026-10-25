@@ -140,7 +140,7 @@ class JwtAuthMiddleware implements MiddlewareInterface
         if (empty($authHeader)) {
             log_debug('JWT middleware: Missing authorization header');
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Missing authentication token');
+            return new ApiResponse('error', 'Unauthorized: Missing authentication token', null, 401);
         }
 
         // Extract token (remove "Bearer " prefix)
@@ -152,7 +152,7 @@ class JwtAuthMiddleware implements MiddlewareInterface
         if ($payload === false) {
             log_debug('JWT middleware: Invalid or expired token');
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Invalid or expired token');
+            return new ApiResponse('error', 'Unauthorized: Invalid or expired token', null, 401);
         }
 
         // Create authenticated user from payload
@@ -182,7 +182,7 @@ class JwtAuthMiddleware implements MiddlewareInterface
         } catch (\InvalidArgumentException $e) {
             log_error("JWT middleware: Invalid token payload - {$e->getMessage()}");
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Invalid token format');
+            return new ApiResponse('error', 'Unauthorized: Invalid token format', null, 401);
         }
     }
 

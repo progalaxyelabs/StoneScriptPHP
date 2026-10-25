@@ -533,7 +533,7 @@ class Application
     {
         $method   = $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN';
         $uri      = $_SERVER['REQUEST_URI'] ?? '/';
-        $route    = strtok($uri, '?');
+        $route    = \StoneScriptPHP\RequestLogging\FailureText::path($uri);
         $status   = http_response_code() ?: 200;
         $duration = round((microtime(true) - self::$startTime) * 1000, 2);
         $userId   = AuthContext::check() ? (string) AuthContext::getUser()->user_id : '-';

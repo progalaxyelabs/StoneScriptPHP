@@ -83,7 +83,7 @@ class MultiAuthJwtValidator
             // Manually decode JWT payload to extract issuer (avoids "empty key" error in jwt v6+)
             $parts = explode('.', $jwt);
             if (count($parts) !== 3) {
-                log_error("JWT validation failed: Invalid JWT format");
+                log_warning("JWT validation failed: Invalid JWT format");
                 return null;
             }
 
@@ -93,14 +93,14 @@ class MultiAuthJwtValidator
             $issuer = $payload->iss ?? null;
 
             if (!$issuer) {
-                log_error("JWT validation failed: Token has no 'iss' claim");
+                log_warning("JWT validation failed: Token has no 'iss' claim");
                 return null;
             }
 
             // Find matching auth server by issuer
             $issuerType = $this->findIssuerType($issuer);
             if (!$issuerType) {
-                log_error("JWT validation failed: Unknown issuer '$issuer'");
+                log_warning("JWT validation failed: Unknown issuer '$issuer'");
                 return null;
             }
 
@@ -116,7 +116,7 @@ class MultiAuthJwtValidator
             if (isset($serverConfig['audience'])) {
                 $audience = $decoded->aud ?? null;
                 if ($audience !== $serverConfig['audience']) {
-                    log_error("JWT validation failed: Invalid audience. Expected '{$serverConfig['audience']}', got '$audience'");
+                    log_warning("JWT validation failed: Invalid audience. Expected '{$serverConfig['audience']}', got '$audience'");
                     return null;
                 }
             }
@@ -127,10 +127,10 @@ class MultiAuthJwtValidator
 
             return $claims;
         } catch (\Firebase\JWT\ExpiredException $e) {
-            log_error("JWT validation failed: Token expired - " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            log_debug("JWT validation failed: Token expired - " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         } catch (\Firebase\JWT\SignatureInvalidException $e) {
-            log_error("JWT validation failed: Invalid signature - " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            log_warning("JWT validation failed: Invalid signature - " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return null;
         } catch (TokenVerifierUnavailableException $e) {
             log_error("JWT validation could not be completed: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));

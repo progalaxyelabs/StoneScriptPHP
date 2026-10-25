@@ -24,7 +24,7 @@ class GoogleOauthRoute implements IRouteHandler
         if ($google_client_id === null || trim($google_client_id) === '') {
             log_error('Google Sign-In is not configured: GOOGLE_CLIENT_ID is not set.');
             http_response_code(500);
-            return new ApiResponse('error', 'Google Sign-In is not configured on this server', []);
+            return new ApiResponse('error', 'Google Sign-In is not configured on this server', [], 500);
         }
 
         $google_client = new \Google\Client(['client_id' => $google_client_id]);
@@ -79,12 +79,12 @@ class GoogleOauthRoute implements IRouteHandler
                 // Invalid Token (verification failed)
                 http_response_code(401); // Unauthorized
                 log_error("Google Sign-In Error: Invalid ID token received.");
-                return new ApiResponse('not ok', 'Invalid ID token', []);
+                return new ApiResponse('not ok', 'Invalid ID token', [], 401);
             }
         } catch (\Exception $e) {
             http_response_code(500);
             log_error("Google Sign-In Exception: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
-            return new ApiResponse('not ok', 'Token verification failed', []);
+            return new ApiResponse('not ok', 'Token verification failed', [], 500);
         }        
     }
 }

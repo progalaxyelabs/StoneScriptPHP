@@ -86,9 +86,26 @@ class MiddlewarePipeline
             return $this->next($request, $finalHandler);
         });
 
-        // If middleware returns a response, return it (short-circuit)
-        // If it returns null, the middleware called $next() and we return that result
-        return $response ?? new ApiResponse('error', 'Middleware did not return a response');
+        // A middleware that returned nothing is a server bug: answer 500, log it at error level, and record it for
+        // request_logs (it used to be an error body with NO status, i.e. shipped as HTTP 200).
+        if ($response === null) {
+            $detail = 'Middleware did not return a response: ' . get_class($middleware);
+            \StoneScriptPHP\RequestLogging\RequestContext::captureException(new \LogicException($detail));
+            log_error($detail);
+            http_response_code(500);
+            return new ApiResponse('error', 'Middleware did not return a response', null, 500);
+        }
+
+        // Keep the response OBJECT truthful for every outer layer: code that only called http_response_code(4xx/5xx)
+        // left the object's status null, which platform guards read as "no status".
+        if ($response->httpStatusCode === null) {
+            $process = http_response_code();
+            if (is_int($process) && $process >= 400) {
+                $response->httpStatusCode = $process;
+            }
+        }
+
+        return $response;
     }
 
     /**

@@ -181,7 +181,7 @@ class RsaJwtHandler implements JwtHandlerInterface, StrictTokenVerifier
             if ($verifyIssuer) {
                 $expectedIssuer = $identity->issuer;
                 if (!empty($expectedIssuer) && isset($decoded->iss) && $decoded->iss !== $expectedIssuer) {
-                    log_error("JWT issuer mismatch: expected '$expectedIssuer', got '{$decoded->iss}'");
+                    log_warning("JWT issuer mismatch: expected '$expectedIssuer', got '{$decoded->iss}'");
                     return false;
                 }
             }
@@ -192,13 +192,13 @@ class RsaJwtHandler implements JwtHandlerInterface, StrictTokenVerifier
             unset($claims['iss'], $claims['iat'], $claims['exp'], $claims['aud'], $claims['nbf']);
             return $claims;
         } catch (\Firebase\JWT\ExpiredException $e) {
-            log_error('JWT token expired: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            log_debug('JWT token expired: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         } catch (\Firebase\JWT\SignatureInvalidException $e) {
-            log_error('JWT signature invalid: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            log_warning('JWT signature invalid: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         } catch (\Exception $e) {
-            log_error('JWT verification failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            log_warning('JWT verification failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return false;
         }
     }

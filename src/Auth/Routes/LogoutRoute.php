@@ -54,7 +54,7 @@ class LogoutRoute implements IRouteHandler
         if (!CsrfHelper::validateRequest()) {
             log_error('LogoutRoute: CSRF validation failed');
             http_response_code(403);
-            return new ApiResponse('error', 'CSRF token validation failed');
+            return new ApiResponse('error', 'CSRF token validation failed', null, 403);
         }
 
         // 2. Get refresh token from cookie

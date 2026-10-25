@@ -46,7 +46,7 @@ class RequireIssuerMiddleware implements MiddlewareInterface
         // Check if JWT claims are present (set by ValidateJwtMiddleware)
         if (!isset($request['jwt_claims'])) {
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: No JWT claims found');
+            return new ApiResponse('error', 'Unauthorized: No JWT claims found', null, 401);
         }
 
         $claims = $request['jwt_claims'];

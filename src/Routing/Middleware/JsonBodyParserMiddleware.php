@@ -34,7 +34,7 @@ class JsonBodyParserMiddleware implements MiddlewareInterface
         if ($this->strict && $mediaType !== 'application/json') {
             log_debug("JsonBodyParser: Unsupported Content-Type: $contentType");
             http_response_code(415);
-            return new ApiResponse('error', 'Content-Type must be application/json');
+            return new ApiResponse('error', 'Content-Type must be application/json', null, 415);
         }
 
         // Parse JSON body
@@ -52,7 +52,7 @@ class JsonBodyParserMiddleware implements MiddlewareInterface
         if ($parsedBody === null && json_last_error() !== JSON_ERROR_NONE) {
             log_debug('JsonBodyParser: Invalid JSON - ' . json_last_error_msg());
             http_response_code(400);
-            return new ApiResponse('error', 'Invalid JSON: ' . json_last_error_msg());
+            return new ApiResponse('error', 'Invalid JSON: ' . json_last_error_msg(), null, 400);
         }
 
         // Add parsed body to request

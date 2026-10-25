@@ -19,7 +19,7 @@ class RequireAuthMiddleware implements MiddlewareInterface
         // Check if request has validated JWT claims
         if (!isset($request['jwt_claims']) || empty($request['jwt_claims'])) {
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Authentication required');
+            return new ApiResponse('error', 'Unauthorized: Authentication required', null, 401);
         }
 
         // Continue to next middleware

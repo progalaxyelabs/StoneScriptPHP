@@ -515,6 +515,8 @@ class Router
             return $this->executeHandler($handler, $request);
         });
 
+        // Make the final response truthful and record every 4xx/5xx for request_logs (always on, no opt-in).
+        $response = \StoneScriptPHP\Http\ResponseFinalizer::apply($response);
         // A failed write must never ship as 2xx (see Persistence\ResponseGuard).
         $response = \StoneScriptPHP\Persistence\ResponseGuard::apply($response);
         \StoneScriptPHP\Persistence\PersistenceLedger::reset();
@@ -645,8 +647,7 @@ class Router
                 $handlerClass = get_class($handler);
             } else {
                 if (!class_exists($handlerClass)) {
-                    log_debug("Handler class not found: $handlerClass");
-                    return $this->error404('Handler not found');
+                    return $this->misconfigured("Route handler class not found: $handlerClass");
                 }
 
                 $handler = new $handlerClass();
@@ -669,8 +670,7 @@ class Router
 
             // Check if handler implements IRouteHandler interface
             if (!($handler instanceof \StoneScriptPHP\IRouteHandler)) {
-                log_debug("Handler does not implement IRouteHandler: $handlerClass");
-                return $this->error404('Handler not implemented correctly');
+                return $this->misconfigured("Route handler does not implement IRouteHandler: $handlerClass");
             }
 
             // Honor the handler's declared validation_rules() at the edge. Without
@@ -747,8 +747,7 @@ class Router
             $response = $handler->process();
 
             if (!($response instanceof ApiResponse)) {
-                log_debug('Handler did not return ApiResponse');
-                return new ApiResponse('error', 'Invalid handler response');
+                return $this->misconfigured('Route handler did not return an ApiResponse: ' . $handlerClass);
             }
 
             \StoneScriptPHP\Audit\AuditRecorder::record($request, $handler, $response);
@@ -757,10 +756,12 @@ class Router
 
         } catch (TenantDatabaseUnavailableException $e) {
             log_error('Tenant database unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            \StoneScriptPHP\RequestLogging\RequestContext::captureException($e);
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: session references an unavailable tenant. Please sign in again.');
+            return new ApiResponse('error', 'Unauthorized: session references an unavailable tenant. Please sign in again.', null, 401);
         } catch (\StoneScriptPHP\Persistence\PersistenceException $e) {
             // A write that did not persist: classified safe message (or explicit public business error) + the real 4xx/5xx.
+            \StoneScriptPHP\RequestLogging\RequestContext::captureException($e);
             return \StoneScriptPHP\Persistence\DbErrorMapper::toResponse($e);
         } catch (\Exception $e) {
             $dbOrigin = \StoneScriptPHP\Persistence\DbErrorMapper::isDatabaseOrigin($e);
@@ -781,7 +782,11 @@ class Router
             }
             // A response carries only a PublicError message, a message deliberately marked public (PublicMessage), or
             // a generic sentence plus a correlation id. Raw exception text never reaches a client, in any mode.
-            return $this->genericFailure($e, 500, $dbOrigin ? 'Database error (details are in the server log)' : null, false);
+            return $this->genericFailure($e, 500, $dbOrigin ? 'Database error (details are in the server log)' : null);
+        } catch (\Error $e) {
+            // TypeError, ArgumentCountError, ...: without this they escape the pipeline and the global handler
+            // renders the 500 OUTSIDE the middleware (no CORS headers, no platform guards).
+            return $this->genericFailure($e, 500);
         }
     }
 
@@ -844,10 +849,12 @@ class Router
             return new ApiResponse('error', 'Validation failed', null, $e->httpCode(), $e->errors());
         } catch (\StoneScriptPHP\Persistence\PersistenceException $e) {
             // keeps error_code / fields / errors and the not-found upgrade; never raw database text
+            \StoneScriptPHP\RequestLogging\RequestContext::captureException($e);
             return \StoneScriptPHP\Persistence\DbErrorMapper::toResponse($e);
         } catch (\RuntimeException $e) {
             $code = $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500;
             if ($e instanceof \StoneScriptPHP\Exceptions\PublicMessage) {
+                \StoneScriptPHP\RequestLogging\RequestContext::captureException($e);
                 log_debug('Public RuntimeException in typed handler: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
                 http_response_code($code);
                 return new ApiResponse('error', $e->getMessage(), null, $code);
@@ -1049,6 +1056,15 @@ class Router
     }
 
     /**
+     * A route that matched but cannot be served because the SERVER is wrong (class missing, wrong interface, bad
+     * return type). That is a 500 the operator must see, not a client 404.
+     */
+    private function misconfigured(string $detail): ApiResponse
+    {
+        return $this->genericFailure(new \LogicException($detail), 500);
+    }
+
+    /**
      * Return 404 error
      *
      * @param string $message
@@ -1057,7 +1073,7 @@ class Router
     private function error404(string $message = 'Not found'): ApiResponse
     {
         http_response_code(404);
-        return new ApiResponse('error', $message);
+        return new ApiResponse('error', $message, null, 404);
     }
 
     /**
@@ -1073,8 +1089,13 @@ class Router
     private function genericFailure(\Throwable $e, int $status, ?string $message = null, bool $explicitStatus = true): ApiResponse
     {
         $correlationId = bin2hex(random_bytes(6));
+        // Recorded for request_logs (class + safe message) AND logged at error level (this used to be log_debug and
+        // therefore invisible in production).
+        \StoneScriptPHP\RequestLogging\RequestContext::captureException($e);
         log_error('Request failed [correlation_id=' . $correlationId . ', HTTP ' . $status . ']: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
         http_response_code($status);
-        return new ApiResponse('error', $message ?? \StoneScriptPHP\Persistence\DbErrorMapper::genericMessage($status), ['correlation_id' => $correlationId], $explicitStatus ? $status : null);
+        // The status is ALWAYS on the response object too ($explicitStatus is kept for signature compatibility):
+        // a layer that reads the object must never see "no status" for a failure.
+        return new ApiResponse('error', $message ?? \StoneScriptPHP\Persistence\DbErrorMapper::genericMessage($status), ['correlation_id' => $correlationId], $status);
     }
 }

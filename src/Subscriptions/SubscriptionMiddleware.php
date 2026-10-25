@@ -219,12 +219,19 @@ class SubscriptionMiddleware implements MiddlewareInterface
     /** Fail-open log, at most once per 60s per process (an outage must not flood the log). */
     private function logFailOpen(string $tenantId, \Throwable $e): void
     {
+        // Every request that fails open is recorded in request_logs (class + safe message); the log line below is
+        // throttled, the per-request record is not. The request is never a clean success on the books.
+        \StoneScriptPHP\RequestLogging\RequestContext::noteHandled('subscription-lookup', $e);
         $now = time();
         if ($now - self::$lastFailOpenLog < 60) {
             return;
         }
         self::$lastFailOpenLog = $now;
-        log_error('[SubscriptionMiddleware] lookup failed (failing open; further occurrences suppressed for 60s) tenant=' . \StoneScriptPHP\Persistence\LogSanitizer::ref($tenantId) . ': ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+        try {
+            log_error('[SubscriptionMiddleware] lookup failed (failing open; further occurrences suppressed for 60s) tenant=' . \StoneScriptPHP\Persistence\LogSanitizer::ref($tenantId) . ': ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+        } catch (\Throwable) {
+            // logging must never turn a fail-open request into a failure
+        }
     }
 
     /** Overridable seam so tests can capture headers (header() is a no-op once PHPUnit output started). */

@@ -33,6 +33,7 @@ class RequestLoggerTest extends TestCase
         \StoneScriptPHP\Http\ClientIp::reset();
         RequestContext::reset();
         AuthContext::clear();
+        http_response_code(200); // process status leaks between tests in CLI
 
         // Provide sensible server superglobals for every test
         $_SERVER['REQUEST_METHOD'] = 'GET';
@@ -209,11 +210,11 @@ class RequestLoggerTest extends TestCase
         $this->assertSame('Disk full',              $capturedRow['error_message']);
     }
 
-    public function test_exception_message_truncated_to_1000_chars(): void
+    public function test_exception_message_truncated_to_the_safe_limit(): void
     {
-        $longMessage = str_repeat('x', 2000);
+        $longMessage = str_repeat('word ', 400); // (a single 2000-char run would be scrubbed as an opaque token)
         RequestContext::captureException(new \RuntimeException($longMessage));
-        $this->assertSame(1000, mb_strlen(RequestContext::getErrorMessage() ?? ''));
+        $this->assertSame(\StoneScriptPHP\RequestLogging\FailureText::MAX_LENGTH, mb_strlen(RequestContext::getErrorMessage() ?? ''));
     }
 
     // -------------------------------------------------------------------------

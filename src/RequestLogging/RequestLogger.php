@@ -126,7 +126,7 @@ class RequestLogger
 
         // §5 safety net: if no exception was captured by ExceptionHandler, check
         // for a fatal error that bypassed it (e.g. OOM, parse error in autoloader).
-        if (RequestContext::getErrorClass() === null) {
+        if (!RequestContext::hasError()) {
             $last = error_get_last();
             if ($last !== null && in_array($last['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
                 RequestContext::captureFatalError($last);
@@ -257,7 +257,7 @@ class RequestLogger
         // §3 — status: http_response_code() returns false before any code is set
         $statusRaw = http_response_code();
         $status    = ($statusRaw === false || $statusRaw === 0)
-            ? (RequestContext::getErrorClass() !== null ? 500 : 200)
+            ? (RequestContext::hasError() ? 500 : 200)
             : (int) $statusRaw;
 
         // §3 — path without query string
@@ -282,22 +282,29 @@ class RequestLogger
             'request_id'    => (string) $requestId,
             'occurred_at'   => $occurred_at,
             'platform_code' => self::$platformCode,
-            'host'          => substr($_SERVER['HTTP_HOST'] ?? '', 0, 253),
+            'host'          => FailureText::cut($_SERVER['HTTP_HOST'] ?? '', 253),
             'method'        => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
-            'path'          => substr((string) $path, 0, 2048),
+            'path'          => FailureText::cut((string) $path, 2048),
             'status'        => $status,
             'duration_ms'   => $durationMs,
             'client_ip'     => self::loggedClientIp(),
             'identity_id'   => $identityId,
             'tenant_id'     => $tenantId,
-            'role'          => $role !== null ? substr($role, 0, 100) : null,
+            'role'          => $role !== null ? FailureText::cut((string) $role, 100) : null,
             'error_class'   => RequestContext::getErrorClass(),
             'error_message' => RequestContext::getErrorMessage(),
             'user_agent'    => isset($_SERVER['HTTP_USER_AGENT'])
-                ? substr($_SERVER['HTTP_USER_AGENT'], 0, 1000) : null,
+                ? FailureText::cut($_SERVER['HTTP_USER_AGENT'], 1000) : null,
             'referer'       => isset($_SERVER['HTTP_REFERER'])
-                ? substr($_SERVER['HTTP_REFERER'], 0, 2048) : null,
+                ? FailureText::cut(FailureText::path($_SERVER['HTTP_REFERER']), 2048) : null, // query string dropped (personal data)
         ];
+
+        // A 4xx/5xx with NO recorded cause is a gap, never silence: say so explicitly so it can be queried and fixed.
+        // (A request that only carries a handled-failure note keeps that class and message: it is a recorded cause.)
+        if ($status >= 400 && !RequestContext::hasError() && RequestContext::getHandled() === []) {
+            $row['error_class']   = RequestContext::CLASS_UNRECORDED;
+            $row['error_message'] = 'HTTP ' . $status . ' returned without a recorded cause';
+        }
 
         // Test injection path: bypass real gateway write
         if (self::$writeAdapter !== null) {

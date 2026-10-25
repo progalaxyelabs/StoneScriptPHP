@@ -27,7 +27,7 @@ class PermissionMiddleware implements MiddlewareInterface
         if (!isset($request['user']) || !($request['user'] instanceof User)) {
             log_debug('Permission middleware: User not found in request context');
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Authentication required');
+            return new ApiResponse('error', 'Unauthorized: Authentication required', null, 401);
         }
 
         $user = $request['user'];
@@ -37,13 +37,13 @@ class PermissionMiddleware implements MiddlewareInterface
             if (!$user->hasAllPermissions($this->requiredPermissions)) {
                 log_debug('Permission middleware: User does not have all required permissions');
                 http_response_code(403);
-                return new ApiResponse('error', 'Forbidden: Insufficient permissions');
+                return new ApiResponse('error', 'Forbidden: Insufficient permissions', null, 403);
             }
         } else {
             if (!$user->hasAnyPermission($this->requiredPermissions)) {
                 log_debug('Permission middleware: User does not have any required permission');
                 http_response_code(403);
-                return new ApiResponse('error', 'Forbidden: Insufficient permissions');
+                return new ApiResponse('error', 'Forbidden: Insufficient permissions', null, 403);
             }
         }
 

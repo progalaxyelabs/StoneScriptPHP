@@ -38,7 +38,7 @@ class ValidateJwtMiddleware implements MiddlewareInterface
 
         if (empty($authHeader)) {
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Missing authentication token');
+            return new ApiResponse('error', 'Unauthorized: Missing authentication token', null, 401);
         }
 
         // Extract token (remove "Bearer " prefix)
@@ -49,7 +49,7 @@ class ValidateJwtMiddleware implements MiddlewareInterface
 
         if ($payload === false) {
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Invalid or expired token');
+            return new ApiResponse('error', 'Unauthorized: Invalid or expired token', null, 401);
         }
 
         // Store JWT claims in request attributes for downstream middleware

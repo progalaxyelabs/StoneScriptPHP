@@ -69,7 +69,8 @@ function res_error($message, int $httpStatusCode = 500) {
     // fatal error firing before the SAPI has populated $_SERVER) legitimately has no
     // REQUEST_METHOD/REQUEST_URI — mirrors the same '?? CLI' / '?? empty' fallback
     // bootstrap.php already uses for this exact log-line shape.
-    $method_and_url = ($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' . ($_SERVER['REQUEST_URI'] ?? '');
+    // Path only: the query string is where personal data lives (and a newline in it must not forge a log line).
+    $method_and_url = ($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' . \StoneScriptPHP\RequestLogging\FailureText::path($_SERVER['REQUEST_URI'] ?? '');
     log_error('res_error: ' . $method_and_url . ' - ' . $message);
     return new ApiResponse('error', $message, null, $httpStatusCode);
 }

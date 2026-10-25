@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [13.1.0]
+
+Server-side error tracking fix. Every API failure is now recorded in `request_logs` (class + safe message) and in the
+file log at error level, and nothing that failed ships as HTTP 2xx. No opt-in. No schema change.
+
+### Fixed
+
+- **`request_logs.error_class` / `error_message` were NULL for every handler failure.** `Router::executeHandler()` caught
+  the exception and logged it with `log_debug` (a no-op in production), so `RequestContext` (filled only by the global
+  uncaught-exception handler) never saw it. The Router now records every exception it turns into an error response
+  (`RequestContext::captureException`) and logs it at error level with a correlation id. `\Error` (TypeError, ...) is
+  now caught inside the pipeline too, so that 500 passes back through the middleware (CORS headers, platform guards).
+- **Unknown routes answered 500 behind platform guards that read the response object.** The router's 404/405/500
+  responses set only the process status (`http_response_code`) and left `ApiResponse::$httpStatusCode` null.
+  `Router::error404()` and every router-built error now carry their status on the object, and `MiddlewarePipeline`
+  copies a process status >= 400 onto a response object that has none, so every layer sees the truth.
+- **Failures shipped as HTTP 200.** New `Http\ResponseFinalizer` (applied to every response in `Router::dispatch()`,
+  always on): an `error` body with no HTTP status becomes 500, a `not ok` body 400; a middleware that returns nothing is a
+  recorded 500 (was an error body with no status). **Behaviour change:** this rule used to apply only under
+  `PERSISTENCE_CONTRACT=enforced`; it now applies in every mode. A handler that deliberately returns an error body with an
+  explicit 2xx status is untouched.
+- **A route whose handler class is missing / does not implement `IRouteHandler` / returns a non-`ApiResponse`** is a
+  server misconfiguration: 500 (logged and recorded), no longer a client-looking 404 or a bare error body.
+- **"JWT signature invalid" noise.** `HybridApiTokenJwtHandler` now routes by the token's (unverified) `iss`: a token naming
+  another issuer goes straight to the JWKS verifier instead of first failing against the local key and writing an error.
+  Routine rejections are `warning` (bad signature/issuer/format) or `debug` (expired), not `error`; a token that fails every
+  key is still rejected (401) and logged once.
+- **Swallowed failures are visible.** New `RequestContext::noteHandled($source, $e)`: a request that recovered from a failure
+  (the subscription fail-open lookup uses it) is recorded with `error_class` + `[handled:source] message` even though its status is 2xx.
+  A 4xx/5xx for which nothing recorded a cause is written as `UnrecordedError` rather than NULL.
+- **Router/Subscription/ExternalAuth `Registration complete` lines were INFO on every request**: now debug.
+
+- **Review hardening (same release).** `request_logs` text columns are always valid UTF-8 (the 300-char cut is
+  character-safe and invalid input bytes are repaired instead of voiding the message; PostgreSQL would otherwise reject
+  the very row that records the failure); a non-empty message is never recorded as empty (`[message withheld]`). The
+  scrubber now also removes long hex (32+) and base64url (40+) runs, vendor secret keys (`sk_live_`, `rzp_test_`, ...),
+  Indian GSTIN and PAN, and path-only query strings; UUIDs, ISO dates and `correlation_id` are kept. No logged value can
+  carry a newline (a token's `iss` could previously forge a log line), and `res_error()`, `log_request()`, the
+  request-end line and `LoggingMiddleware` log the path without the query string; `request_logs.referer` loses its query
+  string. A 4xx/5xx carrying only a handled-failure note keeps that class instead of `UnrecordedError`.
+- **Every status-less error body now has an explicit status** (previously the process status was set but the object
+  carried none): RequireAuth/RequireRole/RequireIssuer/ValidateJwt/AttributeAuth/Permission/Role/Auth/JwtAuth middleware
+  (401/403), RateLimit (429), JsonBodyParser (415/400), Logout/Refresh CSRF (403), Refresh `refused()` (401, 503 when the
+  verifier is unavailable), and the Google sign-in route template (500 / 401 / 500).
+
+### Security / privacy
+
+- `RequestContext` stores class + a scrubbed message (`RequestLogging\FailureText`): quoted literals, e-mails, phone-like
+  numbers, JWT/bearer tokens, `key=value` pairs naming personal data, DB `Key (..)=(..)`/DETAIL tails are removed; 300
+  chars max (was the raw message, 1000 chars).
+- `Logger` redacts personal-data context keys (`email`, `phone`, `store_name`, `tenant_name`, `address`, ...) and masks
+  e-mails/phones/tokens in message text. `TenantProvisioner` no longer logs the tenant slug.
+
 ## [13.0.0]
 
 MAJOR release: database error messages are now identifier-only. Requires `progalaxyelabs/stonescriptdb-gateway-client`

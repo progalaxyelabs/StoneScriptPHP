@@ -461,13 +461,11 @@ final class PersistenceContractTest extends TestCase
         $this->assertStringContainsString('success-after-failed-write', $notices[0]);
         $this->assertStringContainsString('PERSISTENCE_CONTRACT=enforced', $notices[0]);
 
+        // An error-shaped body with no HTTP status is made a 5xx in EVERY mode since 13.1.0 (ResponseFinalizer): a
+        // failure must never ship as 2xx, with no opt-in. Lenient only keeps the other two behaviours above.
         PersistenceContract::reset();
-        $notices = $this->deprecations(function (): void {
-            $res = $this->dispatch(ErrorBodyNoCodeRoute::class);
-            $this->assertNull($res->httpStatusCode);
-        });
-        $this->assertCount(1, $notices);
-        $this->assertStringContainsString('error-body-2xx', $notices[0]);
+        $res = $this->dispatch(ErrorBodyNoCodeRoute::class);
+        $this->assertSame(500, $res->httpStatusCode);
     }
 
     public function test_lenient_raw_db_error_stays_a_500(): void
@@ -478,7 +476,7 @@ final class PersistenceContractTest extends TestCase
         $notices = $this->deprecations(function (): void {
             $res = $this->dispatch(RawDbErrorRoute::class);
             $this->assertSame('error', $res->status);
-            $this->assertNull($res->httpStatusCode, 'lenient: not mapped to 409');
+            $this->assertSame(500, $res->httpStatusCode, 'lenient: not mapped to 409, but the 500 is on the object');
         });
         $this->assertStringContainsString('db-error-mapping', $notices[0] ?? '');
     }

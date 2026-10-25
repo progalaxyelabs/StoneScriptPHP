@@ -117,6 +117,19 @@ class HybridApiTokenJwtHandler implements JwtHandlerInterface, StrictTokenVerifi
         // Attempt platform RSA validation first (API tokens).
         // RsaJwtHandler::verifyToken() returns false on any failure — never throws.
         $platformIssuer = ($this->identity ?? LocalSigningIdentity::current())->issuer;
+
+        // Route by the (unverified) `iss`: a token that names ANOTHER issuer (an auth-service token) cannot be ours,
+        // so trying the local key first is a guaranteed miss that used to be written to the error log on every
+        // exchange. The claim only SELECTS the verifier; the verifier still proves the signature and issuer.
+        // A miss on one key while another key accepts the token is therefore never logged; a token that fails
+        // every key is rejected (false) and logged once by the verifier that owned it.
+        $peekedIssuer = $this->peekIssuer($jwt);
+        if (!empty($platformIssuer) && $peekedIssuer !== null && $peekedIssuer !== $platformIssuer) {
+            return $this->authServiceHandler instanceof StrictTokenVerifier
+                ? $this->authServiceHandler->verifyTokenStrict($jwt)
+                : $this->authServiceHandler->verifyToken($jwt);
+        }
+
         try {
             $claims = $this->platformHandler->verifyTokenStrict($jwt);
         } catch (TokenVerifierUnavailableException $e) {

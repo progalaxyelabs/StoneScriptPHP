@@ -30,7 +30,7 @@ class LoggingMiddleware implements MiddlewareInterface
     {
         $startTime = microtime(true);
         $method = $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN';
-        $path = $_SERVER['REQUEST_URI'] ?? '/';
+        $path = \StoneScriptPHP\RequestLogging\FailureText::path($_SERVER['REQUEST_URI'] ?? '/');
 
         if ($this->logRequests) {
             $logMessage = "Request: $method $path";

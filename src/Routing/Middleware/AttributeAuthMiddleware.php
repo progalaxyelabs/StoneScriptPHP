@@ -100,7 +100,7 @@ class AttributeAuthMiddleware implements MiddlewareInterface
         if ($user === null) {
             log_debug('Attribute auth: Permission required but user not authenticated');
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Authentication required');
+            return new ApiResponse('error', 'Unauthorized: Authentication required', null, 401);
         }
 
         // ->all(): App\Models\User (platform-authored) and implode() both expect
@@ -112,13 +112,13 @@ class AttributeAuthMiddleware implements MiddlewareInterface
             if (!$user->hasAllPermissions($permissions)) {
                 log_debug('Attribute auth: User missing required permissions (ALL): ' . implode(', ', $permissions));
                 http_response_code(403);
-                return new ApiResponse('error', 'Forbidden: Insufficient permissions');
+                return new ApiResponse('error', 'Forbidden: Insufficient permissions', null, 403);
             }
         } else {
             if (!$user->hasAnyPermission($permissions)) {
                 log_debug('Attribute auth: User missing required permissions (ANY): ' . implode(', ', $permissions));
                 http_response_code(403);
-                return new ApiResponse('error', 'Forbidden: Insufficient permissions');
+                return new ApiResponse('error', 'Forbidden: Insufficient permissions', null, 403);
             }
         }
 
@@ -132,7 +132,7 @@ class AttributeAuthMiddleware implements MiddlewareInterface
         if ($user === null) {
             log_debug('Attribute auth: Role required but user not authenticated');
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Authentication required');
+            return new ApiResponse('error', 'Unauthorized: Authentication required', null, 401);
         }
 
         // ->all(): App\Models\User (platform-authored) and implode() both expect
@@ -144,13 +144,13 @@ class AttributeAuthMiddleware implements MiddlewareInterface
             if (!$user->hasAllRoles($roles)) {
                 log_debug('Attribute auth: User missing required roles (ALL): ' . implode(', ', $roles));
                 http_response_code(403);
-                return new ApiResponse('error', 'Forbidden: Insufficient roles');
+                return new ApiResponse('error', 'Forbidden: Insufficient roles', null, 403);
             }
         } else {
             if (!$user->hasAnyRole($roles)) {
                 log_debug('Attribute auth: User missing required roles (ANY): ' . implode(', ', $roles));
                 http_response_code(403);
-                return new ApiResponse('error', 'Forbidden: Insufficient roles');
+                return new ApiResponse('error', 'Forbidden: Insufficient roles', null, 403);
             }
         }
 

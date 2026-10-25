@@ -54,9 +54,9 @@ class RefreshRoute implements IRouteHandler
     }
 
     /** A refused refresh: HTTP 401 with the stable machine code `invalid_grant` (message unchanged). */
-    private static function refused(string $message, string $code = 'invalid_grant'): ApiResponse
+    private static function refused(string $message, string $code = 'invalid_grant', int $status = 401): ApiResponse
     {
-        $r = new ApiResponse('error', $message);
+        $r = new ApiResponse('error', $message, null, $status);
         $r->errorCode = $code;
         return $r;
     }
@@ -69,7 +69,7 @@ class RefreshRoute implements IRouteHandler
     {
         log_error('RefreshRoute: token verification unavailable: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
         http_response_code(503);
-        return self::refused('Token verification is temporarily unavailable. Try again shortly.', 'token_verifier_unavailable');
+        return self::refused('Token verification is temporarily unavailable. Try again shortly.', 'token_verifier_unavailable', 503);
     }
 
     public function validation_rules(): array
@@ -84,7 +84,7 @@ class RefreshRoute implements IRouteHandler
         if (!CsrfHelper::validateRequest()) {
             log_error('RefreshRoute: CSRF validation failed');
             http_response_code(403);
-            return new ApiResponse('error', 'CSRF token validation failed');
+            return new ApiResponse('error', 'CSRF token validation failed', null, 403);
         }
 
         // 2. Read refresh token from httpOnly cookie

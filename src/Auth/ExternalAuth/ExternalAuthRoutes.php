@@ -101,7 +101,7 @@ class ExternalAuthRoutes
             self::registerForPrefix($router, self::LEGACY_PREFIX, $client, $config, $provisioner, $rolesResolver, $tenantsResolver);
         }
 
-        log_info("ExternalAuthRoutes: Registration complete with prefix '{$config->prefix}'" .
+        log_debug("ExternalAuthRoutes: Registration complete with prefix '{$config->prefix}'" .
             ($config->legacyCompat && $config->prefix !== self::LEGACY_PREFIX
                 ? ' + legacy compat ' . self::LEGACY_PREFIX
                 : ''));

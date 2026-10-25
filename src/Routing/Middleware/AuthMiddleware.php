@@ -44,7 +44,7 @@ class AuthMiddleware implements MiddlewareInterface
         if (empty($authHeader)) {
             log_debug('Auth middleware: Missing authorization header');
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Missing authentication token');
+            return new ApiResponse('error', 'Unauthorized: Missing authentication token', null, 401);
         }
 
         // Extract token (remove "Bearer " prefix if present)
@@ -56,7 +56,7 @@ class AuthMiddleware implements MiddlewareInterface
             if (!$isValid) {
                 log_debug('Auth middleware: Invalid token');
                 http_response_code(401);
-                return new ApiResponse('error', 'Unauthorized: Invalid token');
+                return new ApiResponse('error', 'Unauthorized: Invalid token', null, 401);
             }
         }
 

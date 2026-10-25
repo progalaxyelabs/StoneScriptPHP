@@ -139,7 +139,7 @@ class SubscriptionRoutes
             log_debug("SubscriptionRoutes: Registered GET $prefix/plans (protected)");
         }
 
-        log_info("SubscriptionRoutes: Registration complete with prefix '$prefix'");
+        log_debug("SubscriptionRoutes: Registration complete with prefix '$prefix'");
     }
 
     /**

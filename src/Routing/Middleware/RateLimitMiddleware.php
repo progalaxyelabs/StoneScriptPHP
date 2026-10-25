@@ -66,7 +66,7 @@ class RateLimitMiddleware implements MiddlewareInterface
             header('X-RateLimit-Remaining: 0');
             header('X-RateLimit-Reset: ' . $data[$identifier]['blocked_until']);
 
-            return new ApiResponse('error', 'Too many requests. Please try again later.');
+            return new ApiResponse('error', 'Too many requests. Please try again later.', null, 429);
         }
 
         // Remove old requests outside the time window
@@ -93,7 +93,7 @@ class RateLimitMiddleware implements MiddlewareInterface
             header('X-RateLimit-Remaining: 0');
             header('X-RateLimit-Reset: ' . ($currentTime + $this->windowSeconds));
 
-            return new ApiResponse('error', 'Rate limit exceeded. Please try again later.');
+            return new ApiResponse('error', 'Rate limit exceeded. Please try again later.', null, 429);
         }
 
         // Add current request

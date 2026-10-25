@@ -27,7 +27,7 @@ class RoleMiddleware implements MiddlewareInterface
         if (!isset($request['user']) || !($request['user'] instanceof User)) {
             log_debug('Role middleware: User not found in request context');
             http_response_code(401);
-            return new ApiResponse('error', 'Unauthorized: Authentication required');
+            return new ApiResponse('error', 'Unauthorized: Authentication required', null, 401);
         }
 
         $user = $request['user'];
@@ -37,13 +37,13 @@ class RoleMiddleware implements MiddlewareInterface
             if (!$user->hasAllRoles($this->requiredRoles)) {
                 log_debug('Role middleware: User does not have all required roles');
                 http_response_code(403);
-                return new ApiResponse('error', 'Forbidden: Insufficient roles');
+                return new ApiResponse('error', 'Forbidden: Insufficient roles', null, 403);
             }
         } else {
             if (!$user->hasAnyRole($this->requiredRoles)) {
                 log_debug('Role middleware: User does not have any required role');
                 http_response_code(403);
-                return new ApiResponse('error', 'Forbidden: Insufficient roles');
+                return new ApiResponse('error', 'Forbidden: Insufficient roles', null, 403);
             }
         }
 

@@ -201,7 +201,7 @@ abstract class TenantProvisioner
             throw new \RuntimeException("Failed to provision tenant database (HTTP $httpCode)");
         }
 
-        log_info("TenantProvisioner: Provisioned database for tenant {$data['tenant_id']} slug={$data['tenant_slug']}");
+        log_info("TenantProvisioner: Provisioned database for tenant {$data['tenant_id']}");
     }
 
     /** The gateway's `error` code from a JSON error body, or null when absent/unparseable. */
