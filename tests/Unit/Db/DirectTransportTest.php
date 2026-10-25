@@ -139,7 +139,6 @@ class DirectTransportTest extends TestCase
         $transport = $this->makeTransportWithMockPool($pool);
 
         $method = new ReflectionMethod(DirectTransport::class, 'isConnectionFailure');
-        $method->setAccessible(true);
 
         $e = new PDOException('simulated', 0);
         // PDOException::errorInfo is populated by the PDO/PDOStatement driver in

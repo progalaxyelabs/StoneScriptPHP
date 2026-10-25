@@ -52,7 +52,6 @@ class ProvisionTenantRouteClassOverrideTest extends TestCase
         $this->setEnvIfEmpty('AUTH_ISSUER', 'http://localhost:3139');
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 
@@ -60,7 +59,6 @@ class ProvisionTenantRouteClassOverrideTest extends TestCase
     {
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         foreach ($this->envVarsSetByThisTest as $name) {
@@ -182,7 +180,6 @@ class ProvisionTenantRouteClassOverrideTest extends TestCase
     private function invokeProtected(object $obj, string $method, array $args): mixed
     {
         $ref = new \ReflectionMethod($obj, $method);
-        $ref->setAccessible(true);
         return $ref->invokeArgs($obj, $args);
     }
 

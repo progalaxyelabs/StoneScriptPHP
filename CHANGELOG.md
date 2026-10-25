@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.0.0]
+
+**BREAKING (only the PHP floor): requires PHP `>=8.5.12`.** PHP 8.2, 8.3 and 8.4 are no longer supported. No other intentional API
+or behaviour change. See `docs/UPGRADING-14.0.md`. Verified on PHP 8.5.12 (`php:8.5.12-cli-bookworm`, digest-pinned): 1692 unit/feature
+tests, 83 real-gateway E2E and 23 gateway-client E2E all green with `error_reporting=-1` and no `E_DEPRECATED`.
+
+### Changed
+- `composer.json` `php`: `>=8.5.12` (was `~8.2.35 || ~8.3.36 || ~8.4.27 || >=8.5.12`); `config.platform.php` 8.5.12.
+- `PhpRuntimeFloor` enforces one floor (8.5.12); 8.2 - 8.4 are refused at boot with a pointer to the upgrade guide.
+
+### Fixed (PHP 8.5 deprecations)
+- Removed `curl_close()` (deprecated 8.5) from the auth client, ZeptoMail mailer, store-access middleware, tenant provisioner and `stone upgrade`.
+- `cli/helpers/gateway-common.php`: `$http_response_header` (deprecated 8.5) -> `http_get_last_response_headers()`.
+- Test-suite: removed `setAccessible()` calls; E2E fixture creates its `migrations/` directory (git does not track empty directories).
+- Requires `progalaxyelabs/stonescriptdb-gateway-client` 4.0.1 (also drops `curl_close()`) to be fully deprecation-free; `^4.0` already allows it.
+
 ## [13.2.1]
 
 Security release: the framework (and therefore every app built on it) refuses to install or boot on a PHP release that is

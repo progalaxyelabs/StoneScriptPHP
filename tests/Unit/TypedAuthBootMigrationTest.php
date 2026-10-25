@@ -151,11 +151,9 @@ class TypedAuthBootMigrationTest extends TestCase
         // renderBootConfigError(); verify that renders clean, parseable JSON carrying
         // the actionable message — never an uncaught exception / stack trace.
         $startTime = new \ReflectionProperty(Application::class, 'startTime');
-        $startTime->setAccessible(true);
         $startTime->setValue(null, microtime(true));
 
         $render = new \ReflectionMethod(Application::class, 'renderBootConfigError');
-        $render->setAccessible(true);
 
         $msg = 'StoneScriptPHP: typed-auth wiring incomplete - cannot boot. AccessTokenMiddleware missing';
 

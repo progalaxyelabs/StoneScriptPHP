@@ -50,7 +50,6 @@ class ExchangeRouteTest extends TestCase
         $this->setEnvIfEmpty('AUTH_SERVICE_URL', 'http://localhost:3139');
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         // res_error() (helpers.php) reads these from $_SERVER for its log line;
@@ -63,7 +62,6 @@ class ExchangeRouteTest extends TestCase
     {
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         // Undo only the putenv() calls this test made — restores the
@@ -578,7 +576,6 @@ class ExchangeRouteTest extends TestCase
         unset($_ENV['PLATFORM_CODE']);
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $config = new ExternalAuthConfig(['auth_issuer' => 'http://localhost:3139']);

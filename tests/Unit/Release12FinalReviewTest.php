@@ -142,7 +142,6 @@ final class Release12FinalReviewTest extends TestCase
         FinalReviewTypedRoute::$throw = $e;
         $router = new Router();
         $m = new \ReflectionMethod($router, 'executeHandler');
-        $m->setAccessible(true);
         return $m->invoke($router, new FinalReviewTypedRoute(), ['input' => ['x' => 'a'], 'params' => []]);
     }
 
@@ -190,7 +189,6 @@ final class Release12FinalReviewTest extends TestCase
     {
         $h = ExceptionHandler::getInstance();
         $m = new \ReflectionMethod($h, 'buildErrorResponse');
-        $m->setAccessible(true);
         $msg = 'Field "email" is not valid (value: \'x\') - see "docs"';
         $body = $m->invoke($h, new BadRequestException($msg), 400, true, 'cid000000001');
         $this->assertSame($msg, $body['message'], 'not sanitised: it is a deliberately public message');

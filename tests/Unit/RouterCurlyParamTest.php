@@ -32,11 +32,9 @@ class RouterCurlyParamTest extends TestCase
 
         $ref = new \ReflectionClass($router);
         $routesProp = $ref->getProperty('routes');
-        $routesProp->setAccessible(true);
         $routesProp->setValue($router, $routesByMethod);
 
         $matchRoute = $ref->getMethod('matchRoute');
-        $matchRoute->setAccessible(true);
 
         return $matchRoute->invoke($router, $method, $path);
     }

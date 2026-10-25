@@ -200,7 +200,6 @@ class StoreAccessMiddleware implements MiddlewareInterface
         $response = curl_exec($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlErr  = curl_error($ch);
-        curl_close($ch);
 
         if ($response === false || $curlErr) {
             throw new \RuntimeException('Auth service unreachable: ' . $curlErr);

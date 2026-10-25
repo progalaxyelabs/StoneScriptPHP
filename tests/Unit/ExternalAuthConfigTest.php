@@ -42,7 +42,6 @@ class ExternalAuthConfigTest extends TestCase
         // Reset Env singleton between tests to pick up the env vars above.
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 
@@ -51,7 +50,6 @@ class ExternalAuthConfigTest extends TestCase
         // Restore Env singleton to a clean state after each test.
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         // Undo only the putenv() calls this test made — restores the
@@ -260,7 +258,6 @@ class ExternalAuthConfigTest extends TestCase
         // Reset Env singleton so the new putenv() value is actually picked up.
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $config = new ExternalAuthConfig([]);
@@ -273,7 +270,6 @@ class ExternalAuthConfigTest extends TestCase
         $this->setEnvIfEmpty('API_ACCESS_TOKEN_EXPIRY', '15');
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $config = new ExternalAuthConfig(['exchange_ttl' => 900]);
@@ -306,7 +302,6 @@ class ExternalAuthConfigTest extends TestCase
         // Reset singleton to pick up the unset value
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $this->expectException(\RuntimeException::class);
@@ -323,7 +318,6 @@ class ExternalAuthConfigTest extends TestCase
         putenv('AUTH_ISSUER=');
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $config = new ExternalAuthConfig(['auth_issuer' => 'http://localhost:3139']);
@@ -338,7 +332,6 @@ class ExternalAuthConfigTest extends TestCase
         putenv('AUTH_ISSUER=http://localhost:3139');
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $config = new ExternalAuthConfig([]);
@@ -357,7 +350,6 @@ class ExternalAuthConfigTest extends TestCase
         unset($_ENV['AUTH_SERVICE_URL']);
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $this->expectException(\RuntimeException::class);
@@ -377,7 +369,6 @@ class ExternalAuthConfigTest extends TestCase
         unset($_ENV['AUTH_SERVICE_URL']);
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $config = new ExternalAuthConfig([
@@ -396,7 +387,6 @@ class ExternalAuthConfigTest extends TestCase
         putenv('AUTH_SERVICE_URL=http://auth:3139');
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $config = new ExternalAuthConfig(['auth_issuer' => 'http://localhost:3139']);

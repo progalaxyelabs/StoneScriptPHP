@@ -50,7 +50,6 @@ final class AllowedOriginsConfigTest extends TestCase
     {
         $reflection = new \ReflectionClass(Env::class);
         $this->loadOriginsFromFile = new ReflectionMethod(Env::class, 'loadOriginsFromFile');
-        $this->loadOriginsFromFile->setAccessible(true);
     }
 
     protected function tearDown(): void
@@ -69,7 +68,6 @@ final class AllowedOriginsConfigTest extends TestCase
 
         // Reset the singleton so other test classes rebuild it fresh.
         $prop = new \ReflectionProperty(Env::class, '_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 

@@ -66,7 +66,6 @@ class MigrationsPluginPathsTest extends TestCase
     {
         $ref = new \ReflectionClass(Migrations::class);
         $prop = $ref->getProperty('pluginMigrationPaths');
-        $prop->setAccessible(true);
 
         $this->assertSame([], $prop->getValue());
     }
@@ -78,7 +77,6 @@ class MigrationsPluginPathsTest extends TestCase
 
         $ref = new \ReflectionClass(Migrations::class);
         $prop = $ref->getProperty('pluginMigrationPaths');
-        $prop->setAccessible(true);
 
         $this->assertCount(1, $prop->getValue());
         $this->assertSame(rtrim($this->tmpDir, '/'), $prop->getValue()[0]);
@@ -128,7 +126,6 @@ class MigrationsPluginPathsTest extends TestCase
 
         $ref = new \ReflectionClass(Migrations::class);
         $prop = $ref->getProperty('pluginSchemaPaths');
-        $prop->setAccessible(true);
         $value = $prop->getValue();
 
         $this->assertSame(['/tmp/plugin-tables'], $value['tables']);
@@ -147,7 +144,6 @@ class MigrationsPluginPathsTest extends TestCase
         $instance = (new \ReflectionClass(Migrations::class))->newInstanceWithoutConstructor();
         $ref = new \ReflectionClass(Migrations::class);
         $method = $ref->getMethod('getCodeDefinitions');
-        $method->setAccessible(true);
 
         $definitions = $method->invoke($instance);
 
@@ -159,7 +155,6 @@ class MigrationsPluginPathsTest extends TestCase
         $instance = (new \ReflectionClass(Migrations::class))->newInstanceWithoutConstructor();
         $ref = new \ReflectionClass(Migrations::class);
         $method = $ref->getMethod('scanMigrationFiles');
-        $method->setAccessible(true);
 
         return $method->invoke($instance);
     }

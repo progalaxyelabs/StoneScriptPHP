@@ -69,7 +69,6 @@ class MultiAuthJwksStaleCacheBoundTest extends TestCase
 
         $validator = new MultiAuthJwtValidator([self::ISSUER_TYPE => $config], $this->cacheDir);
         $m = new \ReflectionMethod($validator, 'getJWKS');
-        $m->setAccessible(true);
         return [$validator, $m, $config];
     }
 

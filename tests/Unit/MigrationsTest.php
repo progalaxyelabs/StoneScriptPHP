@@ -106,7 +106,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('parseTableName');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -127,7 +126,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('parseTableName');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -148,7 +146,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('parseFunctionName');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -169,7 +166,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('parseFunctionName');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -190,7 +186,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -206,7 +201,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -220,7 +214,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -234,7 +227,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -249,7 +241,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('normalizeType');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -265,7 +256,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('compareColumns');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -293,7 +283,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('compareColumns');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -321,7 +310,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('compareColumns');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -350,7 +338,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('compareColumns');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -376,7 +363,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('diff');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -402,7 +388,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('diff');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -428,7 +413,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('diff');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 
@@ -454,7 +438,6 @@ class MigrationsTest extends TestCase
     {
         $reflection = new \ReflectionClass(\StoneScriptPHP\Migrations::class);
         $method = $reflection->getMethod('diff');
-        $method->setAccessible(true);
 
         $migrations = new \StoneScriptPHP\Migrations();
 

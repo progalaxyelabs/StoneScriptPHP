@@ -48,7 +48,6 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         $this->setEnvIfEmpty('AUTH_ISSUER', 'http://localhost:3139');
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         // findExistingTenantId()/oauth promote both need a raw Bearer token
@@ -62,7 +61,6 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
     {
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         AuthContext::clear();

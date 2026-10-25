@@ -224,7 +224,6 @@ abstract class AuthServiceClient
         $curlError = curl_error($ch);
         $curlErrno = curl_errno($ch);
 
-        curl_close($ch);
 
         if ($curlErrno !== 0) {
             throw new AuthServiceException(

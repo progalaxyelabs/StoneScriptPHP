@@ -182,7 +182,6 @@ class MyZeptoMail implements EmailInterface
         $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
         $error = curl_error($curl);
 
-        curl_close($curl);
 
         if ($error) {
             $this->lastError = "cURL error: {$error}";

@@ -14,17 +14,13 @@ final class PhpRuntimeFloorTest extends TestCase
     {
         return [
             '8.1.99 unsupported' => [80199, '8.1.99', false],
-            '8.2.34 vulnerable' => [80234, '8.2.34', false],
-            '8.2.35 floor' => [80235, '8.2.35', true],
-            '8.2.40' => [80240, '8.2.40', true],
-            '8.3.6 distro-style old number' => [80306, '8.3.6', false],
-            '8.3.35' => [80335, '8.3.35', false],
-            '8.3.36 floor' => [80336, '8.3.36', true],
-            '8.4.26' => [80426, '8.4.26', false],
-            '8.4.27 floor' => [80427, '8.4.27', true],
+            '8.2.35 no longer supported' => [80235, '8.2.35', false],
+            '8.3.36 no longer supported' => [80336, '8.3.36', false],
+            '8.4.27 no longer supported' => [80427, '8.4.27', false],
             '8.5.4' => [80504, '8.5.4', false],
             '8.5.11' => [80511, '8.5.11', false],
             '8.5.12 floor' => [80512, '8.5.12', true],
+            '8.5.13' => [80513, '8.5.13', true],
             '8.6.0 newer line' => [80600, '8.6.0', true],
             '9.0.0' => [90000, '9.0.0', true],
         ];
@@ -39,9 +35,11 @@ final class PhpRuntimeFloorTest extends TestCase
 
     public function test_message_names_the_fix(): void
     {
-        $m = (string) PhpRuntimeFloor::violation(80306, '8.3.6');
-        $this->assertStringContainsString('8.3.36', $m);
+        $m = (string) PhpRuntimeFloor::violation(80504, '8.5.4');
+        $this->assertStringContainsString('8.5.12', $m);
         $this->assertStringContainsString('upstream', $m);
+        $old = (string) PhpRuntimeFloor::violation(80336, '8.3.36');
+        $this->assertStringContainsString('requires PHP 8.5.12', $old);
     }
 
     public function test_override_is_cli_only_and_needs_exactly_1(): void
@@ -59,10 +57,10 @@ final class PhpRuntimeFloorTest extends TestCase
     public function test_composer_json_constraint_matches_the_floors(): void
     {
         $c = json_decode((string) file_get_contents(__DIR__ . '/../../composer.json'), true);
-        $this->assertSame('~8.2.35 || ~8.3.36 || ~8.4.27 || >=8.5.12', $c['require']['php']);
+        $this->assertSame('>=8.5.12', $c['require']['php']);
         $this->assertSame('src/php_floor.php', $c['autoload']['files'][0], 'the guard must load first');
         foreach (PhpRuntimeFloor::FLOORS as $line => $id) {
-            $this->assertStringContainsString(PhpRuntimeFloor::floorString($id), $c['require']['php'] . ' >=8.5.12');
+            $this->assertStringContainsString(PhpRuntimeFloor::floorString($id), $c['require']['php']);
         }
     }
 
@@ -113,7 +111,7 @@ final class PhpRuntimeFloorTest extends TestCase
 
     public function test_enforce_returns_silently_on_a_patched_version(): void
     {
-        [$rc, $out, $err] = $this->runEnforce('80336, ' . var_export('8.3.36', true) . ", 'fpm-fcgi'");
+        [$rc, $out, $err] = $this->runEnforce('80512, ' . var_export('8.5.12', true) . ", 'fpm-fcgi'");
         $this->assertSame(0, $rc);
         $this->assertSame('BOOTED', $out);
         $this->assertSame('', $err);

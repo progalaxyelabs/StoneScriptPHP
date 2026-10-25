@@ -49,7 +49,6 @@ class HybridApiTokenJwtHandlerTest extends TestCase
         // Reset Env singleton so our env changes take effect.
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $this->env = Env::get_instance();

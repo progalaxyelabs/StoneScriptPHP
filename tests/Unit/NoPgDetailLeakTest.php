@@ -294,7 +294,6 @@ final class NoPgDetailLeakTest extends TestCase
         $this->assertNoSentinel(print_r((array) $e, true), '(array)');
         foreach ((new \ReflectionObject($e))->getProperties() as $p) {
             if (!$p->isStatic()) {
-                $p->setAccessible(true);
                 $this->assertNoSentinel(print_r($p->getValue($e), true), $p->getName());
             }
         }

@@ -48,7 +48,6 @@ final class EnvDbModeTest extends TestCase
     private function resetSingleton(): void
     {
         $prop = new \ReflectionProperty(Env::class, '_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 

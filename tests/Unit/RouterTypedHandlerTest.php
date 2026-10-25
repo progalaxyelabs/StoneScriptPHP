@@ -58,7 +58,6 @@ final class RouterTypedHandlerTest extends TestCase
         $router = new Router();
         $ref = new \ReflectionClass($router);
         $method = $ref->getMethod('executeHandler');
-        $method->setAccessible(true);
         $request = ['input' => $input, 'params' => []];
         if ($declaredRequestClass !== null) {
             $request['route'] = ['request' => $declaredRequestClass];

@@ -607,7 +607,7 @@ Layer 8: Output Encoding (JSON only)
 ```yaml
 services:
   web:
-    image: php:8.2-fpm
+    image: php:8.5-fpm
     volumes: [./:/var/www]
 
   nginx:

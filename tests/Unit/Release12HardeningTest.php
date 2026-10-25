@@ -260,7 +260,6 @@ final class Release12HardeningTest extends TestCase
     {
         $e = new \RuntimeException('insert failed: Key (email)=(victim@example.com) already exists', 0, new \RuntimeException('prev victim@example.com'));
         $m = new \ReflectionMethod(ExceptionHandler::class, 'buildErrorResponse');
-        $m->setAccessible(true);
         $handler = ExceptionHandler::getInstance();
         foreach ([true, false] as $debug) {
             $body = $m->invoke($handler, $e, 500, $debug, 'abc123abc123');

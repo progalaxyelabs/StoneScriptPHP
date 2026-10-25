@@ -410,8 +410,9 @@ function gatewayHttpRequest(string $method, string $url, array $headers, ?string
 
     $result = @file_get_contents($url, false, $context);
     $httpCode = 0;
-    if (isset($http_response_header)) {
-        foreach ($http_response_header as $header) {
+    $responseHeaders = http_get_last_response_headers(); // PHP 8.4+; replaces the deprecated $http_response_header
+    if ($responseHeaders !== null) {
+        foreach ($responseHeaders as $header) {
             if (preg_match('/^HTTP\/\d\.\d (\d+)/', $header, $matches)) {
                 $httpCode = (int) $matches[1];
             }

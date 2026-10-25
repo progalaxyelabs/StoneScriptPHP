@@ -51,7 +51,6 @@ final class DatabaseIsGatewayModeTest extends TestCase
     private function resetSingleton(string $class): void
     {
         $prop = new \ReflectionProperty($class, '_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 

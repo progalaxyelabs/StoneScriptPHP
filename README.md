@@ -33,7 +33,7 @@ back here if you need to read or modify the framework's own code.
 
 ## Requirements
 
-- PHP >= 8.2, with `pdo`, `pdo_pgsql`, `json`, `openssl`
+- PHP >= 8.5.12 (patched), with `pdo`, `pdo_pgsql`, `json`, `openssl`
 - PostgreSQL >= 13
 - Composer
 - Redis (optional, for caching)

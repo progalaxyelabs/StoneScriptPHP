@@ -66,7 +66,6 @@ final class AuditRecorderTest extends TestCase
     private function resetEnvSingleton(): void
     {
         $prop = new \ReflectionProperty(Env::class, '_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 

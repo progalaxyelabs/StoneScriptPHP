@@ -46,7 +46,6 @@ class RouterValidationTest extends TestCase
         $router = new Router();
         $ref = new \ReflectionClass($router);
         $method = $ref->getMethod('executeHandler');
-        $method->setAccessible(true);
         return $method->invoke($router, $handler, ['input' => $input, 'params' => []]);
     }
 

@@ -65,7 +65,6 @@ final class AuthServiceUrlResolutionTest extends TestCase
     {
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 
@@ -75,7 +74,6 @@ final class AuthServiceUrlResolutionTest extends TestCase
     private function resolve(array $authConfig, Env $env, string $mode): string
     {
         $m = new ReflectionMethod(Application::class, 'resolveAuthServiceUrl');
-        $m->setAccessible(true);
         return $m->invoke(null, $authConfig, $env, $mode);
     }
 

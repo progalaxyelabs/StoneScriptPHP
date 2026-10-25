@@ -47,7 +47,6 @@ curl_setopt($ch, CURLOPT_USERAGENT, 'StoneScriptPHP-Upgrade-Tool');
 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
 
 if ($httpCode !== 200) {
     echo Color::RED . "❌ Failed to fetch release information (HTTP $httpCode)\n" . Color::NC;
@@ -127,7 +126,6 @@ foreach ($filesToUpdate as $source => $dest) {
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     $content = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
 
     if ($httpCode !== 200 || !$content) {
         echo Color::RED . "failed (HTTP $httpCode)\n" . Color::NC;

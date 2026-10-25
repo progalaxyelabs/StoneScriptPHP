@@ -39,7 +39,6 @@ final class EnvSecretResolutionTest extends TestCase
         $this->env = $reflection->newInstanceWithoutConstructor();
 
         $this->resolveRaw = new ReflectionMethod(Env::class, 'resolveRaw');
-        $this->resolveRaw->setAccessible(true);
     }
 
     protected function tearDown(): void
@@ -59,7 +58,6 @@ final class EnvSecretResolutionTest extends TestCase
         // Reset the singleton so other test classes rebuild it from .env and
         // are not poisoned by the synthetic config we set here.
         $prop = new \ReflectionProperty(Env::class, '_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 
@@ -170,7 +168,6 @@ final class EnvSecretResolutionTest extends TestCase
     private function resetSingleton(): void
     {
         $prop = new \ReflectionProperty(Env::class, '_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 

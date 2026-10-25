@@ -103,7 +103,6 @@ class JwtRoutingTest extends TestCase
         }
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
         putenv('DB_GATEWAY_URL=http://localhost:9000');
         putenv('DB_GATEWAY_PLATFORM=test-platform');

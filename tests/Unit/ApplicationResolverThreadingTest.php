@@ -43,7 +43,6 @@ class ApplicationResolverThreadingTest extends TestCase
         $this->setEnvIfEmpty('AUTH_SERVICE_URL', 'http://localhost:3139');
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         $_SERVER['REQUEST_METHOD'] = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -54,7 +53,6 @@ class ApplicationResolverThreadingTest extends TestCase
     {
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         // Undo only the putenv() calls this test made — restores the

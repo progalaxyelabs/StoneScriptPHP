@@ -22,7 +22,7 @@ final class RealGatewayCliTest extends RealGatewayTestCase
         ]]);
         $body = (string) @file_get_contents(self::$url . $path, false, $ctx);
         $status = 0;
-        foreach ($http_response_header ?? [] as $h) {
+        foreach (http_get_last_response_headers() ?? [] as $h) {
             if (preg_match('#^HTTP/\S+ (\d+)#', $h, $mm) === 1) {
                 $status = (int) $mm[1];
             }
@@ -67,6 +67,10 @@ final class RealGatewayCliTest extends RealGatewayTestCase
         $this->assertSame(1, preg_match('/DB_GATEWAY_PLATFORM_TOKEN=(\S+)/', $out, $m));
         $token = $m[1];
 
+        // the fixture ships no migrations/ dir (git does not track empty dirs)
+        if (!is_dir($project . '/src/postgresql/main/postgresql/migrations')) {
+            mkdir($project . '/src/postgresql/main/postgresql/migrations', 0775, true);
+        }
         file_put_contents(
             $project . '/src/postgresql/main/postgresql/migrations/20261021_000001_bad_data.pgsql',
             "INSERT INTO users (email, name) VALUES ('mig.sentinel@e2e.test', 'A'), ('mig.sentinel@e2e.test', 'B');\n"

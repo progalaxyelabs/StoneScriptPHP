@@ -372,7 +372,6 @@ final class SubscriptionReadOnlyTest extends TestCase
             $_ENV[$k] = $v;
         }
         $env = new \ReflectionProperty(\StoneScriptPHP\Env::class, '_instance');
-        $env->setAccessible(true);
         $env->setValue(null, null);
         $c = new SubscriptionConfig([]);
         $this->assertSame('read_only', $c->expiredMode);
@@ -466,7 +465,6 @@ final class SubscriptionReadOnlyTest extends TestCase
         mkdir($dir);
         \StoneScriptPHP\Logger::get_instance()->configure(false, true, false, $dir);
         $ref = new \ReflectionProperty(SubscriptionMiddleware::class, 'lastFailOpenLog');
-        $ref->setAccessible(true);
         $ref->setValue(null, 0);
         try {
             $mw = $this->mw(null, ['provider' => function () { throw new \RuntimeException('gateway down'); }]);
@@ -541,7 +539,6 @@ final class SubscriptionReadOnlyTest extends TestCase
     public function test_cors_exposes_subscription_header_by_default(): void
     {
         $ref = new \ReflectionProperty(CorsMiddleware::class, 'exposedHeaders');
-        $ref->setAccessible(true);
         $this->assertSame(['X-Subscription-State'], $ref->getValue(new CorsMiddleware(['https://a.example'])));
     }
 }

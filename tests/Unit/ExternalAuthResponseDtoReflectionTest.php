@@ -65,7 +65,6 @@ class ExternalAuthResponseDtoReflectionTest extends TestCase
         $this->setEnvIfEmpty('AUTH_ISSUER', 'http://auth.test/');
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 
@@ -73,7 +72,6 @@ class ExternalAuthResponseDtoReflectionTest extends TestCase
     {
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         foreach ($this->envVarsSetByThisTest as $name) {

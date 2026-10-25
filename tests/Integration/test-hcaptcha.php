@@ -112,7 +112,6 @@ $requestWithToken = [
 // Use reflection to test private method
 $reflection = new ReflectionClass($middleware);
 $method = $reflection->getMethod('extractToken');
-$method->setAccessible(true);
 $token = $method->invoke($middleware, $requestWithToken);
 if ($token === 'test-token-123') {
     echo "✓ PASS: Token extracted from h-captcha-response\n";

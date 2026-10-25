@@ -53,7 +53,6 @@ final class GatewayUrlResolutionTest extends TestCase
     {
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 

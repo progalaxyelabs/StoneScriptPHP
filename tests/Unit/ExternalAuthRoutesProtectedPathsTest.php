@@ -35,7 +35,6 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
         $this->setEnvIfEmpty('AUTH_ISSUER', 'http://localhost:3139');
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 
@@ -43,7 +42,6 @@ class ExternalAuthRoutesProtectedPathsTest extends TestCase
     {
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         foreach ($this->envVarsSetByThisTest as $name) {

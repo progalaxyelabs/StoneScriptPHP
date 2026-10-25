@@ -5,19 +5,18 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Support;
 
 /**
- * Refuses to boot on a PHP release below the patched floor for its minor line.
+ * Refuses to boot on a PHP release below the patched floor (v14: PHP 8.5.12).
  *
- * Why this exists in addition to composer.json "php": Composer's generated
- * vendor/composer/platform_check.php only enforces the LOWEST bound of the "php" constraint
- * (here >= 8.2.35), so PHP 8.3.6 or 8.5.4 would pass it. This guard enforces the per-minor floors at
- * every boot (web, FPM, CLI, `php stone`, queue workers: anything that loads vendor/autoload.php).
+ * Why this exists in addition to composer.json "php": `composer install --ignore-platform-reqs`, a base image
+ * swapped after the install, or a downgraded php-fpm package would skip the install-time check. This guard
+ * re-checks at every boot (web, FPM, CLI, `php stone`, queue workers: anything that loads vendor/autoload.php).
  *
- * Floors (unauthenticated PHP RCE "PHP2Shell", CVE-2026-109618 / CVE-2026-109619):
- * 8.2.35, 8.3.36, 8.4.27, 8.5.12; any later minor line (8.6+, 9+) is accepted.
+ * Floor (unauthenticated PHP RCE "PHP2Shell", CVE-2026-109618 / CVE-2026-109619): 8.5.12.
+ * Any later release or minor line (8.5.13+, 8.6+, 9+) is accepted. PHP 8.2 - 8.4 are not supported by v14 at all.
  *
  * Distro builds that backport fixes but keep an old version string (Debian/Ubuntu "8.3.6-0ubuntu...")
  * cannot be told apart from vulnerable builds by PHP_VERSION, so they are refused. Use upstream
- * (packages.sury.org / ondrej PPA) packages, whose version number is truthful. See UPGRADING-13.2.1.md.
+ * (packages.sury.org / ondrej PPA) packages, whose version number is truthful. See docs/UPGRADING-14.0.md.
  *
  * Escape hatch: CLI only (phpunit on a developer workstation), via STONESCRIPT_ALLOW_UNPATCHED_PHP=1.
  * It is NEVER honoured under a web SAPI (fpm, cgi, apache, embed...), and prints a warning each time.
@@ -26,9 +25,6 @@ final class PhpRuntimeFloor
 {
     /** minor line (PHP_MAJOR_VERSION * 100 + PHP_MINOR_VERSION) => lowest patched PHP_VERSION_ID */
     public const FLOORS = [
-        802 => 80235,
-        803 => 80336,
-        804 => 80427,
         805 => 80512,
     ];
 
@@ -38,8 +34,8 @@ final class PhpRuntimeFloor
         $line = intdiv($versionId, 100); // 80305 -> 803
         $floor = self::FLOORS[$line] ?? null;
         if ($floor === null) {
-            if ($line < 802) {
-                return "PHP $versionString is not supported (8.2 or newer, patched, is required).";
+            if ($line < 805) {
+                return "PHP $versionString is not supported: StoneScriptPHP 14 requires PHP 8.5.12 or newer; see docs/UPGRADING-14.0.md.";
             }
             return null; // a minor line newer than every known floor (8.6+, 9+)
         }
@@ -47,7 +43,7 @@ final class PhpRuntimeFloor
             return "PHP $versionString is below the patched floor for the " . intdiv($line, 100) . '.' . ($line % 100)
                 . ' line (' . self::floorString($floor) . ') and is exposed to the unauthenticated PHP RCE '
                 . 'CVE-2026-109618 / CVE-2026-109619. Upgrade to an upstream PHP build (not a distro backport that '
-                . 'keeps an old version number); see UPGRADING-13.2.1.md.';
+                . 'keeps an old version number); see docs/UPGRADING-14.0.md.';
         }
         return null;
     }

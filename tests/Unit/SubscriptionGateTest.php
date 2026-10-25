@@ -26,7 +26,6 @@ final class SubscriptionGateTest extends TestCase
     private function gate(array $subscriptionConfig): bool
     {
         $m = new ReflectionMethod(Application::class, 'isSubscriptionEnabled');
-        $m->setAccessible(true);
         return $m->invoke(null, $subscriptionConfig);
     }
 

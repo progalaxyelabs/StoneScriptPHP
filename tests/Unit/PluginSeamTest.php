@@ -78,7 +78,6 @@ class PluginSeamTest extends TestCase
 
         $ref = new \ReflectionClass($middleware);
         $prop = $ref->getProperty('strategy');
-        $prop->setAccessible(true);
 
         $this->assertInstanceOf(NoTenantStrategy::class, $prop->getValue($middleware));
     }
@@ -100,7 +99,6 @@ class PluginSeamTest extends TestCase
 
         $ref = new \ReflectionClass($middleware);
         $prop = $ref->getProperty('strategy');
-        $prop->setAccessible(true);
 
         $this->assertSame($customStrategy, $prop->getValue($middleware));
     }
@@ -121,7 +119,6 @@ class PluginSeamTest extends TestCase
 
         $ref = new \ReflectionClass(\StoneScriptPHP\Application::class);
         $method = $ref->getMethod('normalizePlugins');
-        $method->setAccessible(true);
 
         $result = $method->invoke(null, [$validPlugin, 'not-a-plugin', 42, null]);
 
@@ -137,7 +134,6 @@ class PluginSeamTest extends TestCase
     {
         $ref = new \ReflectionClass(\StoneScriptPHP\Application::class);
         $method = $ref->getMethod('normalizePlugins');
-        $method->setAccessible(true);
 
         $this->assertSame([], $method->invoke(null, 'not-an-array'));
         $this->assertSame([], $method->invoke(null, null));
@@ -154,7 +150,6 @@ class PluginSeamTest extends TestCase
 
         $ref = new \ReflectionClass(\StoneScriptPHP\Application::class);
         $method = $ref->getMethod('mergePluginRoutes');
-        $method->setAccessible(true);
 
         $result = $method->invoke(null, $appRoutes, []);
 
@@ -187,7 +182,6 @@ class PluginSeamTest extends TestCase
 
         $ref = new \ReflectionClass(\StoneScriptPHP\Application::class);
         $method = $ref->getMethod('mergePluginRoutes');
-        $method->setAccessible(true);
 
         $result = $method->invoke(null, $appRoutes, [$plugin]);
 
@@ -224,7 +218,6 @@ class PluginSeamTest extends TestCase
 
         $ref = new \ReflectionClass(\StoneScriptPHP\Application::class);
         $method = $ref->getMethod('resolveTenancyStrategy');
-        $method->setAccessible(true);
 
         $result = $method->invoke(null, ['strategy' => $explicitStrategy], [$plugin]);
 
@@ -259,7 +252,6 @@ class PluginSeamTest extends TestCase
 
         $ref = new \ReflectionClass(\StoneScriptPHP\Application::class);
         $method = $ref->getMethod('resolveTenancyStrategy');
-        $method->setAccessible(true);
 
         $result = $method->invoke(null, [], [$plugin]);
 
@@ -275,7 +267,6 @@ class PluginSeamTest extends TestCase
     {
         $ref = new \ReflectionClass(\StoneScriptPHP\Application::class);
         $method = $ref->getMethod('resolveTenancyStrategy');
-        $method->setAccessible(true);
 
         $this->assertNull($method->invoke(null, [], []));
     }

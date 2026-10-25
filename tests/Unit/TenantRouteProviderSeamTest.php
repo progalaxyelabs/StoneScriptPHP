@@ -46,7 +46,6 @@ class TenantRouteProviderSeamTest extends TestCase
         $this->setEnvIfEmpty('AUTH_ISSUER', 'http://localhost:3139');
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 
@@ -54,7 +53,6 @@ class TenantRouteProviderSeamTest extends TestCase
     {
         $ref = new \ReflectionClass(Env::class);
         $prop = $ref->getProperty('_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
 
         foreach ($this->envVarsSetByThisTest as $name) {

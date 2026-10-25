@@ -96,7 +96,7 @@ notes: |
   - Auto-generated TypeScript client from backend DTOs
   - Type-safe API communication (SOAP-like)
   - PSR-4 autoloading
-  - PHP >=8.2 requirement
+  - PHP >=8.5.12 requirement
 
   Package: progalaxyelabs/stone-script-php (Composer)
   Future migration to: @stonescriptphp org when domain acquired

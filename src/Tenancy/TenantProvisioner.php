@@ -126,7 +126,6 @@ abstract class TenantProvisioner
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
 
         if ($httpCode < 200 || $httpCode >= 300) {
             log_error("TenantProvisioner::syncBusinessDetails: HTTP $httpCode (response body not logged)");
@@ -241,7 +240,6 @@ abstract class TenantProvisioner
         $ch = curl_init(rtrim($this->gatewayUrl, '/') . '/health');
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
         $body = curl_exec($ch);
-        curl_close($ch);
         $decoded = is_string($body) ? json_decode($body, true) : null;
         $v = is_array($decoded) ? ($decoded['version'] ?? null) : null;
         return $this->gatewayVersionCache = (is_string($v) && $v !== '' ? $v : null);
@@ -375,7 +373,6 @@ abstract class TenantProvisioner
         $response = curl_exec($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlErr  = curl_error($ch);
-        curl_close($ch);
 
         return [$httpCode, $response, $curlErr];
     }

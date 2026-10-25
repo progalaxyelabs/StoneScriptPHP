@@ -33,7 +33,6 @@ class PostRazorpayWebhookRouteQuarantineTest extends TestCase
     private function invokeHandlePaymentCaptured(PostRazorpayWebhookRoute $route, array $payload): void
     {
         $ref = new \ReflectionMethod($route, 'handlePaymentCaptured');
-        $ref->setAccessible(true);
         $ref->invoke($route, $payload);
     }
 

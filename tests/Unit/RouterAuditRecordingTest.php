@@ -89,7 +89,6 @@ final class RouterAuditRecordingTest extends TestCase
         }
         $this->putenvKeys = [];
         $prop = new \ReflectionProperty(Env::class, '_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
         parent::tearDown();
     }
@@ -107,7 +106,6 @@ final class RouterAuditRecordingTest extends TestCase
             $this->putenvKeys[] = $key;
         }
         $prop = new \ReflectionProperty(Env::class, '_instance');
-        $prop->setAccessible(true);
         $prop->setValue(null, null);
     }
 
@@ -116,7 +114,6 @@ final class RouterAuditRecordingTest extends TestCase
         $router = new Router();
         $ref = new \ReflectionClass($router);
         $method = $ref->getMethod('executeHandler');
-        $method->setAccessible(true);
         return $method->invoke($router, $handler, $request);
     }
 

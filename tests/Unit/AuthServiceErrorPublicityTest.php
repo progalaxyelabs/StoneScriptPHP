@@ -55,7 +55,6 @@ final class AuthServiceErrorPublicityTest extends TestCase
             }
         }))->newInstanceWithoutConstructor();
         $m = new \ReflectionMethod(AuthServiceClient::class, 'executeCurl');
-        $m->setAccessible(true);
         try {
             $ch = curl_init('file://' . $file);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);

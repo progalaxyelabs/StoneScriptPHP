@@ -56,7 +56,6 @@ class MultiAuthJwtValidatorTest extends TestCase
 
         // Write to persistent cache via reflection
         $writeMethod = new \ReflectionMethod($validator, 'writePersistentCache');
-        $writeMethod->setAccessible(true);
         $writeMethod->invoke($validator, 'customer', $jwksData);
 
         // Verify file was created
@@ -67,7 +66,6 @@ class MultiAuthJwtValidatorTest extends TestCase
         // Read back via reflection (simulates new PHP-FPM request)
         $validator2 = new MultiAuthJwtValidator([], $this->cacheDir);
         $readMethod = new \ReflectionMethod($validator2, 'readPersistentCache');
-        $readMethod->setAccessible(true);
         $result = $readMethod->invoke($validator2, 'customer');
 
         $this->assertNotNull($result);
@@ -82,7 +80,6 @@ class MultiAuthJwtValidatorTest extends TestCase
         $validator = new MultiAuthJwtValidator([], $this->cacheDir);
 
         $readMethod = new \ReflectionMethod($validator, 'readPersistentCache');
-        $readMethod->setAccessible(true);
         $result = $readMethod->invoke($validator, 'nonexistent');
 
         $this->assertNull($result);
@@ -94,7 +91,6 @@ class MultiAuthJwtValidatorTest extends TestCase
 
         $validator = new MultiAuthJwtValidator([], $this->cacheDir);
         $writeMethod = new \ReflectionMethod($validator, 'writePersistentCache');
-        $writeMethod->setAccessible(true);
 
         // Write twice — no temp files should be left
         $writeMethod->invoke($validator, 'customer', $jwksData);
@@ -110,7 +106,6 @@ class MultiAuthJwtValidatorTest extends TestCase
 
         $validator = new MultiAuthJwtValidator([], $this->cacheDir);
         $writeMethod = new \ReflectionMethod($validator, 'writePersistentCache');
-        $writeMethod->setAccessible(true);
         $writeMethod->invoke($validator, 'customer', $jwksData);
 
         $cacheKey = 'stonescriptphp_jwks_' . md5('customer');

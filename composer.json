@@ -1,6 +1,6 @@
 {
     "name": "progalaxyelabs/stonescriptphp",
-    "version": "13.2.1",
+    "version": "14.0.0",
     "description": "Core Framework Library - Use progalaxyelabs/stonescriptphp-server to create new projects. Modern PHP backend framework for building APIs with PostgreSQL. Installed automatically as a dependency when you create projects with stonescriptphp-server.",
     "type": "library",
     "license": "MIT",
@@ -27,7 +27,7 @@
         }
     ],
     "require": {
-        "php": "~8.2.35 || ~8.3.36 || ~8.4.27 || >=8.5.12",
+        "php": ">=8.5.12",
         "ext-json": "*",
         "ext-curl": "*",
         "progalaxyelabs/stonescriptdb-gateway-client": "^4.0",
@@ -72,7 +72,7 @@
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "platform": {
-            "php": "8.3.36"
+            "php": "8.5.12"
         }
     },
     "archive": {
