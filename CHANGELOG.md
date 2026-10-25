@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [13.2.1]
+
+Security release: the framework (and therefore every app built on it) refuses to install or boot on a PHP release that is
+vulnerable to PHP2Shell. **No code changes are needed in an app on a patched PHP; an app on an unpatched PHP will now stop
+instead of running.** See `docs/UPGRADING-13.2.1.md`.
+
+### Security
+
+- **Minimum PHP is now the patched release of each supported line**: `~8.2.35 || ~8.3.36 || ~8.4.27 || >=8.5.12`
+  (was `^8.2`). Earlier releases are exposed to the unauthenticated PHP remote code execution CVE-2026-109618 and
+  CVE-2026-109619 ("PHP2Shell"), exploited in the wild. `composer install/update` refuses an older PHP.
+- **Boot-time guard** (`StoneScriptPHP\Support\PhpRuntimeFloor`, loaded first by `autoload.files`). Composer's generated
+  `platform_check.php` enforces only the lowest bound of the `php` constraint (here `>= 8.2.35`), so on its own it would let
+  8.3.6 or 8.5.4 boot. The guard enforces the floor of each minor line on every start (php-fpm, `php stone`, workers):
+  web requests get a generic JSON `503` (`service_unavailable`, `Retry-After`) with the version/CVE detail in the server error log
+  only; the CLI prints the reason and exits 1. A distro build that backports the fix but keeps an old version number
+  (for example Debian/Ubuntu `8.3.6`) is refused by design: use upstream (sury / ondrej) packages.
+  CLI-only escape hatch for developer workstations and CI images, `STONESCRIPT_ALLOW_UNPATCHED_PHP=1`; it is ignored under every web SAPI.
+- Development `config.platform.php` pin raised from 8.3.33 to 8.3.36.
+
 ## [13.2.0]
 
 `request_logs` is now bounded: it has retention, a bounded write, and no probe noise. Safe by default, no opt-in.
