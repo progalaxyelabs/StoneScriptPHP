@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
     logged_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
--- Indexes per §8
+-- Indexes per §8. idx_request_logs_occurred_at also serves the retention purge (rl_purge_request_logs); additive and idempotent.
 CREATE INDEX IF NOT EXISTS idx_request_logs_occurred_at        ON request_logs (occurred_at);
 CREATE INDEX IF NOT EXISTS idx_request_logs_identity_id        ON request_logs (identity_id);
 CREATE INDEX IF NOT EXISTS idx_request_logs_status             ON request_logs (status);

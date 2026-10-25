@@ -63,7 +63,7 @@ try {
     }
 
     // Log the request
-    $method_and_url = ($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' . ($_SERVER['REQUEST_URI'] ?? '');
+    $method_and_url = ($_SERVER['REQUEST_METHOD'] ?? 'CLI') . ' ' . \StoneScriptPHP\RequestLogging\FailureText::path($_SERVER['REQUEST_URI'] ?? '');
     log_debug("---------- {$method_and_url} ----------");
 
     // Initialize timings array for performance tracking

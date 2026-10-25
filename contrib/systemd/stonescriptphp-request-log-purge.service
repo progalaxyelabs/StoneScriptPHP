@@ -1,0 +1,22 @@
+# StoneScriptPHP request-log retention. Install as /etc/systemd/system/<app>-request-log-purge.service
+# (one pair per platform), edit the three marked lines, then enable the matching .timer.
+# PREREQUISITE: the platform's main schema must contain function rl_purge_request_logs (package file
+# src/RequestLogging/Schema/functions/rl_purge_request_logs.pgsql): `php stone gateway:migrate-vendor-main`, or copy that
+# file into the platform's own main schema functions/ and run `php stone gateway:migrate-main`.
+# Do a first manual run off-peak: `php stone request-logs:purge`.
+
+[Unit]
+Description=Purge old request_logs rows (retention)
+After=network-online.target
+
+[Service]
+Type=oneshot
+# The OS user that runs this platform's PHP-FPM pool (the CLI reads the same environment the app does).
+User=www-data
+# The platform's API project root (the directory that contains `stone` and `vendor/`).
+WorkingDirectory=/srv/example-app/api
+# Retention window: REQUEST_LOG_RETENTION_DAYS in the app environment (default 30), or pass --days=N here.
+ExecStart=/usr/bin/php stone request-logs:purge
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min

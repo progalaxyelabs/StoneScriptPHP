@@ -114,13 +114,14 @@ final class FailureText
         return (string) preg_replace_callback('/\x01(\d+)\x02/', static fn (array $m): string => $keep[(int) $m[1]] ?? '', $text);
     }
 
-    /** A request URI without its query string or fragment (the query string is where personal data lives). */
+    /** A request URI without its query string or fragment (the query string is where personal data lives), long opaque segments masked ({@see PathScrubber}). */
     public static function path(string $uri): string
     {
         $uri = self::oneLine(self::utf8($uri));
         $cut = strcspn($uri, '?#');
         $path = substr($uri, 0, $cut);
-        return $path === '' ? '/' : self::cut($path, 2048);
+        // bearer-like secrets in the path (invitation / cancel / reset tokens) never reach a log or a row
+        return $path === '' ? '/' : self::cut(PathScrubber::scrub($path), 2048);
     }
 
     /** CR/LF and other control characters become a single space: a logged value must never forge a log line. */

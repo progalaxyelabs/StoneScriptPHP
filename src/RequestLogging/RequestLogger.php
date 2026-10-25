@@ -10,8 +10,9 @@ use StoneScriptDB\GatewayClient;
 /**
  * Platform-level request logger.
  *
- * Persists one self-sufficient row to {platform}_main.request_logs on every
- * request — regardless of success, uncaught exception, or fatal error.
+ * Persists one self-sufficient row to {platform}_main.request_logs per request —
+ * regardless of success, uncaught exception, or fatal error — except health/monitor
+ * probes that succeeded (§10). Rows are purged by `php stone request-logs:purge`.
  *
  * §1  Armed via register_shutdown_function() as the FIRST action in Application::run().
  * §2  Duration from INDEX_START_TIME; falls back to the start time passed to arm().
@@ -21,6 +22,14 @@ use StoneScriptDB\GatewayClient;
  * §6  fastcgi_finish_request() before DB write; entire write is fail-open.
  * §7  Config-gated: request_logging.enabled (defaults true).
  * §9  X-Request-Id captured if present, else UUIDv4 generated.
+ * §10 Probe skipping: successful requests to request_logging.skip_paths (default /health, /healthz)
+ *     and successful HEAD requests are not logged; any failure (status >= 400, a recorded error) always is.
+ * §11 The write is bounded: connect <= request_logging.connect_timeout_seconds (default 1), total <=
+ *     request_logging.write_timeout_seconds (default 2). After 3 CONSECUTIVE failed writes this worker skips
+ *     success rows for request_logging.failure_cooldown_seconds (default 30) - failure rows are still attempted
+ *     (one probe per 5 s) - and reports ONE summarized error line per minute,
+ *     so a slow or dead gateway can neither pin php-fpm workers nor flood the log.
+ * Personal data held per row: see docs/REQUEST-LOGGING.md.
  *
  * @package StoneScriptPHP\RequestLogging
  */
@@ -40,6 +49,28 @@ class RequestLogger
     private static string $gatewayPlatform = '';
     private static string $gatewaySchema   = 'main';
 
+    public const DEFAULT_SKIP_PATHS        = ['/health', '/healthz'];
+    public const DEFAULT_CONNECT_TIMEOUT_S = 1;
+    public const DEFAULT_WRITE_TIMEOUT_S   = 2;
+    public const DEFAULT_COOLDOWN_S        = 30;
+    private const REPORT_INTERVAL_S        = 60;
+    private const BREAKER_THRESHOLD        = 3;
+    private const PROBE_INTERVAL_S         = 5;
+
+    /** @var string[] */
+    private static array $skipPaths = self::DEFAULT_SKIP_PATHS;
+    private static int   $connectTimeout = self::DEFAULT_CONNECT_TIMEOUT_S;
+    private static int   $writeTimeout   = self::DEFAULT_WRITE_TIMEOUT_S;
+    private static int   $cooldown       = self::DEFAULT_COOLDOWN_S;
+
+    // Per-php-fpm-worker failure state (statics live as long as the worker).
+    private static float  $suspendedUntil = 0.0;
+    private static float  $nextProbeAt    = 0.0;
+    private static int    $consecutiveFailures = 0;
+    private static float  $lastReport     = 0.0;
+    private static int    $failedSinceReport = 0;
+    private static int    $skippedSinceReport = 0;
+
     /**
      * For testing: when set, called instead of the real GatewayClient write.
      * The closure receives the assembled row array for assertion.
@@ -48,6 +79,9 @@ class RequestLogger
      * @internal
      */
     private static ?\Closure $writeAdapter = null;
+
+    /** For testing: receives the summarized failure line instead of log_error(). @internal */
+    private static ?\Closure $failureSink = null;
 
     // -------------------------------------------------------------------------
     // Public API
@@ -104,6 +138,14 @@ class RequestLogger
         self::$gatewayPlatform = (string)($_ENV['DB_GATEWAY_PLATFORM']       ?? $_SERVER['DB_GATEWAY_PLATFORM']       ?? '');
         self::$gatewaySchema   = (string)($_ENV['DB_GATEWAY_SCHEMA_NAME']    ?? $_SERVER['DB_GATEWAY_SCHEMA_NAME']    ?? 'main');
 
+        if (isset($loggingConfig['path_scrub_patterns']) && is_array($loggingConfig['path_scrub_patterns'])) {
+            PathScrubber::setPatterns($loggingConfig['path_scrub_patterns']);
+        }
+        self::$skipPaths      = self::resolveSkipPaths($loggingConfig['skip_paths'] ?? null);
+        self::$connectTimeout = self::clampSeconds($loggingConfig['connect_timeout_seconds'] ?? self::envValue('REQUEST_LOG_CONNECT_TIMEOUT'), self::DEFAULT_CONNECT_TIMEOUT_S);
+        self::$writeTimeout   = max(self::$connectTimeout, self::clampSeconds($loggingConfig['write_timeout_seconds'] ?? self::envValue('REQUEST_LOG_WRITE_TIMEOUT'), self::DEFAULT_WRITE_TIMEOUT_S));
+        self::$cooldown       = max(0, min(600, (int) ($loggingConfig['failure_cooldown_seconds'] ?? self::envValue('REQUEST_LOG_FAILURE_COOLDOWN') ?? self::DEFAULT_COOLDOWN_S)));
+
         self::$armed = true;
 
         // §1 — shutdown function is the ONLY hook that survives success, exception, AND fatal
@@ -133,17 +175,139 @@ class RequestLogger
             }
         }
 
+        // §10 — successful probes are noise (and a 1 Hz monitor would otherwise write 86k rows/day/endpoint)
+        if (self::shouldSkip(
+            (string) ($_SERVER['REQUEST_METHOD'] ?? ''),
+            (string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/'),
+            self::currentStatus(),
+            RequestContext::hasError() || RequestContext::getHandled() !== [],
+            self::$skipPaths
+        )) {
+            return;
+        }
+
         // §6 — release the client connection before the (potentially slow) DB write
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
         }
 
+        // §11 — breaker. It opens only after BREAKER_THRESHOLD CONSECUTIVE failed writes (one transient timeout
+        // never costs a failure row). While open, success rows are skipped; failure rows (status >= 400 or a
+        // recorded error) are still attempted, at most one per PROBE_INTERVAL_S, with the short timeout.
+        $now = microtime(true);
+        if (self::$suspendedUntil > $now) {
+            $isFailure = self::currentStatus() >= 400 || RequestContext::hasError() || RequestContext::getHandled() !== [];
+            if (!$isFailure || $now < self::$nextProbeAt) {
+                self::$skippedSinceReport++;
+                return;
+            }
+            self::$nextProbeAt = $now + self::PROBE_INTERVAL_S;
+        }
+
         try {
             self::writeLog();
+            self::$consecutiveFailures = 0;
+            self::$suspendedUntil = 0.0;
         } catch (\Throwable $e) {
             // §6 — fail-open: swallow all errors, never become a new failure mode
-            log_error('[RequestLogger] DB write failed (fail-open): ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            if (++self::$consecutiveFailures >= self::BREAKER_THRESHOLD) {
+                self::$suspendedUntil = microtime(true) + self::$cooldown;
+            }
+            self::noteFailure(\StoneScriptPHP\Persistence\LogSanitizer::describe($e));
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // §10 probe skipping, §11 failure reporting — public/internal for unit tests
+    // -------------------------------------------------------------------------
+
+    /**
+     * True when this request must NOT be logged: it succeeded (status < 400, no recorded error or handled
+     * failure) AND it is a HEAD request or its path equals / sits under one of $skipPaths.
+     *
+     * @param string[] $skipPaths
+     */
+    public static function shouldSkip(string $method, string $path, int $status, bool $hadError, array $skipPaths): bool
+    {
+        if ($hadError || $status >= 400) {
+            return false; // error capture is never skipped
+        }
+        if (strtoupper($method) === 'HEAD') {
+            return true;
+        }
+        $path = '/' . trim($path, '/');
+        foreach ($skipPaths as $skip) {
+            if ($path === $skip || str_starts_with($path, $skip . '/')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * skip_paths from config (array or comma list) else REQUEST_LOG_SKIP_PATHS else the defaults.
+     * An explicit empty list means "log every path".
+     *
+     * @return string[] normalised: leading slash, no trailing slash
+     */
+    public static function resolveSkipPaths(mixed $configured): array
+    {
+        $raw = $configured ?? self::envValue('REQUEST_LOG_SKIP_PATHS');
+        if ($raw === null) {
+            return self::DEFAULT_SKIP_PATHS;
+        }
+        $items = is_array($raw) ? $raw : explode(',', (string) $raw);
+        $out = [];
+        foreach ($items as $item) {
+            $item = trim((string) $item);
+            if ($item !== '' && $item !== '/') {
+                $out[] = '/' . trim($item, '/');
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    private static function currentStatus(): int
+    {
+        $raw = http_response_code();
+        return ($raw === false || $raw === 0) ? (RequestContext::hasError() ? 500 : 200) : (int) $raw;
+    }
+
+    private static function envValue(string $name): ?string
+    {
+        $v = $_ENV[$name] ?? $_SERVER[$name] ?? null;
+        return ($v === null || $v === '') ? null : (string) $v;
+    }
+
+    /** Whole seconds in 1..10; anything else -> $default. */
+    private static function clampSeconds(mixed $v, int $default): int
+    {
+        if ($v === null || !is_numeric($v) || (int) $v < 1) {
+            return $default;
+        }
+        return min(10, (int) $v);
+    }
+
+    /**
+     * ONE summarized error line per REPORT_INTERVAL_S per worker, however many writes failed or were skipped.
+     */
+    private static function noteFailure(string $summary): void
+    {
+        self::$failedSinceReport++;
+        $now = microtime(true);
+        if ($now - self::$lastReport < self::REPORT_INTERVAL_S && self::$lastReport > 0.0) {
+            return;
+        }
+        $line = sprintf(
+            '[RequestLogger] request-log write failed (fail-open): %s; %d failed, %d skipped during cooldown since last report',
+            $summary,
+            self::$failedSinceReport,
+            self::$skippedSinceReport
+        );
+        self::$failureSink !== null ? (self::$failureSink)($line) : log_error($line);
+        self::$lastReport = $now;
+        self::$failedSinceReport = 0;
+        self::$skippedSinceReport = 0;
     }
 
     // -------------------------------------------------------------------------
@@ -196,6 +360,16 @@ class RequestLogger
     // -------------------------------------------------------------------------
 
     /**
+     * Receive the summarized failure line instead of log_error() (for unit tests).
+     *
+     * @internal
+     */
+    public static function setFailureSink(?\Closure $sink): void
+    {
+        self::$failureSink = $sink;
+    }
+
+    /**
      * Inject a write adapter (for unit tests).
      *
      * The closure receives the assembled row array and can throw to simulate
@@ -225,6 +399,18 @@ class RequestLogger
         self::$gatewayPlatform = '';
         self::$gatewaySchema = 'main';
         self::$writeAdapter  = null;
+        self::$failureSink   = null;
+        PathScrubber::reset();
+        self::$skipPaths     = self::DEFAULT_SKIP_PATHS;
+        self::$connectTimeout = self::DEFAULT_CONNECT_TIMEOUT_S;
+        self::$writeTimeout  = self::DEFAULT_WRITE_TIMEOUT_S;
+        self::$cooldown      = self::DEFAULT_COOLDOWN_S;
+        self::$suspendedUntil = 0.0;
+        self::$nextProbeAt   = 0.0;
+        self::$consecutiveFailures = 0;
+        self::$lastReport    = 0.0;
+        self::$failedSinceReport = 0;
+        self::$skippedSinceReport = 0;
     }
 
     /** @internal */
@@ -235,6 +421,10 @@ class RequestLogger
     public static function isTrustProxy(): bool   { return self::$trustProxy; }
     /** @internal */
     public static function getPlatformCode(): string { return self::$platformCode; }
+    /** @internal */
+    public static function getWriteTimeouts(): array { return ['connect' => self::$connectTimeout, 'total' => self::$writeTimeout]; }
+    /** @internal @return string[] */
+    public static function getSkipPaths(): array  { return self::$skipPaths; }
 
     // -------------------------------------------------------------------------
     // Private — row assembly and DB write
@@ -262,7 +452,7 @@ class RequestLogger
 
         // §3 — path without query string
         $uri  = $_SERVER['REQUEST_URI'] ?? '/';
-        $path = parse_url($uri, PHP_URL_PATH) ?: '/';
+        $path = FailureText::path((string) $uri); // query dropped, secret-looking segments masked (PathScrubber)
 
         // §2 — occurred_at with microsecond precision, UTC
         $occurred_at = self::formatTimestamp($startTime);
@@ -284,7 +474,7 @@ class RequestLogger
             'platform_code' => self::$platformCode,
             'host'          => FailureText::cut($_SERVER['HTTP_HOST'] ?? '', 253),
             'method'        => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
-            'path'          => FailureText::cut((string) $path, 2048),
+            'path'          => $path,
             'status'        => $status,
             'duration_ms'   => $durationMs,
             'client_ip'     => self::loggedClientIp(),
@@ -314,8 +504,7 @@ class RequestLogger
 
         // §6 — table-missing guard: if gateway is not configured, fail-open to STDERR
         if (empty(self::$gatewayUrl) || empty(self::$gatewayPlatform)) {
-            log_error('[RequestLogger] Gateway not configured — request log skipped');
-            return;
+            throw new \RuntimeException('gateway not configured (DB_GATEWAY_URL / DB_GATEWAY_PLATFORM)');
         }
 
         // Direct GatewayClient for the MAIN schema (not tenant)
@@ -326,6 +515,10 @@ class RequestLogger
             null,   // no tenant schema for main-schema writes
             null    // no UUID override
         );
+
+        // §11 — bounded: a slow gateway must never hold this worker for the client default (30 s / 10 s)
+        $client->setConnectTimeout(self::$connectTimeout);
+        $client->setTimeout(self::$writeTimeout);
 
         // §6 — if the function / table does not exist yet (platform not migrated),
         // GatewayClient throws and the caller's try/catch fails-open. No DDL here.

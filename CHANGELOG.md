@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [13.2.0]
+
+`request_logs` is now bounded: it has retention, a bounded write, and no probe noise. Safe by default, no opt-in.
+**Platforms must (1) get the new SQL function into their main schema and (2) install the retention timer.**
+(1) `composer update` stages `rl_purge_request_logs.pgsql` into `src/postgresql/vendor/`; activate it with
+`php stone gateway:migrate-vendor-main`. A platform that only runs `gateway:migrate-main` must instead copy
+`vendor/progalaxyelabs/stonescriptphp/src/RequestLogging/Schema/functions/rl_purge_request_logs.pgsql` into its own main
+schema `functions/` directory. Without it `php stone request-logs:purge` exits 1. (2) Install the systemd timer from
+`vendor/progalaxyelabs/stonescriptphp/contrib/systemd/` (steps are in the template headers; also see `docs/UPGRADING-13.2.md` in the repository; the unit templates also ship in the package under `contrib/systemd/`).
+
+### Added
+
+- **Retention.** `rl_purge_request_logs(p_older_than_days, p_batch)` (framework main-schema function: batched
+  `DELETE ... SKIP LOCKED`, refuses a window < 1 day, no DDL), `php stone request-logs:purge`
+  (`--days` / `REQUEST_LOG_RETENTION_DAYS`, default 30; `--batch`, `--max-batches`, `--sleep-ms`), and systemd timer/service
+  templates in `contrib/systemd/`. The `occurred_at` index is declared (additive).
+- `docs/REQUEST-LOGGING.md`: exactly which personal-data fields a row holds, retention, timeouts, probe skipping.
+
+### Security
+
+- **Secret-looking path segments are masked in `request_logs.path`, the referer path and every logged request path**
+  (invitation, booking-cancel and reset tokens carried in URL paths). New `RequestLogging\PathScrubber`, applied inside
+  `FailureText::path()` (used by RequestLogger, Logger, LoggingMiddleware, the request line). A segment becomes
+  `{redacted}` when it is 20+ chars of `[A-Za-z0-9_-]`, not purely digits, not a UUID and not a readable kebab/snake word
+  list; hex runs of 32+ chars are replaced wherever they sit. Short ids, numeric ids, UUIDs and route words are kept. Apps add
+  patterns with `PathScrubber::addPattern('~/promo/[^/]+~')` or `request_logging.path_scrub_patterns`. Existing rows
+  written before 13.2 still contain raw tokens: purge them (retention does this within the window) or delete them by hand.
+
+### Changed
+
+- **The request-log write can no longer pin a php-fpm worker.** It uses a 1 s connect / 2 s total timeout (was the gateway
+  client defaults, 10 s / 30 s); configurable (`request_logging.connect_timeout_seconds`, `write_timeout_seconds`).
+  After 3 consecutive failed writes the worker skips SUCCESS-row writes for 30 s (`failure_cooldown_seconds`); failure
+  rows (status >= 400 / recorded error) are still attempted, one probe per 5 s, so a transient timeout never loses an
+  error row. ONE summarized error line per minute per worker instead of one per request.
+- **Probes are not logged.** Successful `HEAD` requests and successful requests to `request_logging.skip_paths`
+  (default `/health`, `/healthz`; `REQUEST_LOG_SKIP_PATHS`) write no row. Failures, including failed probes, are always recorded.
+
 ## [13.1.0]
 
 Server-side error tracking fix. Every API failure is now recorded in `request_logs` (class + safe message) and in the

@@ -1,0 +1,12 @@
+# Install next to the .service as /etc/systemd/system/<app>-request-log-purge.timer, then:
+#   systemctl daemon-reload && systemctl enable --now <app>-request-log-purge.timer
+[Unit]
+Description=Daily request_logs retention purge
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
