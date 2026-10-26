@@ -49,12 +49,6 @@ parameters:
 			path: src/Auth/Client/AuthServiceClient.php
 
 		-
-			message: '#^Parameter \#1 \$handle of function curl_close expects CurlHandle, resource given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/Auth/Client/AuthServiceClient.php
-
-		-
 			message: '#^Parameter \#1 \$handle of function curl_errno expects CurlHandle, resource given\.$#'
 			identifier: argument.type
 			count: 1

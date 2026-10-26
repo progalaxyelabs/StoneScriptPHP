@@ -396,7 +396,7 @@ function gatewayJsonHeaders(string $payload, ?string $token = null): array
  *
  * @return array{code: int, body: string}
  */
-function gatewayHttpRequest(string $method, string $url, array $headers, ?string $body, int $timeout): array
+function gatewayHttpRequest(string $method, string $url, array $headers, ?string $body, int $timeout, bool $fatalOnTransportError = true): array
 {
     $context = stream_context_create([
         'http' => [
@@ -409,6 +409,16 @@ function gatewayHttpRequest(string $method, string $url, array $headers, ?string
     ]);
 
     $result = @file_get_contents($url, false, $context);
+    if ($result === false) {
+        $err = error_get_last();
+        if (!$fatalOnTransportError) {
+            // Caller (e.g. job poll loop) retries on code 0 itself.
+            return ['code' => 0, 'body' => ''];
+        }
+        fwrite(STDERR, "ERROR: Gateway unreachable ({$method} {$url}): " . ($err['message'] ?? 'connection failed or timed out') . "\n");
+        fwrite(STDERR, "  Check DB_GATEWAY_URL and that the gateway is running.\n");
+        exit(1);
+    }
     $httpCode = 0;
     $responseHeaders = http_get_last_response_headers(); // PHP 8.4+; replaces the deprecated $http_response_header
     if ($responseHeaders !== null) {
@@ -983,7 +993,7 @@ function gatewayPollMigrateAllJob(string $gatewayUrl, string $jobId, string $pla
             $headers[] = "Authorization: Bearer {$platformToken}";
         }
 
-        $resp = gatewayHttpRequest('GET', $pollUrl, $headers, null, 30);
+        $resp = gatewayHttpRequest('GET', $pollUrl, $headers, null, 30, false);
 
         // Transport error (connection failure or 5xx on the poll GET itself).
         if ($resp['code'] === 0 || $resp['code'] >= 500) {

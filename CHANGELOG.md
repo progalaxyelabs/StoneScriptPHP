@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.0.1]
+
+### Fixed
+- `composer.json` now requires `progalaxyelabs/stonescriptdb-gateway-client` `^4.0.1` (4.0.0 still called `curl_close()` and raised `E_DEPRECATED` on PHP 8.5).
+- Removed a stale `curl_close` ignore from `phpstan-baseline.neon`.
+- `cli/helpers/gateway-common.php`: an unreachable gateway now prints a clear error to STDERR and exits 1 instead of reporting HTTP code 0 with an empty body (the job-poll loop opts out and keeps its transport-retry behaviour).
+
+### Notes
+- `Cache` still uses plain `unserialize()`: it legitimately stores arbitrary application values including objects, so `allowed_classes => false` would silently turn them into `__PHP_Incomplete_Class`. The Redis store is a trusted, server-side-only boundary; keep it unexposed and authenticated.
+
 ## [14.0.0]
 
 **BREAKING (only the PHP floor): requires PHP `>=8.5.12`.** PHP 8.2, 8.3 and 8.4 are no longer supported. No other intentional API
