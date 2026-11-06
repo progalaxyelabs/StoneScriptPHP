@@ -263,6 +263,24 @@ function ssp_run_post_install(string $projectRoot): array
 }
 
 /**
+ * Composer events whose scripts run while packages are installed, updated, removed or autoloaded, or before any
+ * Composer command. Only the framework's own `stone post-install` may be wired to them.
+ */
+const SSP_INSTALL_TIME_HOOKS = [
+    'pre-install-cmd', 'post-install-cmd', 'pre-update-cmd', 'post-update-cmd',
+    'pre-autoload-dump', 'post-autoload-dump',
+    'pre-package-install', 'post-package-install', 'pre-package-update', 'post-package-update',
+    'pre-package-uninstall', 'post-package-uninstall',
+    'pre-command-run', 'command',
+];
+
+/** True only for the exact framework command, in the forms an app's composer.json uses to call it. */
+function ssp_is_framework_post_install_command(string $cmd): bool
+{
+    return (bool) preg_match('#^(@php|php) (\./)?(vendor/progalaxyelabs/stonescriptphp/stone|stone) post-install$#', trim($cmd));
+}
+
+/**
  * `stone deps:check` core. Returns structured findings.
  *
  * @param array<string,mixed>|null $audit  result of composer audit (null = not run)
@@ -322,10 +340,15 @@ function ssp_check_dependencies(string $projectRoot, ?array $audit, bool $includ
     if (is_array($rootJson)) {
         $allow = $rootJson['config']['allow-plugins'] ?? null;
         if ($allow === true) {
-            $errors[] = 'composer.json config.allow-plugins is true (allows every plugin) — use {} or an explicit map';
+            $errors[] = 'composer.json config.allow-plugins is true (allows every plugin) — use false';
+        } elseif ($allow === false) {
+            // denied outright: nothing to review
         } elseif (!is_array($allow)) {
-            $errors[] = 'composer.json config.allow-plugins is not set — set "allow-plugins": {} to deny all plugins';
+            $errors[] = 'composer.json config.allow-plugins is not set — set "allow-plugins": false to deny all plugins';
         } else {
+            if ($allow === []) {
+                $warnings[] = 'composer.json config.allow-plugins is an empty map: an interactive Composer run asks whether to allow a plugin — use false';
+            }
             foreach ($allow as $plugin => $enabled) {
                 if ($enabled === true && !in_array((string) $plugin, $config['plugins_approved'], true)) {
                     $errors[] = "composer.json allows plugin {$plugin} but it is not in stone-packages.json \"plugins_approved\"";
@@ -333,9 +356,9 @@ function ssp_check_dependencies(string $projectRoot, ?array $audit, bool $includ
             }
         }
         $scripts = $rootJson['scripts'] ?? [];
-        foreach (['post-install-cmd', 'post-update-cmd', 'post-autoload-dump'] as $hook) {
+        foreach (SSP_INSTALL_TIME_HOOKS as $hook) {
             foreach ((array) ($scripts[$hook] ?? []) as $cmd) {
-                if (!is_string($cmd) || !str_contains($cmd, 'stone post-install')) {
+                if (!is_string($cmd) || !ssp_is_framework_post_install_command($cmd)) {
                     $errors[] = "composer.json scripts.{$hook} contains a command other than the framework's `stone post-install`: " . (is_string($cmd) ? substr($cmd, 0, 80) : 'non-string');
                 }
             }
@@ -358,14 +381,14 @@ function ssp_check_dependencies(string $projectRoot, ?array $audit, bool $includ
     return ['errors' => $errors, 'warnings' => $warnings, 'autoload_files' => $autoloadFiles];
 }
 
-/** Run `composer audit --locked --format=json`. Returns null when composer is unavailable or output unparseable. */
+/** Run `composer audit --locked --no-plugins --no-scripts --format=json` (no project code runs). Returns null when composer is unavailable or output unparseable. */
 function ssp_run_composer_audit(string $projectRoot): ?array
 {
     $composer = trim((string) @shell_exec('command -v composer 2>/dev/null'));
     if ($composer === '') {
         return null;
     }
-    $cmd = 'cd ' . escapeshellarg($projectRoot) . ' && ' . escapeshellarg($composer) . ' audit --locked --no-interaction --format=json 2>/dev/null';
+    $cmd = 'cd ' . escapeshellarg($projectRoot) . ' && ' . escapeshellarg($composer) . ' audit --locked --no-interaction --no-plugins --no-scripts --format=json 2>/dev/null';
     $json = shell_exec($cmd);
     $parsed = is_string($json) ? json_decode($json, true) : null;
     return is_array($parsed) ? $parsed : null;

@@ -44,6 +44,14 @@ if (($argv[1] ?? '') === 'post-install') {
     exit($result['exit']);
 }
 
+// deps:check vets the installed packages, so it must not execute any of them: it runs before the autoloader
+// (vendor/autoload.php would run every package's autoload "files"). It needs only the CLI helpers.
+if (($argv[1] ?? '') === 'deps:check') {
+    $stoneExitCode = 1;
+    require $frameworkDir . '/cli/deps-check.php';
+    exit($stoneExitCode);
+}
+
 require_once $projectRoot . '/vendor/autoload.php';
 
 require_once $frameworkDir . '/cli/helpers/color.php';

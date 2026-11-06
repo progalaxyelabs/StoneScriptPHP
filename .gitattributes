@@ -1,0 +1,9 @@
+# GitHub archives (what Packagist installs) honour export-ignore. Keep test and CI material out of them.
+# docs/ ships on purpose: the upgrade guides and READMEs link to it.
+/tests                    export-ignore
+/integration-tests        export-ignore
+/test-results             export-ignore
+/artifacts                export-ignore
+/.github                  export-ignore
+/.gitattributes           export-ignore
+/.gitleaksignore          export-ignore

@@ -17,7 +17,13 @@ See `UPGRADING-14.4.md`.
 - Vendor schema staging reads a package's top-level `postgresql/main/<bucket>/` tree. The old `src/**/Schema/` layout remains as a temporary, warned fallback; a package with both uses `postgresql/` only.
 - `scripts/build-framework-manifest.php` writes the release manifest (run as the last release step; a test fails if it is stale).
 
+- `.gitattributes`: `tests/`, `integration-tests/`, `.github/` and local test output are left out of the GitHub archive. `docs/` is kept because the upgrade guides and the READMEs link to it.
+
 ### Changed
+- `stone deps:check` is dispatched before the Composer autoloader is loaded, so no installed package's autoload `files` run while the packages are being vetted (the same as `stone post-install`). `composer audit` is run with `--no-plugins --no-scripts`.
+- `deps:check` accepts `"allow-plugins": false` (the recommended value; it never prompts) and reports an empty `{}` map as a warning because an interactive Composer run asks about plugins.
+- `deps:check` recognises the framework command by exact match (`@php vendor/progalaxyelabs/stonescriptphp/stone post-install`, `@php stone post-install`, or the `php` forms) rather than by substring, and applies it to every install-time hook: `pre-/post-install-cmd`, `pre-/post-update-cmd`, `pre-/post-autoload-dump`, `pre-/post-package-install|update|uninstall`, `pre-command-run` and `command`. Dev packages stay opt-in with `--dev`: a production install (`--no-dev`) does not contain them, and a development tree legitimately holds many unlisted test tools.
+- Constraint matching follows Composer for pre-release versions (`2.0.0-beta` is below `2.0.0`; `^2.0` and `>=2.0` still include it). A review entry for `2.0.0` therefore no longer covers `2.0.0-beta`.
 - `SubscriptionMiddleware` now FAILS CLOSED when the subscription lookup errors: reads and the write allow-list continue, other writes get HTTP 503 `SUBSCRIPTION_LOOKUP_UNAVAILABLE` (in `block` mode every non-exempt request does), the failure is logged with an ALERT tag and recorded in request logs. `lookup_failure => 'allow'` restores fail-open and is accepted only when `APP_ENV` is a development value.
 
 ## [14.3.0]

@@ -45,14 +45,32 @@ if (!function_exists('ssp_read_installed_packages')) {
         return $out;
     }
 
-    /** @return list<int>|null  [major, minor, patch] or null when not a plain numeric version */
+    /**
+     * Parse a version into [major, minor, patch, stability rank, stability number], or null when it is not a
+     * plain numeric version. Stability follows Composer: dev(0) < alpha(1) < beta(2) < RC(3) < stable(4) < patch(5),
+     * so 2.0.0-beta sorts before 2.0.0. Build metadata after "+" is ignored.
+     *
+     * @return list<int>|null
+     */
     function ssp_parse_version(string $v): ?array
     {
         $v = ltrim(trim($v), 'vV');
-        if (!preg_match('/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.\d+)?(?:[-+][0-9A-Za-z.+-]*)?$/', $v, $m)) {
+        if (!preg_match('/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.\d+)?(?:[-._]?(dev|alpha|a|beta|b|RC|patch|pl|p)[.-]?(\d*))?(?:\+[0-9A-Za-z.+-]*)?$/i', $v, $m)) {
             return null;
         }
-        return [(int) $m[1], (int) ($m[2] ?? 0), (int) ($m[3] ?? 0)];
+        $rank = 4;
+        $num = 0;
+        if (($m[4] ?? '') !== '') {
+            $rank = match (strtolower($m[4])) {
+                'dev' => 0,
+                'alpha', 'a' => 1,
+                'beta', 'b' => 2,
+                'rc' => 3,
+                default => 5,
+            };
+            $num = (int) ($m[5] ?? 0);
+        }
+        return [(int) $m[1], (int) ($m[2] ?? 0), (int) ($m[3] ?? 0), $rank, $num];
     }
 
     function ssp_cmp_version(array $a, array $b): int
@@ -108,7 +126,7 @@ if (!function_exists('ssp_read_installed_packages')) {
             }
             return !isset($m[2]) || $m[2] === '' || $iv[1] === (int) $m[2];
         }
-        if (!preg_match('/^(\^|~|>=|<=|>|<|=|==|!=)?\s*v?(\d+(?:\.\d+){0,3}(?:[-+][0-9A-Za-z.+-]*)?)$/', $term, $m)) {
+        if (!preg_match('/^(\^|~|>=|<=|>|<|=|==|!=)?\s*v?(\d+(?:\.\d+){0,3}(?:[-._]?[A-Za-z]+[.-]?\d*)?(?:\+[0-9A-Za-z.+-]*)?)$/', $term, $m)) {
             return false;
         }
         $op = $m[1] ?? '';
@@ -116,25 +134,32 @@ if (!function_exists('ssp_read_installed_packages')) {
         if ($cv === null) {
             return false;
         }
-        $parts = substr_count(explode('-', $m[2])[0], '.') + 1;
+        // Composer semantics: a bound written without a stability suffix on ^, ~, >= and < is a "-dev" bound,
+        // so 2.0.0-beta satisfies ^2.0 and >=2.0 but not <2.0; = , > , <= and != compare exact stabilities.
+        $hasSuffix = $cv[3] !== 4 || (bool) preg_match('/[A-Za-z]/', explode('+', $m[2])[0]);
+        $dev = static fn (array $v): array => [$v[0], $v[1], $v[2], 0, 0];
+        $lower = $hasSuffix ? $cv : $dev($cv);
+        $parts = substr_count(preg_replace('/[-._]?[A-Za-z].*$/', '', $m[2]), '.') + 1;
         switch ($op) {
             case '':
             case '=':
             case '==':
-                return $parts >= 3 ? $iv === $cv : ssp_cmp_version($iv, $cv) >= 0 && ssp_cmp_version($iv, $parts === 2 ? [$cv[0], $cv[1] + 1, 0] : [$cv[0] + 1, 0, 0]) < 0;
+                return $parts >= 3
+                    ? $iv === $cv
+                    : ssp_cmp_version($iv, $dev($cv)) >= 0 && ssp_cmp_version($iv, $dev($parts === 2 ? [$cv[0], $cv[1] + 1, 0] : [$cv[0] + 1, 0, 0])) < 0;
             case '!=':
                 return $iv !== $cv;
             case '>=':
-                return ssp_cmp_version($iv, $cv) >= 0;
+                return ssp_cmp_version($iv, $lower) >= 0;
             case '>':
                 return ssp_cmp_version($iv, $cv) > 0;
             case '<=':
                 return ssp_cmp_version($iv, $cv) <= 0;
             case '<':
-                return ssp_cmp_version($iv, $cv) < 0;
+                return ssp_cmp_version($iv, $lower) < 0;
             case '~':
                 $upper = $parts >= 3 ? [$cv[0], $cv[1] + 1, 0] : [$cv[0] + 1, 0, 0];
-                return ssp_cmp_version($iv, $cv) >= 0 && ssp_cmp_version($iv, $upper) < 0;
+                return ssp_cmp_version($iv, $lower) >= 0 && ssp_cmp_version($iv, $dev($upper)) < 0;
             case '^':
                 if ($cv[0] > 0) {
                     $upper = [$cv[0] + 1, 0, 0];
@@ -143,7 +168,7 @@ if (!function_exists('ssp_read_installed_packages')) {
                 } else {
                     $upper = [0, 0, $cv[2] + 1];
                 }
-                return ssp_cmp_version($iv, $cv) >= 0 && ssp_cmp_version($iv, $upper) < 0;
+                return ssp_cmp_version($iv, $lower) >= 0 && ssp_cmp_version($iv, $dev($upper)) < 0;
         }
         return false;
     }

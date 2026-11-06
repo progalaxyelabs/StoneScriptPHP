@@ -12,13 +12,13 @@ In the app's `composer.json`, replace every command in `post-install-cmd` and `p
     "post-update-cmd":  ["@php vendor/progalaxyelabs/stonescriptphp/stone post-install"]
 },
 "config": {
-    "allow-plugins": {}
+    "allow-plugins": false
 }
 ```
 
 The vendor path is used on purpose: an app whose root `stone` predates 14.4.0 does not know `post-install` yet, and the first run refreshes it.
 
-Composer runs only the root `composer.json` scripts, never a dependency's own. What remains risky is a Composer plugin (gated only by `allow-plugins`), a package that rewrites files under `vendor/`, and runtime code from a package's autoload `files`.
+Composer runs only the root `composer.json` scripts, never a dependency's own. What remains risky is a Composer plugin (gated only by `allow-plugins`; `false` denies every plugin without prompting, while `{}` can prompt in an interactive run), a package that rewrites files under `vendor/`, and runtime code from a package's autoload `files`.
 
 `stone post-install` stops with exit 1 when the installed framework differs from its release. That check detects accidental damage (a partial install, another package or a manual edit changing framework files). It does not defend against code that deliberately rewrites both the framework and this script; use `deps:check` and a denied plugin list for that.
 
@@ -40,7 +40,7 @@ Composer runs only the root `composer.json` scripts, never a dependency's own. W
 - `approved`: every installed production package must match a listed package or vendor.
 - `autoload_files_reviewed`: packages that declare autoload `files` (run on every request) and that a human has read, with the version range reviewed.
 
-Run `php stone deps:check` (add `--no-audit` offline). It exits 1 on an unapproved package, a known vulnerability, an unreviewed autoload-files package, an unapproved plugin, or a foreign command in the post-install hooks. Run it in CI and before deploy.
+Run `php stone deps:check` (add `--no-audit` offline). It runs without loading `vendor/autoload.php`, so no installed package's code executes while it vets them. It exits 1 on an unapproved package, a known vulnerability, an unreviewed autoload-files package, an unapproved plugin, or any command other than exactly `stone post-install` in a Composer install, update, autoload-dump, package or `pre-command-run` hook. Only production packages are checked unless you pass `--dev`. Run it in CI and before deploy.
 
 ## 3. Package SQL layout
 

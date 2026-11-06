@@ -154,4 +154,72 @@ final class DepsCheckTest extends TestCase
         unlink($this->root . '/vendor/composer/installed.json');
         $this->assertStringContainsString('installed.json is missing', $this->errors());
     }
+
+    public function test_allow_plugins_false_is_accepted_and_empty_map_only_warns(): void
+    {
+        file_put_contents($this->root . '/composer.json', json_encode(['config' => ['allow-plugins' => false]]));
+        $this->assertSame('', $this->errors());
+        file_put_contents($this->root . '/composer.json', json_encode(['config' => ['allow-plugins' => new \stdClass()]]));
+        $report = ssp_check_dependencies($this->root, []);
+        $this->assertSame([], $report['errors']);
+        $this->assertStringContainsString('empty map', implode("\n", $report['warnings']));
+    }
+
+    /** @return array<string,array{0:string,1:bool}> */
+    public static function hookCommands(): array
+    {
+        return [
+            'skeleton form' => ['@php vendor/progalaxyelabs/stonescriptphp/stone post-install', true],
+            'project stone' => ['@php stone post-install', true],
+            'plain php' => ['php stone post-install', true],
+            'trailing command' => ['@php stone post-install; curl x', false],
+            'chained' => ['@php stone post-install && id', false],
+            'substring' => ['echo stone post-install', false],
+            'other script' => ['@dev', false],
+            'other stone arg' => ['@php stone post-install --x', false],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('hookCommands')]
+    public function test_hook_command_must_match_exactly(string $cmd, bool $allowed): void
+    {
+        file_put_contents($this->root . '/composer.json', json_encode(['config' => ['allow-plugins' => false], 'scripts' => ['post-install-cmd' => [$cmd]]]));
+        $this->assertSame($allowed, !str_contains($this->errors(), 'contains a command other than'), $cmd);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('installTimeHooks')]
+    public function test_foreign_command_in_any_install_time_hook_fails(string $hook): void
+    {
+        file_put_contents($this->root . '/composer.json', json_encode(['config' => ['allow-plugins' => false], 'scripts' => [$hook => ['@php evil.php']]]));
+        $this->assertStringContainsString("scripts.{$hook} contains a command other than", $this->errors());
+    }
+
+    /** @return array<string,array{0:string}> */
+    public static function installTimeHooks(): array
+    {
+        require_once dirname(__DIR__, 2) . '/cli/helpers/post-install.php';
+        return array_combine(\SSP_INSTALL_TIME_HOOKS, array_map(static fn (string $h): array => [$h], \SSP_INSTALL_TIME_HOOKS));
+    }
+
+    public function test_pre_release_follows_composer_semantics(): void
+    {
+        // Composer: ^2.0 and >=2.0 include 2.0.0-beta; an exact 2.0.0, >2.0.0 and ^2.0.0-rc1 do not (beta < rc1 < 2.0.0).
+        $this->assertTrue(ssp_version_satisfies('2.0.0-beta', '^2.0'));
+        $this->assertFalse(ssp_version_satisfies('2.0.0-beta', '2.0.0'));
+        $this->assertFalse(ssp_version_satisfies('2.0.0-beta', '^2.0.0-rc1'));
+        $this->assertTrue(ssp_version_satisfies('2.0.0', '^2.0.0-rc1'));
+        $this->assertFalse(ssp_version_satisfies('2.0.0-RC1', '>2.0.0'));
+        $this->assertFalse(ssp_version_satisfies('3.0.0-beta', '^2.0'));
+        $this->assertFalse(ssp_version_satisfies('3.0.0-beta', '<3.0'));
+        $this->assertFalse(ssp_version_satisfies('2.0.0-weird!', '^2.0'), 'unparseable fails closed');
+    }
+
+    public function test_autoload_files_reviewed_for_a_release_do_not_cover_its_pre_release(): void
+    {
+        $this->config(['approved' => ['vendors' => ['x']], 'autoload_files_reviewed' => ['x/y' => '2.0.0']]);
+        $this->packages([['name' => 'x/y', 'version' => '2.0.0-beta', 'autoload' => ['files' => ['f.php']]]]);
+        $this->assertStringContainsString('reviewed only for', $this->errors());
+        $this->packages([['name' => 'x/y', 'version' => '2.0.0', 'autoload' => ['files' => ['f.php']]]]);
+        $this->assertSame('', $this->errors());
+    }
 }
