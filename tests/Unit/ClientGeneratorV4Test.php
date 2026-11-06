@@ -1806,6 +1806,13 @@ JS;
 
             $nodeOutput = [];
             $nodeExit   = 0;
+            exec('node --version 2>&1', $nodeProbe, $nodeProbeExit);
+            $this->assertSame(
+                0,
+                $nodeProbeExit,
+                'This test runs the generated joinUrl() under Node.js: `node` must be on PATH in the test environment '
+                . '(install Node.js in the test image; it is a declared test prerequisite, not optional).'
+            );
             exec('node ' . escapeshellarg($scriptFile) . ' 2>&1', $nodeOutput, $nodeExit);
             @unlink($scriptFile);
 

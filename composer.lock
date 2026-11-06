@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b5566be2f651ba3cf2426b45a7f672cf",
+    "content-hash": "3d4d71d38e2c11b66fe4c63a3f97e490",
     "packages": [
         {
             "name": "firebase/php-jwt",
@@ -211,16 +211,11 @@
         },
         {
             "name": "progalaxyelabs/stonescriptdb-gateway-client",
-            "version": "4.0.1",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client.git",
-                "reference": "57f037ecf439397a22ed46b34ed65567d33a0b67"
-            },
+            "version": "4.2.0",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/progalaxyelabs/stonescriptdb-gateway-client/zipball/57f037ecf439397a22ed46b34ed65567d33a0b67",
-                "reference": "57f037ecf439397a22ed46b34ed65567d33a0b67",
+                "url": "https://api.github.com/repos/progalaxyelabs/stonescriptdb-gateway-client/zipball/d0465e88968797cc9a9db53d4caf89f017cf1a99",
+                "reference": "d0465e88968797cc9a9db53d4caf89f017cf1a99",
                 "shasum": ""
             },
             "require": {
@@ -238,7 +233,6 @@
                     "StoneScriptDB\\": "src/"
                 }
             },
-            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
@@ -258,11 +252,20 @@
                 "postgresql",
                 "stonescriptdb"
             ],
+            "transport-options": {
+                "symlink": false,
+                "relative": false
+            },
+            "source": {
+                "type": "git",
+                "url": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client.git",
+                "reference": "d0465e88968797cc9a9db53d4caf89f017cf1a99"
+            },
+            "notification-url": "https://packagist.org/downloads/",
             "support": {
                 "issues": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/issues",
-                "source": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/tree/v4.0.1"
-            },
-            "time": "2026-10-25T18:16:23+00:00"
+                "source": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/tree/v4.2.0"
+            }
         },
         {
             "name": "symfony/polyfill-ctype",
