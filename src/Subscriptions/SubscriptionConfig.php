@@ -27,6 +27,7 @@ use StoneScriptPHP\Billing\Contracts\PaymentProvider;
  *       'write_allow_list' => ['/devices/pair'],     // extra writes allowed while read-only
  *       'warning_days' => 7,                         // X-Subscription-State warning window
  *       'missing_subscription' => 'read_only',       // or 'allow'
+ *       'lookup_failure' => 'read_only',             // fail CLOSED (default); 'allow' = fail open, dev only
  *   ]);
  *
  * @package StoneScriptPHP\Subscriptions
@@ -70,6 +71,9 @@ class SubscriptionConfig
     /** 'read_only' (default) or 'allow' — what to do for a tenant with no subscription row */
     public readonly string $missingSubscription;
 
+    /** 'read_only' (default, fail CLOSED on a lookup error) or 'allow' (fail open — development only) */
+    public readonly string $lookupFailure;
+
     /** @var array<string, bool> Feature toggles */
     private array $features;
 
@@ -95,6 +99,7 @@ class SubscriptionConfig
         $this->writeAllowList = array_values((array) ($options['write_allow_list'] ?? []));
         $this->warningDays = (int) ($options['warning_days'] ?? 7);
         $this->missingSubscription = (string) ($options['missing_subscription'] ?? 'read_only');
+        $this->lookupFailure = (string) ($options['lookup_failure'] ?? 'read_only');
 
         // Mode-dependent defaults (see SubscriptionMiddleware::DEFAULT_EXEMPT_*).
         $this->exemptPaths = $options['exempt_paths'] ?? (

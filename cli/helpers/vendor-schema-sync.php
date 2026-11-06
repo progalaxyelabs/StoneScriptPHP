@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/package-constraints.php';
 /**
  * StoneScriptPHP CLI Helper — Vendor Schema Sync
  *
@@ -219,6 +220,83 @@ function ssp_stage_package_schema(string $packageSrc, string $targetBase, string
 }
 
 /**
+ * Stage a package from its TOP-LEVEL `postgresql/` tree (the ecosystem layout):
+ *
+ *   vendor/<pkg>/postgresql/main/<bucket>/[<module>/]**\/*.pgsql
+ *
+ * Each file is copied by ORIGINAL basename into <bucket>/ of the target, except the `migrations` bucket, which
+ * is an ordered, run-once stream and so is namespaced `<pkg-slug>__<basename>` exactly like the legacy
+ * ordered-scope layout (same identity the gateway already tracks). Scope `tenant/` is skipped (no vendor→tenant
+ * routing yet). Two files with the same basename in one bucket are a collision: the first wins and a notice is added.
+ *
+ * @param list<string> $notices (in/out)
+ */
+function ssp_stage_package_postgresql_tree(string $packageRoot, string $targetBase, string $packageName, int &$copied, array &$features, ?array &$manifest, array &$notices): void
+{
+    $mainDir = $packageRoot . '/postgresql/main';
+    if (!is_dir($mainDir)) {
+        return;
+    }
+    $slug = ssp_package_slug($packageName);
+    $seen = [];
+    foreach (SSP_SCHEMA_BUCKETS as $bucket) {
+        $bucketDir = $mainDir . '/' . $bucket;
+        if (!is_dir($bucketDir)) {
+            continue;
+        }
+        $files = ssp_collect_schema_files($bucketDir);
+        sort($files);
+        foreach ($files as $file) {
+            $rel = ltrim(substr($file, strlen($bucketDir)), '/');
+            $module = str_contains($rel, '/') ? explode('/', $rel)[0] : 'postgresql';
+            $destName = $bucket === 'migrations' ? $slug . '__' . basename($file) : basename($file);
+            $key = $bucket . '/' . $destName;
+            if (isset($seen[$key])) {
+                $notices[] = "{$packageName}: duplicate file name '{$destName}' in postgresql/main/{$bucket}/ — only the first is staged";
+                continue;
+            }
+            $seen[$key] = true;
+            $destDir = $targetBase . '/' . $bucket;
+            if (!is_dir($destDir)) {
+                mkdir($destDir, 0755, true);
+            }
+            copy($file, $destDir . '/' . $destName);
+            $copied++;
+            $featureKey = $packageName . '/' . $module;
+            $features[$featureKey] = true;
+            if ($manifest !== null) {
+                $manifest[$featureKey][] = $key;
+            }
+        }
+    }
+}
+
+/**
+ * Stage ONE package, picking its layout: the top-level `postgresql/` tree wins; the legacy `src/<Feature>/Schema/`
+ * layout is a TEMPORARY fallback that is staged but warned about (the framework's own bucket features are exempt
+ * from the warning until they move). A package carrying both stages only the new tree and warns that Schema/ is ignored.
+ *
+ * @param list<string> $notices (in/out) human-readable warnings for the caller to print
+ */
+function ssp_stage_package_auto(string $packageSrc, string $targetBase, string $packageName, int &$copied, array &$features, ?array &$manifest, array &$notices): void
+{
+    $packageRoot = dirname($packageSrc);
+    $hasNew = is_dir($packageRoot . '/postgresql/main');
+    $hasOld = ssp_find_schema_dirs($packageSrc) !== [];
+    if ($hasNew) {
+        ssp_stage_package_postgresql_tree($packageRoot, $targetBase, $packageName, $copied, $features, $manifest, $notices);
+        if ($hasOld) {
+            $notices[] = "{$packageName}: has BOTH postgresql/ and src/**/Schema/ — using postgresql/, the old Schema/ tree is IGNORED";
+        }
+        return;
+    }
+    if ($hasOld && $packageName !== 'progalaxyelabs/stonescriptphp') {
+        $notices[] = "{$packageName}: SQL is under src/**/Schema/ (deprecated layout) — staged as a temporary fallback; ask the package to move it to a top-level postgresql/ tree";
+    }
+    ssp_stage_package_schema($packageSrc, $targetBase, $packageName, $copied, $features, $manifest);
+}
+
+/**
  * Recursively collect *.sql / *.pgsql / *.pssql files under a directory
  * (used for the ordered-scope layout, whose files may sit directly under
  * Schema/main/ or one Feature-directory deep).
@@ -284,10 +362,14 @@ function syncVendorSchema(string $vendorFrameworkSrc, string $targetBase): array
  *
  * @param string $projectRoot Absolute path to the consuming project root (getcwd()).
  * @param string $targetBase  Absolute path to (project)/src/postgresql/vendor/postgresql.
+ * @param array<string,string>|null $allowList package => version constraint. null = legacy (every installed
+ *                            progalaxyelabs/* package). An array = ONLY the framework + the named packages in range.
+ * @param list<string>|null $notices (out) warnings for the caller to print
  * @return array{copied: int, features: string[], packages: string[]}
  */
-function syncAllVendorSchema(string $projectRoot, string $targetBase): array
+function syncAllVendorSchema(string $projectRoot, string $targetBase, ?array $allowList = null, ?array &$notices = null): array
 {
+    $notices = $notices ?? [];
     ssp_rrmdir($targetBase);
 
     $copied = 0;
@@ -298,10 +380,28 @@ function syncAllVendorSchema(string $projectRoot, string $targetBase): array
     // Resolve the list of (packageName => srcDir) to scan. Always include the
     // framework so behaviour is never worse than the legacy single-package path.
     $packageSrcDirs = ssp_discover_vendor_package_srcs($projectRoot);
+    $versions = $allowList === null ? [] : ssp_installed_versions($projectRoot);
 
     foreach ($packageSrcDirs as $packageName => $srcDir) {
+        // $allowList === null keeps the legacy "every installed progalaxyelabs/* package" behaviour (library callers
+        // and tests). `stone post-install` always passes a list: only the framework (verified by the integrity
+        // check) plus the packages the app explicitly names, within the named version constraint.
+        if ($allowList !== null && $packageName !== 'progalaxyelabs/stonescriptphp') {
+            $hasSql = is_dir(dirname($srcDir) . '/postgresql/main') || ssp_find_schema_dirs($srcDir) !== [];
+            if (!array_key_exists($packageName, $allowList)) {
+                if ($hasSql) {
+                    $notices[] = "{$packageName} ships schema but is NOT on the schema allow-list (stone-packages.json \"schema_allowlist\") — NOT staged";
+                }
+                continue;
+            }
+            $installed = $versions[$packageName] ?? '';
+            if (!ssp_version_satisfies($installed, (string) $allowList[$packageName])) {
+                $notices[] = "{$packageName} {$installed} does not satisfy its schema allow-list constraint '{$allowList[$packageName]}' — NOT staged";
+                continue;
+            }
+        }
         $before = $copied;
-        ssp_stage_package_schema($srcDir, $targetBase, $packageName, $copied, $features, $manifest);
+        ssp_stage_package_auto($srcDir, $targetBase, $packageName, $copied, $features, $manifest, $notices);
         if ($copied > $before) {
             $packagesWithFiles[$packageName] = true;
         }

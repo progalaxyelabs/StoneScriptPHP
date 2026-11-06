@@ -42,8 +42,13 @@ use StoneScriptPHP\Routing\MiddlewareInterface;
  * EVERY prefix entry in the defaults is unprotected for all methods; a platform's
  * own deletion and renewal/payment routes MUST be on the list (see README).
  *
- * Failure policy:
- *  - DB/gateway error → fail OPEN (no header, request proceeds).
+ * Failure policy (FAIL CLOSED by default since 14.4.0):
+ *  - DB/gateway error → the tenant's state is unknown, so the request is treated as read-only:
+ *    GET/HEAD/OPTIONS and the write allow-list pass; every other write is refused with HTTP 503
+ *    (`data.error_code` SUBSCRIPTION_LOOKUP_UNAVAILABLE); in `block` mode every non-exempt request
+ *    is refused. The failure is logged (rate-limited) with an ALERT tag and recorded in request_logs.
+ *    Opt out with `lookup_failure => 'allow'` (fail open) — DEVELOPMENT ONLY: the constructor refuses
+ *    it unless APP_ENV is development/local/testing.
  *  - No subscription row → treated like an expired subscription (read-only,
  *    or 402 in `block` mode): reads still work, writes are refused. Opt out
  *    with `missing_subscription => 'allow'`.
@@ -58,6 +63,11 @@ class SubscriptionMiddleware implements MiddlewareInterface
     public const MODE_BLOCK     = 'block';
 
     public const HEADER_NAME = 'X-Subscription-State';
+
+    /** lookup_failure values: fail closed (default) or fail open (development only). */
+    public const LOOKUP_FAILURE_READ_ONLY = 'read_only';
+    public const LOOKUP_FAILURE_ALLOW     = 'allow';
+    private const DEV_ENVIRONMENTS = ['development', 'dev', 'local', 'testing', 'test'];
 
     /** Always-writable paths in read_only mode; config can add to, never remove from, these. */
     public const DEFAULT_WRITE_ALLOW_LIST = [
@@ -89,6 +99,7 @@ class SubscriptionMiddleware implements MiddlewareInterface
     /** @var callable(): \DateTimeImmutable */
     private $clock;
     private bool $customProviderGiven;
+    private bool $failOpenOnLookupError;
 
     /**
      * @param string        $expiredMode              'read_only' (default) or 'block' (legacy 402 lockout).
@@ -103,6 +114,9 @@ class SubscriptionMiddleware implements MiddlewareInterface
      *                                                for no row; throw to signal a lookup failure (fail open).
      *                                                Default queries the main DB through the gateway.
      * @param callable|null $clock                    fn(): DateTimeImmutable (test seam).
+     * @param string        $lookupFailure            'read_only' (default, FAIL CLOSED on a lookup error) or 'allow'
+     *                                                (fail open — development environments only).
+     * @param string|null   $appEnv                   Environment name for the 'allow' guard; null = Env::APP_ENV (test seam).
      */
     public function __construct(
         string $expiredMode = self::MODE_READ_ONLY,
@@ -112,7 +126,24 @@ class SubscriptionMiddleware implements MiddlewareInterface
         string $missingSubscription = 'read_only',
         ?callable $statusProvider = null,
         ?callable $clock = null,
+        string $lookupFailure = self::LOOKUP_FAILURE_READ_ONLY,
+        ?string $appEnv = null,
     ) {
+        if (!in_array($lookupFailure, [self::LOOKUP_FAILURE_READ_ONLY, self::LOOKUP_FAILURE_ALLOW], true)) {
+            throw new \InvalidArgumentException(
+                "SubscriptionMiddleware: lookup_failure must be 'read_only' or 'allow', got '{$lookupFailure}'"
+            );
+        }
+        if ($lookupFailure === self::LOOKUP_FAILURE_ALLOW) {
+            $env = strtolower($appEnv ?? self::currentAppEnv());
+            if (!in_array($env, self::DEV_ENVIRONMENTS, true)) {
+                throw new \InvalidArgumentException(
+                    "SubscriptionMiddleware: lookup_failure 'allow' (fail open) is for development only; "
+                    . "APP_ENV is '{$env}'. Leave it at 'read_only' so a billing-lookup outage cannot grant free write access."
+                );
+            }
+        }
+        $this->failOpenOnLookupError = $lookupFailure === self::LOOKUP_FAILURE_ALLOW;
         if (!in_array($expiredMode, [self::MODE_READ_ONLY, self::MODE_BLOCK], true)) {
             throw new \InvalidArgumentException(
                 "SubscriptionMiddleware: expired_mode must be 'read_only' or 'block', got '{$expiredMode}'"
@@ -144,6 +175,7 @@ class SubscriptionMiddleware implements MiddlewareInterface
             writeAllowList: $config->writeAllowList,
             warningDays: $config->warningDays,
             missingSubscription: $config->missingSubscription,
+            lookupFailure: $config->lookupFailure,
         );
     }
 
@@ -172,9 +204,11 @@ class SubscriptionMiddleware implements MiddlewareInterface
         try {
             $row = ($this->statusProvider)($tenantId);
         } catch (\Throwable $e) {
-            // Fail OPEN on lookup errors — never block users on infra trouble.
-            $this->logFailOpen($tenantId, $e);
-            return $next($request);
+            $this->logLookupFailure($tenantId, $e);
+            if ($this->failOpenOnLookupError) {
+                return $next($request);
+            }
+            return $this->handleLookupFailure($request, $path, $next);
         }
 
         if ($row === null && $this->allowMissingSubscription) {
@@ -214,10 +248,36 @@ class SubscriptionMiddleware implements MiddlewareInterface
         );
     }
 
+    /** Fail CLOSED: state unknown → read-only (block mode: refuse everything non-exempt). */
+    private function handleLookupFailure(array $request, string $path, callable $next): ?ApiResponse
+    {
+        $this->sendHeader(self::HEADER_NAME, 'unknown; reason=lookup_failed');
+        $method = strtoupper((string) ($request['method'] ?? ($_SERVER['REQUEST_METHOD'] ?? 'GET')));
+        $readOk = $this->expiredMode === self::MODE_READ_ONLY && in_array($method, ['GET', 'HEAD', 'OPTIONS'], true);
+        if ($readOk || ($this->expiredMode === self::MODE_READ_ONLY && $this->isWriteAllowed($method, $path))) {
+            return $next($request);
+        }
+        return new ApiResponse(
+            'error',
+            'Your subscription status could not be verified right now. Please try again shortly.',
+            ['error_code' => 'SUBSCRIPTION_LOOKUP_UNAVAILABLE'],
+            503,
+        );
+    }
+
+    private static function currentAppEnv(): string
+    {
+        try {
+            return (string) \StoneScriptPHP\Env::get_instance()->APP_ENV;
+        } catch (\Throwable) {
+            return (string) (getenv('APP_ENV') ?: 'production');
+        }
+    }
+
     private static int $lastFailOpenLog = 0;
 
-    /** Fail-open log, at most once per 60s per process (an outage must not flood the log). */
-    private function logFailOpen(string $tenantId, \Throwable $e): void
+    /** Lookup-failure log, at most once per 60s per process (an outage must not flood the log). */
+    private function logLookupFailure(string $tenantId, \Throwable $e): void
     {
         // Every request that fails open is recorded in request_logs (class + safe message); the log line below is
         // throttled, the per-request record is not. The request is never a clean success on the books.
@@ -228,7 +288,7 @@ class SubscriptionMiddleware implements MiddlewareInterface
         }
         self::$lastFailOpenLog = $now;
         try {
-            log_error('[SubscriptionMiddleware] lookup failed (failing open; further occurrences suppressed for 60s) tenant=' . \StoneScriptPHP\Persistence\LogSanitizer::ref($tenantId) . ': ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            log_error('[SubscriptionMiddleware] ALERT lookup failed (' . ($this->failOpenOnLookupError ? 'failing OPEN' : 'failing closed: read-only') . '; further occurrences suppressed for 60s) tenant=' . \StoneScriptPHP\Persistence\LogSanitizer::ref($tenantId) . ': ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
         } catch (\Throwable) {
             // logging must never turn a fail-open request into a failure
         }

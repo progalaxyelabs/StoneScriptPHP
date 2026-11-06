@@ -237,9 +237,10 @@ class ServerSideErrorTrackingTest extends TestCase
     {
         $_SERVER['REQUEST_URI'] = '/portal/invoices';
         AuthContext::setUser(new AuthenticatedUser(user_id: 'identity-1', tenant_id: 'tenant-abc'));
+        // Reads still pass while the lookup is down (fail closed refuses only writes); opt-out used for the 2xx path.
         $mw = new SubscriptionMiddleware(statusProvider: function (string $t): never {
             throw new \RuntimeException("lookup failed for tenant 'Example Pharmacy'");
-        });
+        }, lookupFailure: 'allow', appEnv: 'testing');
         $res = $mw->handle([], fn () => new ApiResponse('ok', 'passed'));
 
         $this->assertSame('passed', $res->message, 'fail-open behaviour is unchanged');

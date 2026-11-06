@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.4.0]
+
+See `UPGRADING-14.4.md`.
+
+### Added
+- `stone post-install`: the one framework-owned command an app's Composer hooks run. It verifies the installed framework against the shipped `framework-manifest.txt` (and the installed.json version) and refuses with a clear message if any file differs; refreshes the project's `stone`; stages vendor schema only from the app's `stone-packages.json` `schema_allowlist` (package + version constraint), noticing every package that ships SQL but is not listed; prunes its own staging directory only. Idempotent.
+- `stone deps:check`: fails on an unapproved package, a known vulnerability (`composer audit`), an unreviewed autoload `files` package, an unapproved Composer plugin, or a foreign command in the post-install hooks. `--no-audit`, `--dev`, `--json`.
+- Vendor schema staging reads a package's top-level `postgresql/main/<bucket>/` tree. The old `src/**/Schema/` layout remains as a temporary, warned fallback; a package with both uses `postgresql/` only.
+- `scripts/build-framework-manifest.php` writes the release manifest (run as the last release step; a test fails if it is stale).
+
+### Changed
+- `SubscriptionMiddleware` now FAILS CLOSED when the subscription lookup errors: reads and the write allow-list continue, other writes get HTTP 503 `SUBSCRIPTION_LOOKUP_UNAVAILABLE` (in `block` mode every non-exempt request does), the failure is logged with an ALERT tag and recorded in request logs. `lookup_failure => 'allow'` restores fail-open and is accepted only when `APP_ENV` is a development value.
+
 ## [14.3.0]
 
 See `UPGRADING-14.3.md`. Requires gateway 4.10+ and gateway-client ^4.2.0.

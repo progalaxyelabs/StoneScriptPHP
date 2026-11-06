@@ -46,6 +46,8 @@ final class SubscriptionReadOnlyTest extends TestCase
             missingSubscription: $opts['missing'] ?? 'read_only',
             statusProvider: $provider,
             clock: fn() => new \DateTimeImmutable(self::NOW),
+            lookupFailure: $opts['lookup_failure'] ?? 'read_only',
+            appEnv: $opts['app_env'] ?? 'testing',
         );
     }
 
@@ -288,9 +290,9 @@ final class SubscriptionReadOnlyTest extends TestCase
 
     // ---- failure policy / scoping --------------------------------------
 
-    public function test_lookup_error_fails_open_without_header(): void
+    public function test_lookup_error_fails_open_without_header_when_opted_out_in_dev(): void
     {
-        $mw = $this->mw(null, ['provider' => function () { throw new \RuntimeException('gateway down'); }]);
+        $mw = $this->mw(null, ['lookup_failure' => 'allow', 'provider' => function () { throw new \RuntimeException('gateway down'); }]);
         $this->assertSame('passed', $this->call($mw, 'POST', '/bills')->message);
         $this->assertArrayNotHasKey('X-Subscription-State', $mw->headers);
     }
@@ -469,7 +471,7 @@ final class SubscriptionReadOnlyTest extends TestCase
         try {
             $mw = $this->mw(null, ['provider' => function () { throw new \RuntimeException('gateway down'); }]);
             for ($i = 0; $i < 5; $i++) {
-                $this->assertSame('passed', $this->call($mw, 'POST', '/bills')->message);
+                $this->assertSame(503, $this->call($mw, 'POST', '/bills')->httpStatusCode);
             }
             $text = '';
             foreach (glob($dir . '/*') ?: [] as $lf) {
@@ -485,6 +487,57 @@ final class SubscriptionReadOnlyTest extends TestCase
             rmdir($dir);
             $ref->setValue(null, 0);
         }
+    }
+
+    // ---- lookup failure: FAIL CLOSED by default (14.4.0) ----------------
+
+    private static function boom(): \Closure
+    {
+        return function (): never {
+            throw new \RuntimeException('gateway down');
+        };
+    }
+
+    public function test_lookup_failure_refuses_writes_by_default(): void
+    {
+        $mw = $this->mw(null, ['provider' => self::boom()]);
+        $res = $this->call($mw, 'POST', '/bills');
+        $this->assertSame(503, $res->httpStatusCode);
+        $this->assertSame('SUBSCRIPTION_LOOKUP_UNAVAILABLE', $res->data['error_code'] ?? null);
+        $this->assertStringContainsString('unknown', $mw->headers[SubscriptionMiddleware::HEADER_NAME] ?? '');
+    }
+
+    public function test_lookup_failure_keeps_reads_and_allow_listed_writes_working(): void
+    {
+        $mw = $this->mw(null, ['provider' => self::boom()]);
+        $this->assertSame('passed', $this->call($mw, 'GET', '/bills')->message);
+        $this->assertSame('passed', $this->call($mw, 'POST', '/auth/login')->message);
+        $this->assertSame('passed', $this->call($mw, 'POST', '/account/delete')->message);
+    }
+
+    public function test_lookup_failure_in_block_mode_refuses_everything_non_exempt(): void
+    {
+        $mw = $this->mw(null, ['provider' => self::boom(), 'mode' => 'block']);
+        $this->assertSame(503, $this->call($mw, 'GET', '/bills')->httpStatusCode);
+        $this->assertSame('passed', $this->call($mw, 'GET', '/health')->message);
+    }
+
+    public function test_lookup_failure_allow_opt_out_fails_open_in_development(): void
+    {
+        $mw = $this->mw(null, ['provider' => self::boom(), 'lookup_failure' => 'allow']);
+        $this->assertSame('passed', $this->call($mw, 'POST', '/bills')->message);
+    }
+
+    public function test_lookup_failure_allow_is_refused_outside_development(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->mw(null, ['lookup_failure' => 'allow', 'app_env' => 'production']);
+    }
+
+    public function test_lookup_failure_rejects_unknown_value(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->mw(null, ['lookup_failure' => 'maybe']);
     }
 
     public function test_traversal_and_encoded_separators_never_match_allow_list(): void
