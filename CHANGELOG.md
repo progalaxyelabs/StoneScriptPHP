@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.1.0]
+
+### Added
+- Boot guard accepts **distro-patched PHP** safely (`docs/DISTRO-PATCHED-PHP.md`): (a) installed package version (dpkg) >= a per-distro minimum-patched table (`PhpRuntimeFloor::DISTRO_PATCHED`; Ubuntu 26.04 `php8.5-common >= 8.5.4-0ubuntu1.5`), unknown distro/package = refuse; one log line says why it accepted. (b) `STONESCRIPT_DISTRO_PATCH_ACK="CVE-...,CVE-...;<pkg>=<version>"` operator attestation bound to the exact package version and all CVE ids, all SAPIs, logged loudly at every boot.
+
+### Changed
+- `composer.json` `php`: `>=8.5` (was `>=8.5.12`) so composer admits distro builds; the runtime guard remains the authority and the upstream floor (8.5.12) is unchanged.
+- Refusal text says "not provably patched" instead of "is exposed" and points to the distro options.
+
 ## [14.0.1]
 
 ### Fixed

@@ -28,7 +28,7 @@ What an app shows on a bad PHP:
 
 ## Distro builds that backport fixes but report an old version (Debian/Ubuntu `8.3.6`, `8.1.2-1ubuntu...`)
 
-**Treated as vulnerable and refused. This is deliberate and permanent.** PHP reports `PHP_VERSION` from the build; a
+**Superseded in 14.1.0: see DISTRO-PATCHED-PHP.md.** Originally: treated as vulnerable and refused. PHP reports `PHP_VERSION` from the build; a
 backported fix keeps the old number, so neither Composer nor a runtime check can tell a patched backport from an unpatched
 build without trusting the package changelog. A guard that guesses is worse than one that is strict. Production servers should therefore run
 upstream builds (packages.sury.org for Debian, ppa:ondrej/php for Ubuntu) whose version number is truthful.

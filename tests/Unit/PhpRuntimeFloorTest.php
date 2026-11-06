@@ -57,11 +57,9 @@ final class PhpRuntimeFloorTest extends TestCase
     public function test_composer_json_constraint_matches_the_floors(): void
     {
         $c = json_decode((string) file_get_contents(__DIR__ . '/../../composer.json'), true);
-        $this->assertSame('>=8.5.12', $c['require']['php']);
+        $this->assertSame('>=8.5', $c['require']['php'], 'composer admits distro builds; the runtime guard is the authority');
         $this->assertSame('src/php_floor.php', $c['autoload']['files'][0], 'the guard must load first');
-        foreach (PhpRuntimeFloor::FLOORS as $line => $id) {
-            $this->assertStringContainsString(PhpRuntimeFloor::floorString($id), $c['require']['php']);
-        }
+        $this->assertSame('8.5.12', PhpRuntimeFloor::floorString(PhpRuntimeFloor::FLOORS[805]), 'upstream floor unchanged');
     }
 
     /** @return array{0:int,1:string,2:string} exit code, stdout, stderr of a child that really runs enforce() */
@@ -115,5 +113,89 @@ final class PhpRuntimeFloorTest extends TestCase
         $this->assertSame(0, $rc);
         $this->assertSame('BOOTED', $out);
         $this->assertSame('', $err);
+    }
+
+    private const CVE_ACK = 'CVE-2026-109618,CVE-2026-109619';
+
+    private function probe(?string $distro, ?string $have, bool|null $atLeast = true): array
+    {
+        return ['distro' => $distro, 'version' => fn (string $p) => $have, 'atLeast' => fn (string $a, string $b) => $atLeast];
+    }
+
+    public function test_refuses_8_5_4_upstream_and_with_no_info(): void
+    {
+        $this->assertNotNull(PhpRuntimeFloor::violation(80504, '8.5.4'));
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', '', $this->probe(null, null)));
+    }
+
+    public function test_accepts_8_5_4_with_the_ubuntu_row(): void
+    {
+        $r = PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', '', $this->probe('ubuntu:26.04', '8.5.4-0ubuntu1.5'));
+        $this->assertSame('distro', $r['kind']);
+        $this->assertStringContainsString('distro-patched build php8.5-common 8.5.4-0ubuntu1.5', $r['message']);
+        $this->assertStringContainsString('CVE-2026-109618', $r['message']);
+    }
+
+    public function test_refuses_below_minimum_unknown_distro_unknown_package_and_foreign_upstream(): void
+    {
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', '', $this->probe('ubuntu:26.04', '8.5.4-0ubuntu1.4', false)));
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', '', $this->probe('ubuntu:24.04', '8.5.4-0ubuntu1.5')), 'no row');
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', '', $this->probe('freebsd:14', '8.5.4-0ubuntu1.5')), 'unknown distro');
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', '', $this->probe('ubuntu:26.04', null)), 'package not installed');
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', '', $this->probe('ubuntu:26.04', '8.5.4-0ubuntu1.5', null)), 'undecidable compare');
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', '', $this->probe('ubuntu:26.04', '8.5.9-0ubuntu1.5')), 'running binary is not that package (self-compiled)');
+    }
+
+    public function test_unsupported_lines_are_never_rescued(): void
+    {
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80306, '8.3.6', self::CVE_ACK . ';php8.3-common=8.3.6-1', $this->probe('ubuntu:26.04', '8.3.6-1')));
+    }
+
+    public function test_ack_matches_only_the_exact_package_version_and_all_cves(): void
+    {
+        $p = $this->probe('debian:13', '8.5.4-1+deb13u2');
+        $ok = self::CVE_ACK . ';php8.5-common=8.5.4-1+deb13u2';
+        $r = PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', $ok, $p);
+        $this->assertSame('ack', $r['kind']);
+        $this->assertStringContainsString('OPERATOR ACKNOWLEDGEMENT', $r['message']);
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', self::CVE_ACK . ';php8.5-common=8.5.4-1+deb13u1', $p), 'package version mismatch');
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', 'CVE-2026-109618;php8.5-common=8.5.4-1+deb13u2', $p), 'missing CVE');
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', self::CVE_ACK, $p), 'no version binding');
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', 'garbage; rm -rf /=1', $p));
+        $this->assertNull(PhpRuntimeFloor::distroAcceptance(80504, '8.5.4', $ok, $this->probe('debian:13', null)), 'package gone');
+    }
+
+    public function test_package_name_and_version_are_validated_before_exec(): void
+    {
+        $this->assertNull(PhpRuntimeFloor::installedPackageVersion('php; id'));
+        $this->assertNull(PhpRuntimeFloor::dpkgAtLeast('1; id', '2'));
+    }
+
+    public function test_dpkg_comparator_and_reader_on_this_host_if_dpkg_exists(): void
+    {
+        if (!is_executable('/usr/bin/dpkg')) {
+            $this->markTestSkipped('no dpkg');
+        }
+        PhpRuntimeFloor::resetCache();
+        $this->assertTrue(PhpRuntimeFloor::dpkgAtLeast('8.5.4-0ubuntu1.5', '8.5.4-0ubuntu1.5'));
+        $this->assertTrue(PhpRuntimeFloor::dpkgAtLeast('8.5.4-0ubuntu1.10', '8.5.4-0ubuntu1.5'));
+        $this->assertFalse(PhpRuntimeFloor::dpkgAtLeast('8.5.4-0ubuntu1.4', '8.5.4-0ubuntu1.5'));
+        $this->assertNull(PhpRuntimeFloor::installedPackageVersion('no-such-package-xyz'));
+    }
+
+    public function test_enforce_boots_logs_one_line_and_cli_and_web_refuse_otherwise(): void
+    {
+        $probe = "['distro'=>'ubuntu:26.04','version'=>fn(\$p)=>'8.5.4-0ubuntu1.5','atLeast'=>fn(\$a,\$b)=>true]";
+        [$rc, $out, $err] = $this->runEnforce("80504, '8.5.4', 'fpm-fcgi', null, '', $probe", ['X' => '1']);
+        $this->assertSame(0, $rc);
+        $this->assertSame('BOOTED', $out);
+        // error_log is disabled in the child (log_errors=0); acceptance must still not refuse.
+        [$rc, $out] = $this->runEnforce("80504, '8.5.4', 'fpm-fcgi', null, '', ['distro'=>'unknown:1','version'=>fn(\$p)=>null,'atLeast'=>fn(\$a,\$b)=>null]");
+        $this->assertSame(1, $rc);
+        $this->assertStringContainsString('service_unavailable', $out);
+        [$rc, , $err] = $this->runEnforce("80504, '8.5.4', 'cli', null, '', ['distro'=>'unknown:1','version'=>fn(\$p)=>null,'atLeast'=>fn(\$a,\$b)=>null]");
+        $this->assertSame(1, $rc);
+        $this->assertStringContainsString('not provably patched', $err);
+        $this->assertStringContainsString('STONESCRIPT_DISTRO_PATCH_ACK', $err);
     }
 }
