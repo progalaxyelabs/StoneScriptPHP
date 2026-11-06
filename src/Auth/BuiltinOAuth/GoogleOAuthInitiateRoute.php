@@ -70,6 +70,9 @@ class GoogleOAuthInitiateRoute implements IRouteHandler
         $client->setScopes(['openid', 'email', 'profile']);
         $client->setState($state);
         $client->setAccessType('online');
+        // Explicit `prompt` makes google/apiclient omit its default approval_prompt=auto;
+        // Google rejects a flow carrying both ("Conflict params: approval_prompt and prompt").
+        $client->setPrompt('select_account');
 
         return new RedirectResponse($client->createAuthUrl());
     }
