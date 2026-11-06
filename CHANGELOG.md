@@ -22,31 +22,21 @@ See `UPGRADING-14.4.md`.
 
 ## [14.3.0]
 
-See `UPGRADING-14.3.md`. Requires gateway 4.10+ and gateway-client ^4.2.0.
-
-### Changed
-- Deploy commands (`gateway:register-main`, `migrate-*`, `register-tenant`, listings) use a deploy-scope token from the process environment (`DB_GATEWAY_DEPLOY_TOKEN` or `DB_GATEWAY_DEPLOY_TOKEN_FILE`), never from `.env`; a clear error is shown when it is missing.
-- `gateway:provision-token` takes `--scope=runtime|deploy` (default `runtime`).
-- Tenant provisioning from the application issues a runtime-scope token.
-
-## [14.2.1]
-
-### Changed
-- Deploy CLI order and credentials: register (admin token) → platform token → upload / create / migrate (platform token). `--force` and `--allow-*` also send the admin token in `X-Gateway-Admin-Token`. `gateway:list-schemas` and `gateway:list-databases` send the platform token.
-- An existing platform token is never replaced implicitly. `gateway:provision-token --rotate` replaces it on request; otherwise the command explains how to continue.
-- `gateway:provision-token --quiet` prints only the token. Commands that would have to issue a token while `--quiet` is set refuse instead of discarding it.
-- The CLI sends no credentials on redirects (redirects are not followed).
-- Requires `progalaxyelabs/stonescriptdb-gateway-client` `^4.1.1`.
-- `UPGRADING-14.2.md` covers gateway 4.9 or later, the log-first rollout, the new-platform order and the force/allow credentials.
-
-## [14.2.0]
+See `UPGRADING-14.3.md`. Requires gateway 4.10+ and gateway-client ^4.2.0. Upgrading from 14.1.x.
 
 ### Added
-- Gateway requests carry the platform token: `DB_GATEWAY_PLATFORM_TOKEN` is passed to the gateway client for all calls (database transport, request log writer, audit recorder). No app code change needed beyond the version bump and the variable being present.
+- Gateway requests carry the platform token: `DB_GATEWAY_PLATFORM_TOKEN` is passed to the gateway client for all calls (database transport, request log writer, audit recorder). No application code change beyond the version bump and the variable being present.
 - `php stone env:check` warns when `DB_GATEWAY_PLATFORM_TOKEN` is missing in gateway mode.
+- `gateway:register-main --issue-deploy-token=<file>` (and `--rotate-deploy-token`): the only command that issues a deploy token. Run it from the workstation; the token is written to a new mode-600 file (directory mode 700, no symlinks) and is never printed.
 
 ### Changed
-- Requires `progalaxyelabs/stonescriptdb-gateway-client` `^4.1.0`.
+- Deploy commands (`gateway:register-main`, `migrate-*`, `register-tenant`, listings) use a deploy-scope token from the process environment (`DB_GATEWAY_DEPLOY_TOKEN` or `DB_GATEWAY_DEPLOY_TOKEN_FILE`), never from `.env`. When it is missing the command stops with guidance; it never issues one.
+- Deploy order and credentials: register (admin token) -> deploy token -> upload / create / migrate (deploy token). `--force` and `--allow-*` also send the admin token in `X-Gateway-Admin-Token`. `gateway:list-schemas` and `gateway:list-databases` send the deploy token.
+- An existing token is never replaced implicitly. `gateway:provision-token --rotate` replaces a runtime token on request.
+- `gateway:provision-token` issues runtime tokens only; `--quiet` prints only the token.
+- The CLI sends no credentials on redirects (redirects are not followed).
+- `TenantProvisioner` no longer mints a runtime token with the admin token when `DB_GATEWAY_PLATFORM_TOKEN` is missing; it raises a clear error. The application must not hold the admin token for this.
+- Requires `progalaxyelabs/stonescriptdb-gateway-client` `^4.2.0`.
 
 ## [14.1.1]
 

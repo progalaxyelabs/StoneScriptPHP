@@ -69,10 +69,16 @@ switch (true) {
                 proc_close($p);
             }
         }
-        foreach (glob(self::$dir . '/*') ?: [] as $f) {
-            @unlink($f);
-        }
-        @rmdir(self::$dir);
+        $rm = function (string $d) use (&$rm): void {
+            foreach (glob($d . '/{,.}*', GLOB_BRACE) ?: [] as $f) {
+                if (in_array(basename($f), ['.', '..'], true)) {
+                    continue;
+                }
+                is_dir($f) && !is_link($f) ? $rm($f) : @unlink($f);
+            }
+            @rmdir($d);
+        };
+        $rm(self::$dir);
     }
 
     protected function setUp(): void
@@ -105,14 +111,30 @@ switch (true) {
         return array_map(fn($l) => json_decode($l, true), array_filter(explode("\n", (string) file_get_contents(self::$log))));
     }
 
-    public function test_new_platform_order_register_token_upload_create_with_the_right_credentials(): void
+    public function test_a_command_without_a_deploy_token_refuses_and_issues_nothing(): void
     {
         [$out, $err, $code] = $this->php(<<<'PHP'
-$env = ['gateway_url' => $url, 'platform_id' => 'newplat', 'admin_token' => 'ADM', 'deploy_token' => null];
-stepRegisterPlatform($url, 'newplat', true, 'ADM', null);
-$tok = resolveGatewayDeployToken($env, false);
-stepUploadSchema($url, 'newplat', 'main', ROOT_PATH . 'archive.tar.gz', true, $tok);
-stepCreateDatabase($url, 'newplat', 'main', null, $tok, 1, 0, true);
+resolveGatewayDeployToken(['gateway_url' => $url, 'platform_id' => 'newplat', 'admin_token' => 'ADM', 'deploy_token' => null], false);
+PHP);
+        $this->assertSame(1, $code);
+        $this->assertSame('', $out);
+        $this->assertStringContainsString('DB_GATEWAY_DEPLOY_TOKEN', $err);
+        $this->assertStringContainsString('--issue-deploy-token', $err);
+        $this->assertSame([], $this->requests(), 'only register-main --issue-deploy-token may issue a deploy token');
+    }
+
+    public function test_new_platform_order_with_issue_deploy_token_writes_the_file_and_prints_nothing(): void
+    {
+        $dir = self::$dir . '/tokdir';
+        @mkdir($dir, 0700);
+        chmod($dir, 0700);
+        $file = $dir . '/newplat.token';
+        [$out, $err, $code] = $this->php(<<<PHP
+\$env = ['gateway_url' => \$url, 'platform_id' => 'newplat', 'admin_token' => 'ADM', 'deploy_token' => null];
+stepRegisterPlatform(\$url, 'newplat', true, 'ADM', null);
+\$tok = issueGatewayDeployTokenToFile(\$env, '$file', false, false);
+stepUploadSchema(\$url, 'newplat', 'main', ROOT_PATH . 'archive.tar.gz', true, \$tok);
+stepCreateDatabase(\$url, 'newplat', 'main', null, \$tok, 1, 0, true);
 PHP);
         $this->assertSame(0, $code, $out . $err);
         $r = $this->requests();
@@ -122,23 +144,59 @@ PHP);
         );
         $this->assertSame('Bearer ADM', $r[0]['auth']);
         $this->assertSame('Bearer ADM', $r[1]['auth']);
-        $this->assertSame('deploy', $r[1]['body']['scope'], 'the CLI issues a deploy-scope token for its own steps');
+        $this->assertSame('deploy', $r[1]['body']['scope']);
         $this->assertSame('Bearer ssdb_pt_fresh', $r[2]['auth']);
         $this->assertSame('Bearer ssdb_pt_fresh', $r[3]['auth']);
         $this->assertNull($r[2]['admin']);
         $this->assertNull($r[3]['admin']);
+        $this->assertSame("ssdb_pt_fresh\n", file_get_contents($file));
+        $this->assertSame(0600, fileperms($file) & 0777);
+        $this->assertStringNotContainsString('ssdb_pt_fresh', $out . $err, 'the issued deploy token must never be printed');
+    }
+
+    public function test_issue_deploy_token_refuses_unsafe_destinations_before_minting_anything(): void
+    {
+        $open = self::$dir . '/opendir';
+        @mkdir($open, 0755);
+        chmod($open, 0755);
+        $safe = self::$dir . '/safedir';
+        @mkdir($safe, 0700);
+        chmod($safe, 0700);
+        file_put_contents($safe . '/exists.token', 'old');
+        @symlink($safe . '/exists.token', $safe . '/link.token');
+        foreach ([$open . '/a.token', $safe . '/exists.token', $safe . '/link.token', 'relative.token'] as $path) {
+            [, $err, $code] = $this->php("issueGatewayDeployTokenToFile(['gateway_url' => \$url, 'platform_id' => 'newplat', 'admin_token' => 'ADM'], '$path', false, true);");
+            $this->assertSame(1, $code, $path);
+            $this->assertSame([], $this->requests(), "$path: nothing may be minted when the destination is unsafe");
+        }
+        $this->assertSame('old', file_get_contents($safe . '/exists.token'));
+    }
+
+    public function test_an_existing_deploy_token_is_replaced_only_with_rotate_and_the_file_is_replaced_atomically(): void
+    {
+        $dir = self::$dir . '/rotdir';
+        @mkdir($dir, 0700);
+        chmod($dir, 0700);
+        file_put_contents($dir . '/p.token', "old\n");
+        chmod($dir . '/p.token', 0600);
+        [$out, $err, $code] = $this->php("issueGatewayDeployTokenToFile(['gateway_url' => \$url, 'platform_id' => 'haspt', 'admin_token' => 'ADM'], '" . $dir . "/p.token', true, true);");
+        $this->assertSame(0, $code, $err);
+        $this->assertSame(['/admin/platform-token/rotate'], array_column($this->requests(), 'path'));
+        $this->assertSame("ssdb_pt_rotated\n", file_get_contents($dir . '/p.token'));
+        $this->assertSame(0600, fileperms($dir . '/p.token') & 0777);
+        $this->assertSame('', $out);
     }
 
     public function test_an_existing_token_is_never_replaced_automatically(): void
     {
-        [$out, $err, $code] = $this->php(<<<'PHP'
-resolveGatewayDeployToken(['gateway_url' => $url, 'platform_id' => 'haspt', 'admin_token' => 'ADM', 'deploy_token' => null], false);
-PHP);
+        $dir = self::$dir . '/exdir';
+        @mkdir($dir, 0700);
+        chmod($dir, 0700);
+        [$out, $err, $code] = $this->php("issueGatewayDeployTokenToFile(['gateway_url' => \$url, 'platform_id' => 'haspt', 'admin_token' => 'ADM'], '" . $dir . "/h.token', false, true);");
         $this->assertSame(1, $code);
         $this->assertStringContainsString('--rotate', $err);
-        $this->assertStringContainsString('DB_GATEWAY_DEPLOY_TOKEN', $err);
-        $this->assertStringContainsString('--scope=deploy', $err);
         $this->assertSame(['/admin/platform-token'], array_column($this->requests(), 'path'), 'no rotate request may be made');
+        $this->assertFileDoesNotExist($dir . '/h.token');
     }
 
     public function test_rotate_is_used_only_when_asked_for(): void
@@ -147,17 +205,6 @@ PHP);
         $this->assertSame(0, $code, $err);
         $this->assertSame('ssdb_pt_rotated', trim($out));
         $this->assertSame(['/admin/platform-token/rotate'], array_column($this->requests(), 'path'));
-    }
-
-    public function test_quiet_never_issues_a_token_it_would_have_to_discard(): void
-    {
-        [$out, $err, $code] = $this->php(<<<'PHP'
-resolveGatewayDeployToken(['gateway_url' => $url, 'platform_id' => 'newplat', 'admin_token' => 'ADM', 'deploy_token' => null], true);
-PHP);
-        $this->assertSame(1, $code);
-        $this->assertSame('', $out);
-        $this->assertStringContainsString('gateway:provision-token --scope=deploy --quiet', $err);
-        $this->assertSame([], $this->requests(), 'nothing may be issued when the token would be lost');
     }
 
     public function test_provision_token_sends_the_requested_scope(): void

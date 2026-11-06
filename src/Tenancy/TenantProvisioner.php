@@ -40,7 +40,6 @@ abstract class TenantProvisioner
      * getPlatformToken(). Either the explicit $platformToken constructor value,
      * or the result of auto-provisioning via POST /admin/platform-token.
      */
-    private ?string $resolvedPlatformToken = null;
     private bool $gatewayVersionResolved = false;
     private ?string $gatewayVersionCache = null;
 
@@ -252,29 +251,15 @@ abstract class TenantProvisioner
     }
 
     /**
-     * Resolve the per-platform scoped bearer token (ssdb_pt_...) required by
-     * gateway v4.1.0+ for platform-scoped admin operations (database create,
-     * migrate, migrate-all).
+     * The platform's runtime token (ssdb_pt_...), needed by gateway v4.1.0+ to create a tenant
+     * database. It comes from the constructor ($platformToken, e.g. Env::DB_GATEWAY_PLATFORM_TOKEN).
      *
-     * Mirrors cli/helpers/gateway-common.php's resolveGatewayDeployToken() /
-     * stepProvisionPlatformToken(), which is the exact flow deploy-manager's
-     * gateway:register-tenant / gateway:migrate-all-tenants CLI steps already use
-     * successfully in production.
+     * There is no fallback that mints one with the admin token: an application server must not
+     * hold or use the admin token, and doing so would undo the token scopes. A missing runtime
+     * token is a configuration error; issue it from the workstation with
+     * `php stone gateway:provision-token` and set DB_GATEWAY_PLATFORM_TOKEN for the application.
      *
-     * Resolution order:
-     *   1. Explicit constructor override ($platformToken, e.g. from
-     *      Env::DB_GATEWAY_PLATFORM_TOKEN) — preferred, avoids a round trip.
-     *   2. Cached value from a prior call within this instance's lifetime
-     *      (resolvedPlatformToken) — provision() only calls createDatabase() once,
-     *      but subclasses/tests may call getPlatformToken() more than once.
-     *   3. Auto-provision via POST /admin/platform-token using the admin token.
-     *      Idempotent on the gateway side (upsert — see
-     *      stonescriptdb-gateway/src/api/admin_platform_token.rs): a routine
-     *      redeploy or repeated provision() calls will NOT rotate an
-     *      already-issued token, so this is safe to call on every provision().
-     *
-     * @throws \RuntimeException If the gateway is unreachable, returns a
-     *                           non-2xx response, or omits the token field.
+     * @throws \RuntimeException If no runtime token is configured.
      */
     protected function getPlatformToken(): string
     {
@@ -282,32 +267,12 @@ abstract class TenantProvisioner
             return $this->platformToken;
         }
 
-        if ($this->resolvedPlatformToken !== null) {
-            return $this->resolvedPlatformToken;
-        }
-
-        $payload = json_encode(['platform' => $this->platformCode, 'scope' => 'runtime']);
-        [$httpCode, $response, $curlErr] = $this->postToGateway('/admin/platform-token', $payload, $this->adminToken);
-
-        if ($response === false) {
-            log_error("TenantProvisioner::getPlatformToken: gateway unreachable provisioning platform token for {$this->platformCode}: {$curlErr}");
-            throw new \RuntimeException("Failed to reach gateway to provision platform token: {$curlErr}");
-        }
-
-        if ($httpCode < 200 || $httpCode >= 300) {
-            log_error("TenantProvisioner: platform token provisioning failed (HTTP $httpCode) (response body not logged)");
-            throw new \RuntimeException("Failed to provision platform token (HTTP $httpCode)");
-        }
-
-        $decoded = json_decode($response, true);
-        $token = $decoded['token'] ?? null;
-        if (!$token) {
-            log_error("TenantProvisioner: gateway returned success but no 'token' field provisioning platform token for {$this->platformCode}");
-            throw new \RuntimeException('Gateway returned success but no token field provisioning platform token');
-        }
-
-        $this->resolvedPlatformToken = $token;
-        return $token;
+        log_error("TenantProvisioner: DB_GATEWAY_PLATFORM_TOKEN is not set for platform {$this->platformCode}");
+        throw new \RuntimeException(
+            'DB_GATEWAY_PLATFORM_TOKEN is not set. Issue the runtime token from the workstation '
+            . '(php stone gateway:provision-token) and configure it for the application; '
+            . 'the application does not mint tokens with the admin token.'
+        );
     }
 
     /**
