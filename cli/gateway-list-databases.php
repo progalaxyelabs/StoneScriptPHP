@@ -44,7 +44,7 @@ if ($schemaFilter) {
     $url .= '?schema=' . urlencode($schemaFilter);
 }
 
-$resp = gatewayHttpRequest('GET', $url, [], null, 30);
+$resp = gatewayHttpRequest('GET', $url, gatewayBearerHeaders($env['platform_token']), null, 30);
 
 if ($resp['code'] === 404) {
     fwrite(STDERR, "ERROR: Platform '{$env['platform_id']}' is not registered on the gateway.\n");

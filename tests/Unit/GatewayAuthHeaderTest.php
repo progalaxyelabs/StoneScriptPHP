@@ -90,6 +90,7 @@ class GatewayAuthHeaderTest extends TestCase
         // still the root — it's just scoped down before hitting these endpoints.
         $migrate = new \ReflectionFunction('stepMigrateDatabase');
         $this->assertSame('platformToken', $migrate->getParameters()[4]->getName());
+        $this->assertSame('adminToken', $migrate->getParameters()[12]->getName(), 'admin token is sent only for force/allow');
         $this->assertTrue($migrate->getParameters()[4]->allowsNull());
 
         $migrateAll = new \ReflectionFunction('stepMigrateAllDatabases');

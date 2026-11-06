@@ -1,24 +1,23 @@
 <?php
 /**
- * StoneScriptPHP CLI - Gateway Provision Platform Token
+ * StoneScriptPHP CLI - Gateway Platform Token
  *
- * Provisions (or re-provisions) a per-platform bearer token via:
- *   POST /admin/platform-token
+ * Issues a per-platform bearer token via POST /admin/platform-token, or replaces
+ * it via POST /admin/platform-token/rotate (--rotate).
  *
- * Gateway v4.1.0+ requires a platform token (not the admin token) for:
- *   POST /admin/database/create
- *   POST /v2/migrate
- *   POST /v2/migrate-all
- *   GET  /v2/migrate-all/{job_id}
+ * The gateway shows a token only once and stores it hashed:
+ *   - First issue: the token is printed to stdout.
+ *   - The platform already has a token: nothing is printed; the command explains
+ *     how to continue (use the stored token, or --rotate).
+ *   - --rotate: a new token is printed and the previous one stops working at once.
+ *     It is never done unless you pass the flag.
  *
- * This command prints the token so you can store it in your .env:
- *   DB_GATEWAY_PLATFORM_TOKEN=<token>
- *
- * Re-provisioning replaces any existing platform token — any copy stored
- * elsewhere must be updated after re-provisioning.
+ * Store the printed token as DB_GATEWAY_PLATFORM_TOKEN in your secret store.
+ * The platform token is used for schema upload, database creation, migrations and
+ * function calls.
  *
  * Usage:
- *   php stone gateway:provision-token
+ *   php stone gateway:provision-token [--rotate] [--quiet]
  *
  * Environment variables (required):
  *   DB_GATEWAY_URL         - Gateway URL (e.g., http://localhost:9000)
@@ -26,12 +25,15 @@
  *   DB_GATEWAY_ADMIN_TOKEN - Admin token (legacy: ADMIN_TOKEN)
  *
  * Options:
- *   --quiet   Suppress output except the token itself (for scripting)
+ *   --rotate  Replace an existing token
+ *   --quiet   Print only the token on stdout (no other output). In CI, redirect
+ *             stdout straight into your secret store; do not let it reach a build log.
  */
 
 require_once __DIR__ . '/helpers/gateway-common.php';
 
-$options = parseGatewayOptions($argv, []);
+$options = parseGatewayOptions($argv, [], ['--rotate']);
+$rotate = in_array('--rotate', $argv, true);
 $env = loadGatewayEnv($options, false, false);
 
 if (!$env['admin_token']) {
@@ -49,10 +51,11 @@ $token = stepProvisionPlatformToken(
     $env['gateway_url'],
     $env['platform_id'],
     $env['admin_token'],
-    $options['quiet']
+    $options['quiet'],
+    $rotate
 );
 
-// Always print the token so it can be captured by scripts / CI pipelines.
+// The token goes to stdout only (for capture into a secret store).
 echo $token . "\n";
 
 exit(0);

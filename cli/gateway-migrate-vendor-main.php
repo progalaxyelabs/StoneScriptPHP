@@ -132,18 +132,22 @@ if (!$options['quiet']) {
 // SAME database (never a partial/vendor-only archive — see file header).
 $archive = buildGatewayArchive('main', $env['platform_id'], 'migrate_vendor_main', $options['quiet'], $mergeTargets);
 
+// The platform token authenticates the upload and the migration (resolved first).
+$platformToken = resolveGatewayPlatformToken($env, $options['quiet']);
+
 // Step 1: Upload the merged schema under the SAME schema name as migrate-main.
 if (!$options['quiet']) echo "Step 1/2: ";
-stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet']);
+stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet'], $platformToken);
 
 // Step 2: Migrate the main database (uuid is null — same target as migrate-main).
 if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
-    null, resolveGatewayPlatformToken($env, $options['quiet']), $options['force'],
+    null, $platformToken, $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
     $options['allow'], $options['skip_verification'],
-    $env['cross_db_link']
+    $env['cross_db_link'],
+    $env['admin_token']
 );
 
 exit(0);

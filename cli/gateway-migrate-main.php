@@ -62,19 +62,23 @@ if (!$options['quiet']) {
 // Build main schema archive
 $archive = buildGatewayArchive('main', $env['platform_id'], 'migrate_main', $options['quiet']);
 
+// The platform token authenticates the upload and the migration (resolved first).
+$platformToken = resolveGatewayPlatformToken($env, $options['quiet']);
+
 // Step 1: Upload main schema
 if (!$options['quiet']) echo "Step 1/2: ";
-stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet']);
+stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet'], $platformToken);
 
 // Step 2: Migrate main database (uuid is null for the main/platform database).
-// Gateway v4.1.0+ requires a platform token (not admin token) for POST /v2/migrate.
+// force/allow also send the admin token (X-Gateway-Admin-Token).
 if (!$options['quiet']) echo "Step 2/2: ";
 stepMigrateDatabase(
     $env['gateway_url'], $env['platform_id'], $mainSchemaName,
-    null, resolveGatewayPlatformToken($env, $options['quiet']), $options['force'],
+    null, $platformToken, $options['force'],
     $options['retry'], $options['delay'], $options['quiet'],
     $options['allow'], $options['skip_verification'],
-    $env['cross_db_link']
+    $env['cross_db_link'],
+    $env['admin_token']
 );
 
 exit(0);

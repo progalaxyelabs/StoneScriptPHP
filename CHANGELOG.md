@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.2.1]
+
+### Changed
+- Deploy CLI order and credentials: register (admin token) → platform token → upload / create / migrate (platform token). `--force` and `--allow-*` also send the admin token in `X-Gateway-Admin-Token`. `gateway:list-schemas` and `gateway:list-databases` send the platform token.
+- An existing platform token is never replaced implicitly. `gateway:provision-token --rotate` replaces it on request; otherwise the command explains how to continue.
+- `gateway:provision-token --quiet` prints only the token. Commands that would have to issue a token while `--quiet` is set refuse instead of discarding it.
+- The CLI sends no credentials on redirects (redirects are not followed).
+- Requires `progalaxyelabs/stonescriptdb-gateway-client` `^4.1.1`.
+- `UPGRADING-14.2.md` covers gateway 4.9 or later, the log-first rollout, the new-platform order and the force/allow credentials.
+
 ## [14.2.0]
 
 ### Added

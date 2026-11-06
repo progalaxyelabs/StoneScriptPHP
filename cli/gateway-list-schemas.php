@@ -29,7 +29,7 @@ if (!$options['quiet']) {
 $resp = gatewayHttpRequest(
     'GET',
     "{$env['gateway_url']}/platform/{$env['platform_id']}/schemas",
-    [],
+    gatewayBearerHeaders($env['platform_token']),
     null,
     30
 );

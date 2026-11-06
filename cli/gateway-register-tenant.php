@@ -56,13 +56,13 @@ if (!$options['quiet']) {
 // Build tenant schema archive
 $archive = buildGatewayArchive('tenant', $env['platform_id'], 'register_tenant', $options['quiet']);
 
-// Step 1: Register platform
+// Step 1: Register platform (admin token when set; otherwise the platform token)
 if (!$options['quiet']) echo "Step 1/2: ";
-stepRegisterPlatform($env['gateway_url'], $env['platform_id'], $options['quiet']);
+stepRegisterPlatform($env['gateway_url'], $env['platform_id'], $options['quiet'], $env['admin_token'], $env['platform_token']);
 
-// Step 2: Upload tenant schema
+// Step 2: Upload tenant schema (platform token)
 if (!$options['quiet']) echo "Step 2/2: ";
-stepUploadSchema($env['gateway_url'], $env['platform_id'], $tenantSchema, $archive['tar_file'], $options['quiet']);
+stepUploadSchema($env['gateway_url'], $env['platform_id'], $tenantSchema, $archive['tar_file'], $options['quiet'], resolveGatewayPlatformToken($env, $options['quiet']));
 
 if (!$options['quiet']) {
     echo "Tenant schema registered. Tenant databases will be created on demand.\n";
