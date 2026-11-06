@@ -15,12 +15,12 @@
  * A platform holds one token per scope:
  *   --scope=runtime (default)  the application's token: function calls and creating a NEW
  *                              tenant database. Store as DB_GATEWAY_PLATFORM_TOKEN on the app host.
- *   --scope=deploy             the deploy manager's token: registration, schema upload,
- *                              migrations, export. Store as DB_GATEWAY_DEPLOY_TOKEN in the deploy
- *                              manager's secret store; never on an application host.
+ *   --scope=deploy             NOT issued here. The deploy manager's token is issued only by
+ *                              `gateway:register-main --issue-deploy-token=<file>` (workstation),
+ *                              which writes it to a mode-600 file and never prints it.
  *
  * Usage:
- *   php stone gateway:provision-token [--scope=runtime|deploy] [--rotate] [--quiet]
+ *   php stone gateway:provision-token [--rotate] [--quiet]
  *
  * Environment variables (required):
  *   DB_GATEWAY_URL         - Gateway URL (e.g., http://localhost:9000)
@@ -28,7 +28,7 @@
  *   DB_GATEWAY_ADMIN_TOKEN - Admin token (legacy: ADMIN_TOKEN)
  *
  * Options:
- *   --scope   runtime (default) or deploy
+ *   --scope   runtime (the only scope this command issues)
  *   --rotate  Replace an existing token
  *   --quiet   Print only the token on stdout (no other output). In CI, redirect
  *             stdout straight into your secret store; do not let it reach a build log.
@@ -44,8 +44,14 @@ foreach ($argv as $a) {
         $scope = substr($a, 8);
     }
 }
-if (!in_array($scope, ['runtime', 'deploy'], true)) {
-    fwrite(STDERR, "ERROR: --scope must be 'runtime' or 'deploy'.\n");
+if ($scope === 'deploy') {
+    fwrite(STDERR, "ERROR: this command does not issue deploy tokens.\n");
+    fwrite(STDERR, "  From the workstation, run: php stone gateway:register-main --issue-deploy-token=<file>\n");
+    fwrite(STDERR, "  (add --rotate-deploy-token to replace an existing one). The token is written to the file, not printed.\n");
+    exit(2);
+}
+if ($scope !== 'runtime') {
+    fwrite(STDERR, "ERROR: --scope must be 'runtime'.\n");
     exit(2);
 }
 $env = loadGatewayEnv($options, false, false);

@@ -279,6 +279,9 @@ function ssp_check_dependencies(string $projectRoot, ?array $audit, bool $includ
     if ($packages === []) {
         $errors[] = 'vendor/composer/installed.json is missing or empty — run composer install first';
     }
+    foreach (ssp_verify_framework_integrity($projectRoot) as $problem) {
+        $errors[] = "framework integrity: {$problem}";
+    }
     $devNames = [];
     $data = is_file($projectRoot . '/vendor/composer/installed.json')
         ? json_decode((string) file_get_contents($projectRoot . '/vendor/composer/installed.json'), true) : [];
@@ -295,14 +298,15 @@ function ssp_check_dependencies(string $projectRoot, ?array $audit, bool $includ
         }
         $version = ltrim((string) ($pkg['version'] ?? ''), 'vV');
         $vendor = explode('/', $name)[0];
-        if (!isset($approvedPackages[$name]) && !isset($approvedVendors[$vendor])) {
+        if ($name !== SSP_FRAMEWORK_PACKAGE && !isset($approvedPackages[$name]) && !isset($approvedVendors[$vendor])) {
             $errors[] = "unapproved package: {$name} {$version} (add it to stone-packages.json \"approved\" after review)";
         }
         if (($pkg['type'] ?? '') === 'composer-plugin' && !in_array($name, $config['plugins_approved'], true)) {
             $errors[] = "unapproved Composer plugin: {$name} (plugins run code during composer install; approve in \"plugins_approved\" AND config.allow-plugins)";
         }
         $files = $pkg['autoload']['files'] ?? [];
-        if (is_array($files) && $files !== []) {
+        // The framework's own autoload files are covered by the integrity check, not by a human review entry.
+        if ($name !== SSP_FRAMEWORK_PACKAGE && is_array($files) && $files !== []) {
             $autoloadFiles[$name] = array_values(array_map('strval', $files));
             $constraint = $config['autoload_files_reviewed'][$name] ?? null;
             if ($constraint === null) {

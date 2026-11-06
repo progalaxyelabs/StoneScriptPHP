@@ -65,8 +65,7 @@ final class TenantProvisionerTest extends TestCase
     }
 
     /**
-     * Provisioner with NO explicit platform token — exercises the auto-provisioning
-     * path via POST /admin/platform-token.
+     * Provisioner with NO platform token — creating a database must fail with a clear error.
      */
     private function provisionerWithoutExplicitPlatformToken(): TestableTenantProvisioner
     {
@@ -313,80 +312,32 @@ final class TenantProvisionerTest extends TestCase
         $this->assertNotSame('test-admin-token', $provisioner->capturedRequests[0]['token']);
     }
 
-    public function test_no_explicit_token_auto_provisions_platform_token_via_admin_token(): void
+    public function test_no_runtime_token_is_a_clear_error_and_no_token_is_minted_with_the_admin_token(): void
     {
         $provisioner = $this->provisionerWithoutExplicitPlatformToken();
-        // First call: POST /admin/platform-token (authorized by admin token).
-        $provisioner->queueResponse(201, '{"platform":"myplatform","token":"ssdb_pt_autoprovisioned0001","created_at":"2026-07-18T00:00:00Z"}', '');
-        // Second call: POST /admin/database/create (authorized by the platform token above).
-        $provisioner->queueResponse(201, '{"status":"created"}', '');
 
-        $provisioner->exposeCreateDatabase(['tenant_id' => 'tenant-uuid-4', 'tenant_slug' => 'acme']);
-
-        $this->assertCount(2, $provisioner->capturedRequests);
-
-        $this->assertSame('/admin/platform-token', $provisioner->capturedRequests[0]['path']);
+        try {
+            $provisioner->exposeCreateDatabase(['tenant_id' => 'tenant-uuid-4', 'tenant_slug' => 'acme']);
+            $this->fail('a missing runtime token must throw');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('DB_GATEWAY_PLATFORM_TOKEN', $e->getMessage());
+        }
         $this->assertSame(
-            'test-admin-token',
-            $provisioner->capturedRequests[0]['token'],
-            'POST /admin/platform-token must be authorized with the shared admin token.'
-        );
-        $tokenPayload = json_decode($provisioner->capturedRequests[0]['payload'], true);
-        $this->assertSame('myplatform', $tokenPayload['platform']);
-
-        $this->assertSame('/admin/database/create', $provisioner->capturedRequests[1]['path']);
-        $this->assertSame(
-            'ssdb_pt_autoprovisioned0001',
-            $provisioner->capturedRequests[1]['token'],
-            'POST /admin/database/create must use the auto-provisioned platform token.'
-        );
-    }
-
-    public function test_auto_provisioned_platform_token_is_cached_not_refetched(): void
-    {
-        $provisioner = $this->provisionerWithoutExplicitPlatformToken();
-        $provisioner->queueResponse(201, '{"platform":"myplatform","token":"ssdb_pt_cached0001","created_at":"2026-07-18T00:00:00Z"}', '');
-
-        $first = $provisioner->exposeGetPlatformToken();
-        $second = $provisioner->exposeGetPlatformToken();
-
-        $this->assertSame('ssdb_pt_cached0001', $first);
-        $this->assertSame($first, $second);
-        $this->assertCount(
-            1,
+            [],
             $provisioner->capturedRequests,
-            'Platform token must be cached after the first resolution — a second ' .
-            'call must NOT re-provision (re-provisioning is safe on the gateway side ' .
-            'due to its upsert semantics, but an unnecessary round trip per call is wasteful).'
+            'No request may be made: the admin token must never be used to mint a runtime token on an app server.'
         );
     }
 
-    public function test_platform_token_provisioning_failure_throws(): void
+    public function test_getPlatformToken_without_a_token_throws_and_makes_no_request(): void
     {
         $provisioner = $this->provisionerWithoutExplicitPlatformToken();
-        $provisioner->queueResponse(403, '{"error":"admin token invalid"}', '');
-
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('HTTP 403');
-        $provisioner->exposeGetPlatformToken();
-    }
-
-    public function test_platform_token_response_missing_token_field_throws(): void
-    {
-        $provisioner = $this->provisionerWithoutExplicitPlatformToken();
-        $provisioner->queueResponse(201, '{"platform":"myplatform"}', '');
-
-        $this->expectException(\RuntimeException::class);
-        $provisioner->exposeGetPlatformToken();
-    }
-
-    public function test_platform_token_unreachable_gateway_throws(): void
-    {
-        $provisioner = $this->provisionerWithoutExplicitPlatformToken();
-        $provisioner->queueResponse(0, false, 'Could not resolve host: gateway');
-
-        $this->expectException(\RuntimeException::class);
-        $provisioner->exposeGetPlatformToken();
+        try {
+            $provisioner->exposeGetPlatformToken();
+        } finally {
+            $this->assertSame([], $provisioner->capturedRequests);
+        }
     }
 }
 

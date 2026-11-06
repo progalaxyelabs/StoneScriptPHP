@@ -4,7 +4,8 @@
  *
  * Four-step registration flow for the main (platform) database:
  *   1. Register platform (idempotent; admin token)
- *   2. Deploy token: reuse DB_GATEWAY_DEPLOY_TOKEN, or issue one with the admin token
+ *   2. Deploy token: DB_GATEWAY_DEPLOY_TOKEN from the process environment, or -- only with
+ *      --issue-deploy-token=<file>, from the workstation -- a newly issued one, written to <file>
  *   3. Upload main schema archive (from main/postgresql/; platform token)
  *   4. Create main database from stored schema (platform token)
  *
@@ -35,6 +36,13 @@
  *   --force                  Skip checksum check and always run all steps
  *   --database-id=<id>       Override DATABASE_ID
  *   --main-schema-name=<n>   Override the main schema name
+ *   --issue-deploy-token=<file>
+ *                            First-time setup, from the workstation: issue the platform's deploy token
+ *                            with the admin token and write it to <file> (absolute path, new file, mode 600,
+ *                            directory mode 700). The token is never printed. This is the only command
+ *                            that issues a deploy token; all others need DB_GATEWAY_DEPLOY_TOKEN.
+ *   --rotate-deploy-token    With --issue-deploy-token: replace an existing deploy token (the old one stops
+ *                            working at once) and replace <file>.
  *
  * Idempotency:
  *   A SHA-256 hash of src/postgresql/ is saved to .cache/.gateway-schema-hash-main
@@ -44,7 +52,18 @@
 
 require_once __DIR__ . '/helpers/gateway-common.php';
 
-$options = parseGatewayOptions($argv, ['main-schema-name']);
+$options = parseGatewayOptions($argv, ['main-schema-name'], ['--issue-deploy-token=', '--rotate-deploy-token']);
+$issueDeployTokenPath = null;
+foreach ($argv as $a) {
+    if (is_string($a) && str_starts_with($a, '--issue-deploy-token=')) {
+        $issueDeployTokenPath = substr($a, 21);
+    }
+}
+$rotateDeployToken = in_array('--rotate-deploy-token', $argv, true);
+if ($rotateDeployToken && $issueDeployTokenPath === null) {
+    fwrite(STDERR, "ERROR: --rotate-deploy-token needs --issue-deploy-token=<file>.\n");
+    exit(2);
+}
 $env = loadGatewayEnv($options);
 
 // Main database schema: MAIN_SCHEMA_NAME, else DB_GATEWAY_SCHEMA_NAME
@@ -68,7 +87,7 @@ $postgresqlPath = ROOT_PATH . 'src/postgresql';
 $hashFile = ROOT_PATH . '.cache/.gateway-schema-hash-main';
 $currentHash = is_dir($postgresqlPath) ? computeSchemaHash($postgresqlPath) : '';
 
-if (!$options['force'] && $currentHash !== '') {
+if (!$options['force'] && $issueDeployTokenPath === null && $currentHash !== '') {
     if (file_exists($hashFile) && file_get_contents($hashFile) === $currentHash) {
         if (!$options['quiet']) {
             echo "Schema unchanged — main database already registered, skipping\n";
@@ -85,12 +104,20 @@ $archive = buildGatewayArchive('main', $env['platform_id'], 'register_main', $op
 if (!$options['quiet']) echo "Step 1/4: ";
 stepRegisterPlatform($env['gateway_url'], $env['platform_id'], $options['quiet'], $env['admin_token'], $env['deploy_token']);
 
-// Step 2: Deploy token. DB_GATEWAY_DEPLOY_TOKEN (process environment) is reused when set;
-// otherwise one is issued with the admin token (shown once). Later steps authenticate with it.
+// Step 2: Deploy token. DB_GATEWAY_DEPLOY_TOKEN (process environment), or -- only when asked to with
+// --issue-deploy-token=<file> -- one issued with the admin token and written to that file (never printed).
 if (!$options['quiet']) echo "Step 2/4: ";
-$platformToken = resolveGatewayDeployToken($env, $options['quiet']);
-if (!$options['quiet'] && !empty($env['deploy_token'])) {
-    echo "Using DB_GATEWAY_DEPLOY_TOKEN\n\n";
+if ($issueDeployTokenPath !== null) {
+    if (!empty($env['deploy_token']) && !$rotateDeployToken) {
+        fwrite(STDERR, "ERROR: DB_GATEWAY_DEPLOY_TOKEN is already set; --issue-deploy-token is for a platform that has none yet.\n");
+        exit(1);
+    }
+    $platformToken = issueGatewayDeployTokenToFile($env, $issueDeployTokenPath, $rotateDeployToken, $options['quiet']);
+} else {
+    $platformToken = resolveGatewayDeployToken($env, $options['quiet']);
+    if (!$options['quiet']) {
+        echo "Using DB_GATEWAY_DEPLOY_TOKEN\n\n";
+    }
 }
 
 // Step 3: Upload main schema (deploy token)

@@ -22,7 +22,11 @@ final class DepsCheckTest extends TestCase
         mkdir($this->root . '/vendor/composer', 0755, true);
         $this->composerJson();
         $this->config(['approved' => ['vendors' => ['progalaxyelabs'], 'packages' => ['vlucas/phpdotenv']]]);
-        $this->packages([['name' => 'progalaxyelabs/stonescriptphp', 'version' => '14.4.0']]);
+        $this->packages([['name' => 'progalaxyelabs/stonescriptphp', 'version' => '14.4.0', 'autoload' => ['files' => ['src/bootstrap.php']]]]);
+        $fw = $this->root . '/vendor/progalaxyelabs/stonescriptphp';
+        mkdir($fw . '/src', 0755, true);
+        file_put_contents($fw . '/src/a.php', '<?php');
+        file_put_contents($fw . '/framework-manifest.txt', ssp_format_manifest('14.4.0', ssp_build_framework_manifest($fw)));
     }
 
     protected function tearDown(): void
@@ -45,6 +49,9 @@ final class DepsCheckTest extends TestCase
 
     private function packages(array $pk, array $dev = []): void
     {
+        if (!in_array('progalaxyelabs/stonescriptphp', array_column($pk, 'name'), true)) {
+            $pk[] = ['name' => 'progalaxyelabs/stonescriptphp', 'version' => '14.4.0'];
+        }
         file_put_contents($this->root . '/vendor/composer/installed.json', json_encode(['packages' => $pk, 'dev-package-names' => $dev]));
     }
 
@@ -56,6 +63,13 @@ final class DepsCheckTest extends TestCase
     public function test_clean_project_passes(): void
     {
         $this->assertSame('', $this->errors());
+    }
+
+    public function test_framework_autoload_files_need_no_review_but_its_integrity_is_checked(): void
+    {
+        $this->assertSame('', $this->errors());
+        file_put_contents($this->root . '/vendor/progalaxyelabs/stonescriptphp/src/a.php', '<?php // changed');
+        $this->assertStringContainsString('framework integrity: modified: src/a.php', $this->errors());
     }
 
     public function test_unapproved_package_fails(): void

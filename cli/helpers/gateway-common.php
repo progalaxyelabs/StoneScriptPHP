@@ -313,18 +313,14 @@ function gatewayDeployTokenFromProcess(): ?string
  * Resolve the DEPLOY token used for every step the CLI performs (registration, schema
  * upload, database create, migrate, migrate-all, listings).
  *
- * Resolution order:
- *   1. DB_GATEWAY_DEPLOY_TOKEN (or DB_GATEWAY_DEPLOY_TOKEN_FILE) from the process environment.
- *   2. Issue a deploy token with the admin token, when the platform has none yet. The gateway
- *      shows a token only once, so this is refused with --quiet (the token would be lost): run
- *      `php stone gateway:provision-token --scope=deploy --quiet` and store its output instead.
- *   3. Otherwise: a clear error. The CLI never falls back to the application's runtime token.
- *
- * A token that already exists on the gateway is never replaced here; replacing it is the
- * explicit `gateway:provision-token --scope=deploy --rotate`.
+ * The token comes from the process environment (DB_GATEWAY_DEPLOY_TOKEN, or
+ * DB_GATEWAY_DEPLOY_TOKEN_FILE) and nowhere else. This function never issues one: the only
+ * command that may issue a deploy token is `gateway:register-main --issue-deploy-token=<file>`,
+ * run from the workstation, which writes the token to a file and prints nothing. The CLI never
+ * falls back to the application's runtime token.
  *
  * @param array $env    Result of loadGatewayEnv().
- * @param bool  $quiet  Suppress informational output.
+ * @param bool  $quiet  Unused; kept so callers need not change.
  * @return string       Deploy token. Exits with code 1 when none is available.
  */
 function resolveGatewayDeployToken(array $env, bool $quiet = false): string
@@ -333,23 +329,91 @@ function resolveGatewayDeployToken(array $env, bool $quiet = false): string
         return $env['deploy_token'];
     }
 
+    fwrite(STDERR, "ERROR: DB_GATEWAY_DEPLOY_TOKEN is not set.\n");
+    fwrite(STDERR, "  The deploy manager supplies it in the process environment for the run (or as DB_GATEWAY_DEPLOY_TOKEN_FILE).\n");
+    fwrite(STDERR, "  It is not read from .env, and the application's runtime token (DB_GATEWAY_PLATFORM_TOKEN) is not accepted for this.\n");
+    fwrite(STDERR, "  This command does not issue one. For a platform that has no deploy token yet, run once from the workstation:\n");
+    fwrite(STDERR, "    php stone gateway:register-main --issue-deploy-token=<path to a new mode-600 file in a mode-700 directory>\n");
+    fwrite(STDERR, "  and give the file's content to the deploy manager. (To replace an existing one add --rotate-deploy-token.)\n");
+    exit(1);
+}
+
+/**
+ * Write a secret to a NEW file with mode 600, never to stdout. The parent directory must exist,
+ * be a real directory (not a symlink), be owned by this user and be closed to group and others
+ * (mode 700); the target must not be a symlink. An existing file is replaced only when
+ * $replace is true, through a temporary file in the same directory and an atomic rename.
+ */
+function validateGatewaySecretPath(string $path, bool $replace): void
+{
+    if ($path === '' || $path[0] !== '/') {
+        fwrite(STDERR, "ERROR: the token file path must be absolute.\n");
+        exit(1);
+    }
+    $dir = dirname($path);
+    if (is_link($dir) || !is_dir($dir)) {
+        fwrite(STDERR, "ERROR: the token file's directory must exist and must not be a symlink.\n");
+        exit(1);
+    }
+    $st = @stat($dir);
+    if ($st === false || (function_exists('posix_geteuid') && $st['uid'] !== posix_geteuid()) || ($st['mode'] & 0077) !== 0) {
+        fwrite(STDERR, "ERROR: the token file's directory must be owned by you and closed to group and others (mode 700).\n");
+        exit(1);
+    }
+    if (is_link($path)) {
+        fwrite(STDERR, "ERROR: the token file path is a symlink; refusing to write through it.\n");
+        exit(1);
+    }
+    if (file_exists($path) && !$replace) {
+        fwrite(STDERR, "ERROR: the token file already exists; refusing to overwrite it.\n");
+        exit(1);
+    }
+}
+
+function writeGatewaySecretFile(string $path, string $secret, bool $replace = false): void
+{
+    validateGatewaySecretPath($path, $replace);
+    $dir = dirname($path);
+    $old = umask(0077);
+    $target = $replace ? $dir . '/.' . basename($path) . '.' . bin2hex(random_bytes(6)) . '.tmp' : $path;
+    $fh = @fopen($target, 'x');
+    umask($old);
+    if ($fh === false) {
+        fwrite(STDERR, "ERROR: cannot create the token file.\n");
+        exit(1);
+    }
+    @chmod($target, 0600);
+    $ok = fwrite($fh, $secret . "\n") !== false;
+    $ok = fclose($fh) && $ok;
+    if ($ok && $replace) {
+        $ok = @rename($target, $path);
+    }
+    if (!$ok) {
+        @unlink($target);
+        fwrite(STDERR, "ERROR: cannot write the token file.\n");
+        exit(1);
+    }
+}
+
+/**
+ * `gateway:register-main --issue-deploy-token=<file>`: issue (or, with $rotate, replace) the
+ * platform's deploy token with the admin token and store it in $path (mode 600). The token is
+ * not printed anywhere; the caller keeps it in memory for the rest of the run.
+ */
+function issueGatewayDeployTokenToFile(array $env, string $path, bool $rotate, bool $quiet): string
+{
     if (empty($env['admin_token'])) {
-        fwrite(STDERR, "ERROR: DB_GATEWAY_DEPLOY_TOKEN is not set.\n");
-        fwrite(STDERR, "  The deploy manager supplies it in the process environment for the run (or as DB_GATEWAY_DEPLOY_TOKEN_FILE).\n");
-        fwrite(STDERR, "  It is not read from .env, and the application's runtime token (DB_GATEWAY_PLATFORM_TOKEN) is not accepted for this.\n");
+        fwrite(STDERR, "ERROR: --issue-deploy-token needs DB_GATEWAY_ADMIN_TOKEN (run it from the workstation).\n");
         exit(1);
     }
-
-    if ($quiet) {
-        fwrite(STDERR, "ERROR: DB_GATEWAY_DEPLOY_TOKEN is not set and --quiet would discard a newly issued token.\n");
-        fwrite(STDERR, "  Issue it once with: php stone gateway:provision-token --scope=deploy --quiet   (prints only the token)\n");
-        fwrite(STDERR, "  and store the output in the deploy manager's secret store.\n");
-        exit(1);
+    // Validate the destination BEFORE a one-time token is minted.
+    validateGatewaySecretPath($path, $rotate);
+    $token = stepProvisionPlatformToken($env['gateway_url'], $env['platform_id'], $env['admin_token'], $quiet, $rotate, 'deploy');
+    writeGatewaySecretFile($path, $token, $rotate);
+    if (!$quiet) {
+        echo "  Deploy token written to the file you named (mode 600). It is not shown.\n\n";
     }
-
-    fwrite(STDERR, "NOTE: DB_GATEWAY_DEPLOY_TOKEN not set -- issuing a deploy token with the admin token.\n\n");
-
-    return stepProvisionPlatformToken($env['gateway_url'], $env['platform_id'], $env['admin_token'], $quiet, false, 'deploy');
+    return $token;
 }
 
 /**
@@ -409,6 +473,9 @@ function stepProvisionPlatformToken(string $gatewayUrl, string $platformId, ?str
             }
             fwrite(STDERR, "ERROR: Gateway returned success but no 'token' field in response.\n");
             exit(1);
+        }
+        if (!$quiet && $scope === 'deploy') {
+            return $token;
         }
         if (!$quiet) {
             echo "  " . ucfirst($scope) . " token issued. It is shown only once; store it now.\n";
