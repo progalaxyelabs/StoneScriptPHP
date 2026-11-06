@@ -205,13 +205,64 @@ final class GatewayCliConfigTest extends TestCase
     {
         $offenders = [];
         foreach (glob(dirname(__DIR__, 2) . '/cli/{gateway-*.php,helpers/gateway-common.php,tenants-check-ids.php,validate-schema-contract.php}', GLOB_BRACE) as $file) {
-            // The cross-DB-link opt-in is deliberately process-environment-only.
-            $code = preg_replace("/getenv\\('GATEWAY_CROSS_DB_LINK_[A-Z_]+'\\)/", '', (string) file_get_contents($file));
+            // The cross-DB-link opt-in and the deploy token are deliberately process-environment-only.
+            $code = preg_replace("/getenv\\('(?:GATEWAY_CROSS_DB_LINK_[A-Z_]+|DB_GATEWAY_DEPLOY_TOKEN(?:_FILE)?)'\\)/", '', (string) file_get_contents($file));
             if (preg_match('/\bgetenv\s*\(/', (string) $code)) {
                 $offenders[] = basename($file);
             }
         }
         $this->assertSame([], $offenders);
+    }
+
+    private function deployProject(string $extraEnv = ''): void
+    {
+        $this->project = new CliProjectHarness();
+        $this->project->write('.env', "DB_GATEWAY_URL=http://127.0.0.1:9\nDB_GATEWAY_PLATFORM=shop\n"
+            . "DB_GATEWAY_SCHEMA_NAME=main\n" . $extraEnv);
+        mkdir($this->project->dir . '/src/postgresql/main/postgresql/tables', 0700, true);
+    }
+
+    public function test_deploy_command_without_a_deploy_token_stops_with_a_clear_error(): void
+    {
+        $this->deployProject("DB_GATEWAY_PLATFORM_TOKEN=runtime-only\n");
+        [$code, $out] = $this->project->stone(['gateway:migrate-main', '--retry=1', '--delay=0']);
+        $this->assertSame(1, $code);
+        $this->assertStringContainsString('DB_GATEWAY_DEPLOY_TOKEN is not set', $out);
+        $this->assertStringNotContainsString('runtime-only', $out);
+    }
+
+    public function test_deploy_token_in_dotenv_is_ignored_with_a_warning(): void
+    {
+        $this->deployProject("DB_GATEWAY_DEPLOY_TOKEN=from-dotenv\n");
+        [$code, $out] = $this->project->stone(['gateway:migrate-main', '--retry=1', '--delay=0']);
+        $this->assertSame(1, $code);
+        $this->assertStringContainsString('is set in .env; it is ignored there', $out);
+        $this->assertStringContainsString('DB_GATEWAY_DEPLOY_TOKEN is not set', $out);
+        $this->assertStringNotContainsString('from-dotenv', $out);
+    }
+
+    public function test_deploy_token_from_the_process_environment_gets_past_the_token_check(): void
+    {
+        $this->deployProject();
+        [$code, $out] = $this->project->stone(['gateway:migrate-main', '--retry=1', '--delay=0'], ['DB_GATEWAY_DEPLOY_TOKEN' => 'proc-token']);
+        $this->assertStringNotContainsString('DB_GATEWAY_DEPLOY_TOKEN is not set', $out);
+        $this->assertStringNotContainsString('proc-token', $out);
+        $this->assertNotSame(0, $code, 'the unreachable gateway must fail the command');
+    }
+
+    public function test_deploy_token_file_must_not_be_group_or_world_readable(): void
+    {
+        $this->deployProject();
+        $file = $this->project->dir . '/deploy.tok';
+        file_put_contents($file, "file-token\n");
+        chmod($file, 0644);
+        [$code, $out] = $this->project->stone(['gateway:migrate-main', '--retry=1', '--delay=0'], ['DB_GATEWAY_DEPLOY_TOKEN_FILE' => $file]);
+        $this->assertSame(1, $code);
+        $this->assertStringContainsString('must not be readable by group or others', $out);
+        chmod($file, 0600);
+        [, $out] = $this->project->stone(['gateway:migrate-main', '--retry=1', '--delay=0'], ['DB_GATEWAY_DEPLOY_TOKEN_FILE' => $file]);
+        $this->assertStringNotContainsString('DB_GATEWAY_DEPLOY_TOKEN is not set', $out);
+        $this->assertStringNotContainsString('file-token', $out);
     }
 
     private const REG = "DB_GATEWAY_URL=http://127.0.0.1:9\nDB_GATEWAY_PLATFORM=shop\nDB_GATEWAY_ADMIN_TOKEN=adm\n";

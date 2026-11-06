@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.3.0]
+
+See `UPGRADING-14.3.md`. Requires gateway 4.10+ and gateway-client ^4.2.0.
+
+### Changed
+- Deploy commands (`gateway:register-main`, `migrate-*`, `register-tenant`, listings) use a deploy-scope token from the process environment (`DB_GATEWAY_DEPLOY_TOKEN` or `DB_GATEWAY_DEPLOY_TOKEN_FILE`), never from `.env`; a clear error is shown when it is missing.
+- `gateway:provision-token` takes `--scope=runtime|deploy` (default `runtime`).
+- Tenant provisioning from the application issues a runtime-scope token.
+
 ## [14.2.1]
 
 ### Changed

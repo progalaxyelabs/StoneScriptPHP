@@ -4,7 +4,7 @@
  *
  * Four-step registration flow for the main (platform) database:
  *   1. Register platform (idempotent; admin token)
- *   2. Platform token: reuse DB_GATEWAY_PLATFORM_TOKEN, or issue one with the admin token
+ *   2. Deploy token: reuse DB_GATEWAY_DEPLOY_TOKEN, or issue one with the admin token
  *   3. Upload main schema archive (from main/postgresql/; platform token)
  *   4. Create main database from stored schema (platform token)
  *
@@ -25,7 +25,8 @@
  *
  * Environment variables (optional):
  *   DATABASE_ID              - Database identifier (default: main)
- *   DB_GATEWAY_PLATFORM_TOKEN - Existing platform token (skips issuing; required once the platform already has one)
+ *   DB_GATEWAY_DEPLOY_TOKEN  - Deploy token, from the deploy manager's process environment (or DB_GATEWAY_DEPLOY_TOKEN_FILE);
+ *                              never read from .env. Required once the platform already has one.
  *
  * Options:
  *   --retry=<n>              Number of retry attempts (default: 3)
@@ -80,21 +81,19 @@ if (!$options['force'] && $currentHash !== '') {
 // Build main schema archive
 $archive = buildGatewayArchive('main', $env['platform_id'], 'register_main', $options['quiet']);
 
-// Step 1: Register platform (admin token: a new platform has no platform token yet)
+// Step 1: Register platform (admin token: a new platform has no token yet)
 if (!$options['quiet']) echo "Step 1/4: ";
-stepRegisterPlatform($env['gateway_url'], $env['platform_id'], $options['quiet'], $env['admin_token'], $env['platform_token']);
+stepRegisterPlatform($env['gateway_url'], $env['platform_id'], $options['quiet'], $env['admin_token'], $env['deploy_token']);
 
-// Step 2: Platform token. DB_GATEWAY_PLATFORM_TOKEN is reused when set; otherwise one is
-// issued with the admin token (shown once). Later steps authenticate with it.
+// Step 2: Deploy token. DB_GATEWAY_DEPLOY_TOKEN (process environment) is reused when set;
+// otherwise one is issued with the admin token (shown once). Later steps authenticate with it.
 if (!$options['quiet']) echo "Step 2/4: ";
-$platformToken = !empty($env['platform_token'])
-    ? $env['platform_token']
-    : resolveGatewayPlatformToken($env, $options['quiet']);
-if (!$options['quiet'] && !empty($env['platform_token'])) {
-    echo "Using DB_GATEWAY_PLATFORM_TOKEN\n\n";
+$platformToken = resolveGatewayDeployToken($env, $options['quiet']);
+if (!$options['quiet'] && !empty($env['deploy_token'])) {
+    echo "Using DB_GATEWAY_DEPLOY_TOKEN\n\n";
 }
 
-// Step 3: Upload main schema (platform token)
+// Step 3: Upload main schema (deploy token)
 if (!$options['quiet']) echo "Step 3/4: ";
 stepUploadSchema($env['gateway_url'], $env['platform_id'], $mainSchemaName, $archive['tar_file'], $options['quiet'], $platformToken);
 

@@ -146,7 +146,7 @@ abstract class TenantProvisioner
      * (ssdb_pt_...), NOT the shared admin token. Sending the admin token here gets a
      * `403 unknown token` from the gateway (platform-wide new-tenant-signup blocker fixed
      * in 7.1.3 — see getPlatformToken()). This mirrors the CLI's
-     * resolveGatewayPlatformToken()/stepCreateDatabase() in cli/helpers/gateway-common.php,
+     * resolveGatewayDeployToken()/stepCreateDatabase() in cli/helpers/gateway-common.php,
      * which deploy-manager's register-tenant/migrate-all-tenants steps already use
      * successfully.
      *
@@ -256,7 +256,7 @@ abstract class TenantProvisioner
      * gateway v4.1.0+ for platform-scoped admin operations (database create,
      * migrate, migrate-all).
      *
-     * Mirrors cli/helpers/gateway-common.php's resolveGatewayPlatformToken() /
+     * Mirrors cli/helpers/gateway-common.php's resolveGatewayDeployToken() /
      * stepProvisionPlatformToken(), which is the exact flow deploy-manager's
      * gateway:register-tenant / gateway:migrate-all-tenants CLI steps already use
      * successfully in production.
@@ -286,7 +286,7 @@ abstract class TenantProvisioner
             return $this->resolvedPlatformToken;
         }
 
-        $payload = json_encode(['platform' => $this->platformCode]);
+        $payload = json_encode(['platform' => $this->platformCode, 'scope' => 'runtime']);
         [$httpCode, $response, $curlErr] = $this->postToGateway('/admin/platform-token', $payload, $this->adminToken);
 
         if ($response === false) {

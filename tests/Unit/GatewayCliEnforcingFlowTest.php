@@ -108,9 +108,9 @@ switch (true) {
     public function test_new_platform_order_register_token_upload_create_with_the_right_credentials(): void
     {
         [$out, $err, $code] = $this->php(<<<'PHP'
-$env = ['gateway_url' => $url, 'platform_id' => 'newplat', 'admin_token' => 'ADM', 'platform_token' => null];
+$env = ['gateway_url' => $url, 'platform_id' => 'newplat', 'admin_token' => 'ADM', 'deploy_token' => null];
 stepRegisterPlatform($url, 'newplat', true, 'ADM', null);
-$tok = resolveGatewayPlatformToken($env, false);
+$tok = resolveGatewayDeployToken($env, false);
 stepUploadSchema($url, 'newplat', 'main', ROOT_PATH . 'archive.tar.gz', true, $tok);
 stepCreateDatabase($url, 'newplat', 'main', null, $tok, 1, 0, true);
 PHP);
@@ -122,6 +122,7 @@ PHP);
         );
         $this->assertSame('Bearer ADM', $r[0]['auth']);
         $this->assertSame('Bearer ADM', $r[1]['auth']);
+        $this->assertSame('deploy', $r[1]['body']['scope'], 'the CLI issues a deploy-scope token for its own steps');
         $this->assertSame('Bearer ssdb_pt_fresh', $r[2]['auth']);
         $this->assertSame('Bearer ssdb_pt_fresh', $r[3]['auth']);
         $this->assertNull($r[2]['admin']);
@@ -131,11 +132,12 @@ PHP);
     public function test_an_existing_token_is_never_replaced_automatically(): void
     {
         [$out, $err, $code] = $this->php(<<<'PHP'
-resolveGatewayPlatformToken(['gateway_url' => $url, 'platform_id' => 'haspt', 'admin_token' => 'ADM', 'platform_token' => null], false);
+resolveGatewayDeployToken(['gateway_url' => $url, 'platform_id' => 'haspt', 'admin_token' => 'ADM', 'deploy_token' => null], false);
 PHP);
         $this->assertSame(1, $code);
         $this->assertStringContainsString('--rotate', $err);
-        $this->assertStringContainsString('DB_GATEWAY_PLATFORM_TOKEN', $err);
+        $this->assertStringContainsString('DB_GATEWAY_DEPLOY_TOKEN', $err);
+        $this->assertStringContainsString('--scope=deploy', $err);
         $this->assertSame(['/admin/platform-token'], array_column($this->requests(), 'path'), 'no rotate request may be made');
     }
 
@@ -150,12 +152,22 @@ PHP);
     public function test_quiet_never_issues_a_token_it_would_have_to_discard(): void
     {
         [$out, $err, $code] = $this->php(<<<'PHP'
-resolveGatewayPlatformToken(['gateway_url' => $url, 'platform_id' => 'newplat', 'admin_token' => 'ADM', 'platform_token' => null], true);
+resolveGatewayDeployToken(['gateway_url' => $url, 'platform_id' => 'newplat', 'admin_token' => 'ADM', 'deploy_token' => null], true);
 PHP);
         $this->assertSame(1, $code);
         $this->assertSame('', $out);
-        $this->assertStringContainsString('gateway:provision-token --quiet', $err);
+        $this->assertStringContainsString('gateway:provision-token --scope=deploy --quiet', $err);
         $this->assertSame([], $this->requests(), 'nothing may be issued when the token would be lost');
+    }
+
+    public function test_provision_token_sends_the_requested_scope(): void
+    {
+        [, $err, $code] = $this->php('stepProvisionPlatformToken($url, "newplat", "ADM", true);'
+            . 'stepProvisionPlatformToken($url, "newplat", "ADM", true, false, "deploy");');
+        $this->assertSame(0, $code, $err);
+        $r = $this->requests();
+        $this->assertSame('runtime', $r[0]['body']['scope']);
+        $this->assertSame('deploy', $r[1]['body']['scope']);
     }
 
     public function test_quiet_provision_prints_only_the_token(): void

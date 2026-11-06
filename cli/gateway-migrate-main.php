@@ -14,7 +14,8 @@
  *   DB_GATEWAY_PLATFORM      - Platform identifier (legacy name PLATFORM_ID also accepted)
  *   DB_GATEWAY_SCHEMA_NAME   - Main schema name, a descriptive name like "main" (legacy name MAIN_SCHEMA_NAME also accepted)
  *   DATABASE_ID              - Database to migrate (default: main)
- *   DB_GATEWAY_PLATFORM_TOKEN - Platform token (required by gateway v4.1.0+; auto-provisioned if absent and DB_GATEWAY_ADMIN_TOKEN is set)
+ *   DB_GATEWAY_DEPLOY_TOKEN    - Deploy token supplied by the deploy manager in the process environment (or DB_GATEWAY_DEPLOY_TOKEN_FILE); never read from .env.
+ *                                An admin token can issue one when the platform has none yet.
  *
  * Options:
  *   --retry=<n>              Number of retry attempts (default: 3)
@@ -63,7 +64,7 @@ if (!$options['quiet']) {
 $archive = buildGatewayArchive('main', $env['platform_id'], 'migrate_main', $options['quiet']);
 
 // The platform token authenticates the upload and the migration (resolved first).
-$platformToken = resolveGatewayPlatformToken($env, $options['quiet']);
+$platformToken = resolveGatewayDeployToken($env, $options['quiet']);
 
 // Step 1: Upload main schema
 if (!$options['quiet']) echo "Step 1/2: ";

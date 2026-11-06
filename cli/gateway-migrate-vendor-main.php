@@ -133,7 +133,7 @@ if (!$options['quiet']) {
 $archive = buildGatewayArchive('main', $env['platform_id'], 'migrate_vendor_main', $options['quiet'], $mergeTargets);
 
 // The platform token authenticates the upload and the migration (resolved first).
-$platformToken = resolveGatewayPlatformToken($env, $options['quiet']);
+$platformToken = resolveGatewayDeployToken($env, $options['quiet']);
 
 // Step 1: Upload the merged schema under the SAME schema name as migrate-main.
 if (!$options['quiet']) echo "Step 1/2: ";

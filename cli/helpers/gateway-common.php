@@ -194,7 +194,7 @@ function loadCrossDbLinkAuth(): ?array
  * @param bool   $requireSchema Whether a schema name (SCHEMA_NAME / MAIN_SCHEMA_NAME /
  *                              TENANT_SCHEMA_NAME) is required. Set false for commands
  *                              that do not target a specific schema (e.g. gateway:provision-token).
- * @return array{gateway_url: string, platform_id: string, schema_name: ?string, main_schema_name: ?string, tenant_schema_name: ?string, database_id: string, admin_token: ?string, platform_token: ?string, cross_db_link: array|null}
+ * @return array{gateway_url: string, platform_id: string, schema_name: ?string, main_schema_name: ?string, tenant_schema_name: ?string, database_id: string, admin_token: ?string, platform_token: ?string, deploy_token: ?string, cross_db_link: array|null}
  */
 function loadGatewayEnv(array $options, bool $requireDb = true, bool $requireSchema = true): array
 {
@@ -216,6 +216,10 @@ function loadGatewayEnv(array $options, bool $requireDb = true, bool $requireSch
     // Platform token: used for platform-scoped operations (database create, migrate, migrate-all).
     // Provisioned via POST /admin/platform-token. Store as DB_GATEWAY_PLATFORM_TOKEN in .env.
     $platformToken = cliEnv('DB_GATEWAY_PLATFORM_TOKEN');
+
+    // Deploy token: held only by the deploy manager. Read from the PROCESS environment or a
+    // one-shot file the deploy script passes (and deletes) -- never from the application's .env.
+    $deployToken = gatewayDeployTokenFromProcess();
 
     // Main schema: MAIN_SCHEMA_NAME / DB_GATEWAY_SCHEMA_NAME (the application's main schema).
     // No fallback to SCHEMA_NAME: it may be a version-tagged name that is not the main schema.
@@ -260,50 +264,92 @@ function loadGatewayEnv(array $options, bool $requireDb = true, bool $requireSch
         'database_id'        => $databaseId,
         'admin_token'        => $adminToken,
         'platform_token'     => $platformToken,
+        'deploy_token'       => $deployToken,
         'cross_db_link'      => loadCrossDbLinkAuth(),
     ];
 }
 
 /**
- * Resolve the platform token to use for platform-scoped gateway operations
- * (schema upload, database create, migrate, migrate-all, job status).
+ * The deploy token, from the PROCESS environment only:
+ *   1. DB_GATEWAY_DEPLOY_TOKEN
+ *   2. DB_GATEWAY_DEPLOY_TOKEN_FILE -- a one-shot file the deploy script writes (mode 600),
+ *      passes, and deletes after the run. The CLI only reads it.
+ * It is deliberately NOT read through the application's `.env` / secrets chain: the deploy
+ * token must never sit on an application host. A `.env` that carries the key is reported (by
+ * name) and ignored.
+ */
+function gatewayDeployTokenFromProcess(): ?string
+{
+    $direct = getenv('DB_GATEWAY_DEPLOY_TOKEN');
+    if (is_string($direct) && trim($direct) !== '') {
+        return trim($direct);
+    }
+    $file = getenv('DB_GATEWAY_DEPLOY_TOKEN_FILE');
+    if (is_string($file) && $file !== '') {
+        if (!is_file($file) || !is_readable($file)) {
+            fwrite(STDERR, "ERROR: DB_GATEWAY_DEPLOY_TOKEN_FILE is set but the file cannot be read.\n");
+            exit(1);
+        }
+        $perms = @fileperms($file);
+        if ($perms !== false && ($perms & 0077) !== 0) {
+            fwrite(STDERR, "ERROR: DB_GATEWAY_DEPLOY_TOKEN_FILE must not be readable by group or others (use mode 600).\n");
+            exit(1);
+        }
+        $value = trim((string) file_get_contents($file));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+    foreach ([getcwd() . '/.env'] as $dotenv) {
+        if (is_file($dotenv) && is_readable($dotenv)
+            && preg_match('/^\s*(?:export\s+)?DB_GATEWAY_DEPLOY_TOKEN\s*=/m', (string) file_get_contents($dotenv))) {
+            fwrite(STDERR, "WARNING: DB_GATEWAY_DEPLOY_TOKEN is set in .env; it is ignored there. The deploy token must come from the deploy manager's process environment, and must not be stored on the application host.\n");
+        }
+    }
+    return null;
+}
+
+/**
+ * Resolve the DEPLOY token used for every step the CLI performs (registration, schema
+ * upload, database create, migrate, migrate-all, listings).
  *
  * Resolution order:
- *   1. $env['platform_token'] (DB_GATEWAY_PLATFORM_TOKEN) — explicit, preferred
- *   2. Provision one with the admin token, when the platform has none yet. The
- *      gateway shows a token only once, so this is refused with --quiet (the
- *      token would be lost): run `php stone gateway:provision-token --quiet`
- *      and store its output instead.
- *   3. null — when neither token is available (an older gateway may accept the
- *      request without one; caller decides)
+ *   1. DB_GATEWAY_DEPLOY_TOKEN (or DB_GATEWAY_DEPLOY_TOKEN_FILE) from the process environment.
+ *   2. Issue a deploy token with the admin token, when the platform has none yet. The gateway
+ *      shows a token only once, so this is refused with --quiet (the token would be lost): run
+ *      `php stone gateway:provision-token --scope=deploy --quiet` and store its output instead.
+ *   3. Otherwise: a clear error. The CLI never falls back to the application's runtime token.
  *
- * A token that already exists on the gateway is never replaced here; replacing
- * it is the explicit `gateway:provision-token --rotate`.
+ * A token that already exists on the gateway is never replaced here; replacing it is the
+ * explicit `gateway:provision-token --scope=deploy --rotate`.
  *
  * @param array $env    Result of loadGatewayEnv().
  * @param bool  $quiet  Suppress informational output.
- * @return string|null  Platform token, or null if unavailable.
+ * @return string       Deploy token. Exits with code 1 when none is available.
  */
-function resolveGatewayPlatformToken(array $env, bool $quiet = false): ?string
+function resolveGatewayDeployToken(array $env, bool $quiet = false): string
 {
-    if (!empty($env['platform_token'])) {
-        return $env['platform_token'];
+    if (!empty($env['deploy_token'])) {
+        return $env['deploy_token'];
     }
 
     if (empty($env['admin_token'])) {
-        return null;
-    }
-
-    if ($quiet) {
-        fwrite(STDERR, "ERROR: DB_GATEWAY_PLATFORM_TOKEN is not set and --quiet would discard a newly issued token.\n");
-        fwrite(STDERR, "  Issue it once with: php stone gateway:provision-token --quiet   (prints only the token)\n");
-        fwrite(STDERR, "  and store the output as DB_GATEWAY_PLATFORM_TOKEN in your secret store.\n");
+        fwrite(STDERR, "ERROR: DB_GATEWAY_DEPLOY_TOKEN is not set.\n");
+        fwrite(STDERR, "  The deploy manager supplies it in the process environment for the run (or as DB_GATEWAY_DEPLOY_TOKEN_FILE).\n");
+        fwrite(STDERR, "  It is not read from .env, and the application's runtime token (DB_GATEWAY_PLATFORM_TOKEN) is not accepted for this.\n");
         exit(1);
     }
 
-    fwrite(STDERR, "NOTE: DB_GATEWAY_PLATFORM_TOKEN not set — issuing a platform token with the admin token.\n\n");
+    if ($quiet) {
+        fwrite(STDERR, "ERROR: DB_GATEWAY_DEPLOY_TOKEN is not set and --quiet would discard a newly issued token.\n");
+        fwrite(STDERR, "  Issue it once with: php stone gateway:provision-token --scope=deploy --quiet   (prints only the token)\n");
+        fwrite(STDERR, "  and store the output in the deploy manager's secret store.\n");
+        exit(1);
+    }
 
-    return stepProvisionPlatformToken($env['gateway_url'], $env['platform_id'], $env['admin_token'], $quiet);
+    fwrite(STDERR, "NOTE: DB_GATEWAY_DEPLOY_TOKEN not set -- issuing a deploy token with the admin token.\n\n");
+
+    return stepProvisionPlatformToken($env['gateway_url'], $env['platform_id'], $env['admin_token'], $quiet, false, 'deploy');
 }
 
 /**
@@ -323,21 +369,27 @@ function resolveGatewayPlatformToken(array $env, bool $quiet = false): ?string
  * @param string|null $adminToken  Admin bearer token.
  * @param bool        $quiet       Suppress informational output.
  * @param bool        $rotate      Replace an existing token (the old one stops working).
- * @return string                  The platform token. Exits with code 1 on failure.
+ * @param string      $scope       'runtime' (the application's token) or 'deploy' (the deploy manager's token).
+ * @return string                  The token. Exits with code 1 on failure.
  */
-function stepProvisionPlatformToken(string $gatewayUrl, string $platformId, ?string $adminToken, bool $quiet = false, bool $rotate = false): string
+function stepProvisionPlatformToken(string $gatewayUrl, string $platformId, ?string $adminToken, bool $quiet = false, bool $rotate = false, string $scope = 'runtime'): string
 {
     if (!$quiet) {
-        echo ($rotate ? "Rotating" : "Issuing") . " platform token for '{$platformId}'...\n";
+        echo ($rotate ? "Rotating" : "Issuing") . " {$scope} token for '{$platformId}'...\n";
     }
 
     if (!$adminToken) {
-        fwrite(STDERR, "ERROR: DB_GATEWAY_ADMIN_TOKEN is required to issue a platform token.\n");
+        fwrite(STDERR, "ERROR: DB_GATEWAY_ADMIN_TOKEN is required to issue a {$scope} token.\n");
         fwrite(STDERR, "  Set DB_GATEWAY_ADMIN_TOKEN in your .env or environment.\n");
         exit(1);
     }
 
-    $payload = json_encode(['platform' => $platformId]);
+    if (!in_array($scope, ['runtime', 'deploy'], true)) {
+        fwrite(STDERR, "ERROR: --scope must be 'runtime' or 'deploy'.\n");
+        exit(1);
+    }
+    $envName = $scope === 'deploy' ? 'DB_GATEWAY_DEPLOY_TOKEN' : 'DB_GATEWAY_PLATFORM_TOKEN';
+    $payload = json_encode(['platform' => $platformId, 'scope' => $scope]);
     $path = $rotate ? '/admin/platform-token/rotate' : '/admin/platform-token';
     $resp = gatewayHttpRequest('POST', "{$gatewayUrl}{$path}", [
         'Content-Type: application/json',
@@ -350,17 +402,17 @@ function stepProvisionPlatformToken(string $gatewayUrl, string $platformId, ?str
         $token = is_array($response) ? ($response['token'] ?? null) : null;
         if (!$token) {
             if (is_array($response) && !empty($response['token_exists'])) {
-                fwrite(STDERR, "ERROR: platform '{$platformId}' already has a token on the gateway, and a stored token cannot be read back.\n");
-                fwrite(STDERR, "  Set DB_GATEWAY_PLATFORM_TOKEN to the existing token, or replace it (the old one stops working):\n");
-                fwrite(STDERR, "    php stone gateway:provision-token --rotate\n");
+                fwrite(STDERR, "ERROR: platform '{$platformId}' already has a {$scope} token on the gateway, and a stored token cannot be read back.\n");
+                fwrite(STDERR, "  Use the existing token ({$envName}), or replace it (the old one stops working):\n");
+                fwrite(STDERR, "    php stone gateway:provision-token --scope={$scope} --rotate\n");
                 exit(1);
             }
             fwrite(STDERR, "ERROR: Gateway returned success but no 'token' field in response.\n");
             exit(1);
         }
         if (!$quiet) {
-            echo "  Platform token issued. It is shown only once; store it now.\n";
-            echo "  Add to your secret store: DB_GATEWAY_PLATFORM_TOKEN={$token}\n";
+            echo "  " . ucfirst($scope) . " token issued. It is shown only once; store it now.\n";
+            echo "  Add to your secret store: {$envName}={$token}\n";
             echo "  (This output contains the token. Do not run this where output is logged; with --quiet, gateway:provision-token prints only the token.)\n\n";
         }
         return $token;
@@ -372,7 +424,7 @@ function stepProvisionPlatformToken(string $gatewayUrl, string $platformId, ?str
         exit(1);
     }
 
-    fwrite(STDERR, "ERROR: Failed to issue platform token (HTTP {$resp['code']})\n");
+    fwrite(STDERR, "ERROR: Failed to issue {$scope} token (HTTP {$resp['code']})\n");
     if ($resp['body']) {
         fwrite(STDERR, "  " . gw_safe_body($resp['body']) . "\n");
     }
@@ -532,12 +584,12 @@ function buildGatewayArchive(string $target, string $platformId, string $suffix,
 }
 
 /**
- * Step: Register platform (idempotent). Credential: the admin token when given,
- * otherwise the platform token.
+ * Step: Register platform (idempotent). Credential: the admin token when given
+ * (first registration needs the operator's approval), otherwise the deploy token.
  *
  * @return void Exits on failure.
  */
-function stepRegisterPlatform(string $gatewayUrl, string $platformId, bool $quiet, ?string $adminToken = null, ?string $platformToken = null): void
+function stepRegisterPlatform(string $gatewayUrl, string $platformId, bool $quiet, ?string $adminToken = null, ?string $deployToken = null): void
 {
     if (!$quiet) {
         echo "Registering platform...\n";
@@ -545,8 +597,8 @@ function stepRegisterPlatform(string $gatewayUrl, string $platformId, bool $quie
 
     $payload = json_encode(['platform' => $platformId]);
     // A new platform has no token yet, so registration uses the admin token;
-    // re-registering an existing platform can use its own token.
-    $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/platform/register", gatewayJsonHeaders($payload, $adminToken ?: $platformToken), $payload, 30);
+    // re-registering an existing platform uses its deploy token.
+    $resp = gatewayHttpRequest('POST', "{$gatewayUrl}/platform/register", gatewayJsonHeaders($payload, $adminToken ?: $deployToken), $payload, 30);
 
     if (in_array($resp['code'], [200, 201, 409])) {
         if (!$quiet) {
@@ -560,7 +612,7 @@ function stepRegisterPlatform(string $gatewayUrl, string $platformId, bool $quie
 }
 
 /**
- * Step: Upload schema archive (authenticated with the platform token).
+ * Step: Upload schema archive (authenticated with the deploy token).
  *
  * @return void Exits on failure.
  */
@@ -610,14 +662,14 @@ function stepUploadSchema(string $gatewayUrl, string $platformId, string $schema
 /**
  * Step: Create database from stored schema (with retry).
  *
- * Calls POST /admin/database/create, authenticated with the platform token
- * (not the admin token). Use resolveGatewayPlatformToken() to obtain the token.
+ * Calls POST /admin/database/create, authenticated with the deploy token
+ * (not the admin token). Use resolveGatewayDeployToken() to obtain the token.
  *
  * @param string      $gatewayUrl
  * @param string      $platformId
  * @param string      $schemaName
  * @param string|null $uuid          Tenant UUID to create; null for the main (platform) database.
- * @param string|null $platformToken Platform bearer token (from DB_GATEWAY_PLATFORM_TOKEN).
+ * @param string|null $platformToken Deploy bearer token (from DB_GATEWAY_DEPLOY_TOKEN).
  * @param int         $retryCount
  * @param int         $retryDelay
  * @param bool        $quiet
@@ -695,15 +747,15 @@ function stepCreateDatabase(string $gatewayUrl, string $platformId, string $sche
 /**
  * Step: Migrate database using stored schema (with retry).
  *
- * Calls POST /v2/migrate, authenticated with the platform token. With force/allow the
+ * Calls POST /v2/migrate, authenticated with the deploy token. With force/allow the
  * admin token is also sent in X-Gateway-Admin-Token.
- * Use resolveGatewayPlatformToken() to obtain the token.
+ * Use resolveGatewayDeployToken() to obtain the token.
  *
  * @param string      $gatewayUrl
  * @param string      $platformId
  * @param string      $schemaName
  * @param string|null $uuid             Tenant UUID to migrate; null for the main (platform) database.
- * @param string|null $platformToken    Platform bearer token (from DB_GATEWAY_PLATFORM_TOKEN).
+ * @param string|null $platformToken    Deploy bearer token (from DB_GATEWAY_DEPLOY_TOKEN).
  * @param bool        $force
  * @param int         $retryCount
  * @param int         $retryDelay
@@ -827,12 +879,12 @@ function stepMigrateDatabase(string $gatewayUrl, string $platformId, string $sch
  * functions_updated at the top level.
  *
  * Calls POST /v2/migrate-all which requires a platform token (not admin token)
- * Use resolveGatewayPlatformToken() to obtain the token.
+ * Use resolveGatewayDeployToken() to obtain the token.
  *
  * @param string      $gatewayUrl
  * @param string      $platformId
  * @param string      $schemaName
- * @param string|null $platformToken    Platform bearer token (from DB_GATEWAY_PLATFORM_TOKEN).
+ * @param string|null $platformToken    Deploy bearer token (from DB_GATEWAY_DEPLOY_TOKEN).
  * @param bool        $force
  * @param int         $retryCount       Retry attempts for the INITIATE call only.
  * @param int         $retryDelay       Delay between INITIATE retries (seconds).
