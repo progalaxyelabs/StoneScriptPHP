@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "df4df00d769813b4cf0fcf6b5c60a56d",
+    "content-hash": "b5566be2f651ba3cf2426b45a7f672cf",
     "packages": [
         {
             "name": "firebase/php-jwt",
@@ -211,16 +211,16 @@
         },
         {
             "name": "progalaxyelabs/stonescriptdb-gateway-client",
-            "version": "4.0.0",
+            "version": "4.0.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client.git",
-                "reference": "0607d662ed5f2d632ef02556d1fc82c9e6b9d09a"
+                "reference": "57f037ecf439397a22ed46b34ed65567d33a0b67"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/progalaxyelabs/stonescriptdb-gateway-client/zipball/0607d662ed5f2d632ef02556d1fc82c9e6b9d09a",
-                "reference": "0607d662ed5f2d632ef02556d1fc82c9e6b9d09a",
+                "url": "https://api.github.com/repos/progalaxyelabs/stonescriptdb-gateway-client/zipball/57f037ecf439397a22ed46b34ed65567d33a0b67",
+                "reference": "57f037ecf439397a22ed46b34ed65567d33a0b67",
                 "shasum": ""
             },
             "require": {
@@ -260,9 +260,9 @@
             ],
             "support": {
                 "issues": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/issues",
-                "source": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/tree/4.0.0"
+                "source": "https://github.com/progalaxyelabs/stonescriptdb-gateway-client/tree/v4.0.1"
             },
-            "time": "2026-10-21T00:00:00+00:00"
+            "time": "2026-10-25T18:16:23+00:00"
         },
         {
             "name": "symfony/polyfill-ctype",
@@ -4269,7 +4269,7 @@
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=8.5.12",
+        "php": ">=8.5",
         "ext-json": "*",
         "ext-curl": "*"
     },

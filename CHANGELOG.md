@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.1.1]
+
+### Fixed
+- `composer.lock` pinned `progalaxyelabs/stonescriptdb-gateway-client` at 4.0.0 although `composer.json` has required `^4.0.1` since 14.0.1, so `composer install` failed ("lock file ... does not satisfy your constraint") and a checkout using the old vendor tree failed `EnvBrokenEnvFileTest` (3 tests): 4.0.0 emits a `curl_close()` `E_DEPRECATED` on PHP 8.5 into the otherwise-JSON boot output. Lock refreshed to 4.0.1 (and its platform floor to `>=8.5`, matching `composer.json`).
+- Result: the full `Unit` suite is green in a clean `php:8.5.12-cli` container after `composer install` (1695 tests, 0 errors, 0 failures; 41 tests skip with explicit reasons — they need a live PostgreSQL/gateway or `tsc`, and belong to the E2E/integration runs).
+
 ## [14.1.0]
 
 ### Added
