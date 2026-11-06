@@ -113,7 +113,9 @@ class Database
             $env->DB_GATEWAY_PLATFORM,
             $env->DB_GATEWAY_SCHEMA_NAME,
             $env->DB_GATEWAY_TENANT_SCHEMA_NAME,
-            $env->DB_GATEWAY_UUID ?? null
+            $env->DB_GATEWAY_UUID ?? null,
+            null,
+            $env->DB_GATEWAY_PLATFORM_TOKEN ?: null
         );
 
         log_debug('Database: Gateway client initialized');

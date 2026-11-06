@@ -80,7 +80,7 @@ final class AuditRecorder
             }
 
             $env = Env::get_instance();
-            $client = new GatewayClient($env->DB_GATEWAY_URL, $env->DB_GATEWAY_PLATFORM, 'audit');
+            $client = new GatewayClient($env->DB_GATEWAY_URL, $env->DB_GATEWAY_PLATFORM, 'audit', null, null, null, $env->DB_GATEWAY_PLATFORM_TOKEN ?: null);
             $client->callFunction('audit_append', $params);
         } catch (Throwable $e) {
             // No-fake-success: log loudly, never throw. See class docblock.

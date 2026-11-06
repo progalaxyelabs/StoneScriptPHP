@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.2.0]
+
+### Added
+- Gateway requests carry the platform token: `DB_GATEWAY_PLATFORM_TOKEN` is passed to the gateway client for all calls (database transport, request log writer, audit recorder). No app code change needed beyond the version bump and the variable being present.
+- `php stone env:check` warns when `DB_GATEWAY_PLATFORM_TOKEN` is missing in gateway mode.
+
+### Changed
+- Requires `progalaxyelabs/stonescriptdb-gateway-client` `^4.1.0`.
+
 ## [14.1.1]
 
 ### Fixed

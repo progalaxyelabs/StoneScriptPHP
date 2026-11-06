@@ -48,6 +48,7 @@ class RequestLogger
     private static string $gatewayUrl      = '';
     private static string $gatewayPlatform = '';
     private static string $gatewaySchema   = 'main';
+    private static string $gatewayToken    = '';
 
     public const DEFAULT_SKIP_PATHS        = ['/health', '/healthz'];
     public const DEFAULT_CONNECT_TIMEOUT_S = 1;
@@ -137,6 +138,7 @@ class RequestLogger
         self::$gatewayUrl      = (string)($_ENV['DB_GATEWAY_URL']           ?? $_SERVER['DB_GATEWAY_URL']           ?? '');
         self::$gatewayPlatform = (string)($_ENV['DB_GATEWAY_PLATFORM']       ?? $_SERVER['DB_GATEWAY_PLATFORM']       ?? '');
         self::$gatewaySchema   = (string)($_ENV['DB_GATEWAY_SCHEMA_NAME']    ?? $_SERVER['DB_GATEWAY_SCHEMA_NAME']    ?? 'main');
+        self::$gatewayToken    = (string)($_ENV['DB_GATEWAY_PLATFORM_TOKEN'] ?? $_SERVER['DB_GATEWAY_PLATFORM_TOKEN'] ?? '');
 
         if (isset($loggingConfig['path_scrub_patterns']) && is_array($loggingConfig['path_scrub_patterns'])) {
             PathScrubber::setPatterns($loggingConfig['path_scrub_patterns']);
@@ -398,6 +400,7 @@ class RequestLogger
         self::$gatewayUrl    = '';
         self::$gatewayPlatform = '';
         self::$gatewaySchema = 'main';
+        self::$gatewayToken  = '';
         self::$writeAdapter  = null;
         self::$failureSink   = null;
         PathScrubber::reset();
@@ -513,7 +516,9 @@ class RequestLogger
             self::$gatewayPlatform,
             self::$gatewaySchema,
             null,   // no tenant schema for main-schema writes
-            null    // no UUID override
+            null,   // no UUID override
+            null,   // no admin token
+            self::$gatewayToken !== '' ? self::$gatewayToken : null
         );
 
         // §11 — bounded: a slow gateway must never hold this worker for the client default (30 s / 10 s)

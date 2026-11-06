@@ -52,6 +52,9 @@ $tenant = BootCheck::tenantSchema($env);
 if ($tenant !== null) {
     $warnings[] = $tenant . " (only needed if the app routes tenants; Application::run() enforces it when tenancy is configured)";
 }
+if ($env->DB_MODE === 'gateway' && trim((string) $env->DB_GATEWAY_PLATFORM_TOKEN) === '') {
+    $warnings[] = "DB_GATEWAY_PLATFORM_TOKEN is not set - gateway requests will be sent without a platform token and may be refused (HTTP 401) by a gateway that requires one.";
+}
 try {
     AuthMiddlewareRegistrar::forMode($env->AUTH_MODE, $env);
 } catch (\RuntimeException $e) {
