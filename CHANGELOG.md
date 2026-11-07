@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.4.1]
+
+### Fixed
+- The built-in Google sign-in redirect sends `prompt=select_account` only. Google rejected the request when `approval_prompt` was also present ("Conflict params"); a test now checks the authorize URL.
+- `stone deps:check` / `post-install` constraint matching follows Composer for a bare two-part version: `1.2` means exactly `1.2.0.0`, not the range `1.2.*` (use `1.2.*` for a range). A fourth version segment is now compared instead of being dropped, including for `>=`, `<` and `~`.
+
 ## [14.4.0]
 
 See `UPGRADING-14.4.md`.

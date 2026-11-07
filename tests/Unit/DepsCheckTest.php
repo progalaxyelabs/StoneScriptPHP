@@ -201,6 +201,26 @@ final class DepsCheckTest extends TestCase
         return array_combine(\SSP_INSTALL_TIME_HOOKS, array_map(static fn (string $h): array => [$h], \SSP_INSTALL_TIME_HOOKS));
     }
 
+    public function test_two_part_constraint_is_exact_and_fourth_segment_counts(): void
+    {
+        // Composer: "1.2" == 1.2.0.0 exactly; it is NOT the range 1.2.*.
+        $this->assertTrue(ssp_version_satisfies('1.2.0', '1.2'));
+        $this->assertTrue(ssp_version_satisfies('1.2.0.0', '1.2'));
+        $this->assertFalse(ssp_version_satisfies('1.2.5', '1.2'));
+        $this->assertFalse(ssp_version_satisfies('1.2.0.1', '1.2'));
+        $this->assertTrue(ssp_version_satisfies('1.2.5', '1.2.*'));
+        $this->assertTrue(ssp_version_satisfies('1.2.3', '1.2.3'));
+        // a fourth segment is significant, not dropped
+        $this->assertFalse(ssp_version_satisfies('1.2.3.4', '1.2.3'));
+        $this->assertTrue(ssp_version_satisfies('1.2.3.4', '1.2.3.4'));
+        $this->assertFalse(ssp_version_satisfies('1.2.3.5', '1.2.3.4'));
+        $this->assertTrue(ssp_version_satisfies('1.2.3.5', '>=1.2.3.4'));
+        $this->assertFalse(ssp_version_satisfies('1.2.3.3', '>=1.2.3.4'));
+        $this->assertTrue(ssp_version_satisfies('1.2.3.9', '~1.2.3.4'));
+        $this->assertFalse(ssp_version_satisfies('1.2.4.0', '~1.2.3.4'));
+        $this->assertTrue(ssp_version_satisfies('1.9.0', '^1.2'));
+    }
+
     public function test_pre_release_follows_composer_semantics(): void
     {
         // Composer: ^2.0 and >=2.0 include 2.0.0-beta; an exact 2.0.0, >2.0.0 and ^2.0.0-rc1 do not (beta < rc1 < 2.0.0).

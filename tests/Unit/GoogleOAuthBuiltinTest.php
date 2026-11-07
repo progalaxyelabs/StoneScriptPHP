@@ -185,6 +185,9 @@ class GoogleOAuthBuiltinTest extends TestCase
         $this->assertSame('code', $params['response_type']);
         $this->assertStringContainsString('email', $params['scope']);
         $this->assertNotEmpty($params['state']);
+        // Google rejects a request carrying both prompt and approval_prompt
+        $this->assertSame('select_account', $params['prompt'] ?? null);
+        $this->assertArrayNotHasKey('approval_prompt', $params);
 
         // state must be a verifiable signed token, not an opaque/random string
         $jwtHandler = new RsaJwtHandler();
