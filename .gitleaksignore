@@ -1,4 +1,4 @@
-# Verified false positives (see docs/BUILD-2026-10-26-debrand-gate-deterministic.md). Fingerprint = [commit:]file:rule:line.
+# Verified false positives. Fingerprint = [commit:]file:rule:line.
 0762967c4b9c53a6c8ea6797a2d59c612f5a221c:tests/Unit/FailureTextTest.php:stripe-access-token:75
 0762967c4b9c53a6c8ea6797a2d59c612f5a221c:tests/Unit/ServerSideErrorTrackingTest.php:generic-api-key:285
 1b3413dd855bb02ff987a948fbd01fa58d5d6f6f:examples/middleware/README.md:curl-auth-header:51
