@@ -146,7 +146,7 @@ final class TenancyFleetCommandsTest extends TestCase
         $this->assertSame(1, $status);
         $this->assertStringContainsString("FAIL " . self::B, $this->err);
         $this->assertStringContainsString("role 'ghost' is held by 3 user(s) but has no privileges", $this->err);
-        $this->assertStringContainsString('Do not set TENANCY_V2=true', $this->err);
+        $this->assertStringContainsString('Do not set LEGACY_TENANCY=false', $this->err);
         $this->assertStringNotContainsString(self::A, $this->err, 'the healthy tenant is not reported');
     }
 

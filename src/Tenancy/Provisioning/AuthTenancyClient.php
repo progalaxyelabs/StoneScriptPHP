@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Tenancy\Provisioning;
 
 /**
- * The ONLY place that speaks the auth service's v2 tenancy HTTP contract. If the auth side differs
+ * The ONLY place that speaks the auth service's tenancy HTTP contract. If the auth side differs
  * in a detail (a path, a header name, a field name), this is the single class to align. The shapes
- * below are pinned by tests/Unit/Tenancy/AuthV2ClientContractTest.php.
+ * below are pinned by tests/Unit/Tenancy/AuthTenancyClientContractTest.php.
  *
- * Every route is under /api/internal/v2. Two kinds of caller:
+ * Every route is under /api/internal. Two kinds of caller:
  *
  *   OPERATOR (header X-Operator-Token)
  *     POST /operator/platforms                {name, slug, idempotency_key}
@@ -48,12 +48,12 @@ namespace StoneScriptPHP\Tenancy\Provisioning;
  * never appear in an exception message or a log line. A response may carry its fields at the top
  * level or under "data".
  */
-final class AuthV2Client
+final class AuthTenancyClient
 {
     /** Longest platform slug: {slug}_tenant_{36-char uuid with underscores} must fit 63 bytes. */
     public const MAX_SLUG_LENGTH = 19;
 
-    private const BASE = '/api/internal/v2';
+    private const BASE = '/api/internal';
 
     /** @var callable(string,string,list<string>,?string):array{0:int,1:string} */
     private $transport;
@@ -236,7 +236,7 @@ final class AuthV2Client
     private function credentialHeaders(): array
     {
         if ($this->clientId === null || $this->clientId === '' || $this->clientSecret === null || $this->clientSecret === '') {
-            throw new ProvisioningException('auth_credential', 'Platform credential is not configured (AUTH_V2_CLIENT_ID / AUTH_V2_CLIENT_SECRET); run platform:register');
+            throw new ProvisioningException('auth_credential', 'Platform credential is not configured (PLATFORM_CLIENT_ID / PLATFORM_CLIENT_SECRET); run platform:register');
         }
         return ['X-Platform-Client-Id: ' . $this->clientId, 'X-Platform-Client-Secret: ' . $this->clientSecret];
     }

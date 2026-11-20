@@ -65,7 +65,7 @@ class MembershipClient extends AuthServiceClient
 
     // updateMembership(), suspendMembership() and reactivateMembership() REMOVED in 15.0.0: they called
     // PUT /memberships/{id}, which the auth service does not have. A membership's status changes through
-    // ExternalAuthServiceClient::setMembershipStatus() (14.x flow) or the tenancy v2 authority.
+    // ExternalAuthServiceClient::setMembershipStatus() (legacy 14.x flow) or the MembershipAuthority (current tenancy flow).
 
     /**
      * Create a new membership

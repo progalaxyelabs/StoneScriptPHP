@@ -51,13 +51,13 @@ final class SecretsFileTest extends TestCase
         $link = $this->dir . '/.env';
         symlink($real, $link);
 
-        (new SecretsFile($link))->upsert(['AUTH_V2_CLIENT_ID' => 'client-1']);
+        (new SecretsFile($link))->upsert(['PLATFORM_CLIENT_ID' => 'client-1']);
 
         $this->assertTrue(is_link($link), 'the link is still a link');
         $this->assertSame($real, realpath($link));
-        $this->assertSame("KEEP=1\nAUTH_V2_CLIENT_ID=client-1\n", (string) file_get_contents($real));
+        $this->assertSame("KEEP=1\nPLATFORM_CLIENT_ID=client-1\n", (string) file_get_contents($real));
         $this->assertSame(0640, fileperms($real) & 0777);
-        $this->assertSame('client-1', (new SecretsFile($link))->get('AUTH_V2_CLIENT_ID'));
+        $this->assertSame('client-1', (new SecretsFile($link))->get('PLATFORM_CLIENT_ID'));
     }
 
     public function test_a_dangling_symlink_is_refused_not_replaced(): void

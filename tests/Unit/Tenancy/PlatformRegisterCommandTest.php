@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Tenancy\Platform\PlatformRegisterCommand;
 use StoneScriptPHP\Tenancy\Platform\PlatformRowStore;
 use StoneScriptPHP\Tenancy\Platform\SecretsFile;
-use StoneScriptPHP\Tenancy\Provisioning\AuthV2Client;
+use StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient;
 
 /**
  * `php stone platform:register`: operator token sources, idempotent retry, write order, and that no
@@ -67,7 +67,7 @@ final class PlatformRegisterCommandTest extends TestCase
         return new PlatformRegisterCommand(
             function (string $t): void { $this->stdout .= $t; },
             function (string $t): void { $this->stderr .= $t; },
-            fn (string $url): AuthV2Client => new AuthV2Client($url, null, null, function (string $m, string $u, array $h, ?string $b) use ($response): array {
+            fn (string $url): AuthTenancyClient => new AuthTenancyClient($url, null, null, function (string $m, string $u, array $h, ?string $b) use ($response): array {
                 $this->requests[] = [$m, $u, $h, $b];
                 $this->order[] = 'auth';
                 return $response;
@@ -119,8 +119,8 @@ final class PlatformRegisterCommandTest extends TestCase
         $this->assertNoSecretsPrinted();
 
         $secrets = new SecretsFile($this->dir . '/project/.env');
-        $this->assertSame('client-7', $secrets->get('AUTH_V2_CLIENT_ID'));
-        $this->assertSame(self::CLIENT_SECRET, $secrets->get('AUTH_V2_CLIENT_SECRET'));
+        $this->assertSame('client-7', $secrets->get('PLATFORM_CLIENT_ID'));
+        $this->assertSame(self::CLIENT_SECRET, $secrets->get('PLATFORM_CLIENT_SECRET'));
         $this->assertNull($secrets->get('EXTERNAL_AUTH_CLIENT_SECRET'), 'the 14.x variable is never created by platform:register');
         $this->assertSame(self::PLATFORM_ID, $secrets->get('PLATFORM_UUID'));
         $this->assertNull($secrets->get('PLATFORM_ID'), 'PLATFORM_ID is the legacy slug variable and is never overwritten with the uuid');
@@ -136,7 +136,7 @@ final class PlatformRegisterCommandTest extends TestCase
 
         [$method, $url, $headers, $body] = $this->requests[0];
         $this->assertSame('POST', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/operator/platforms', $url);
+        $this->assertSame('https://auth.example.test/api/internal/operator/platforms', $url);
         $this->assertContains('X-Operator-Token: ' . self::OPERATOR_TOKEN, $headers);
         $this->assertSame(['name' => 'Acme Shop', 'slug' => 'acme', 'idempotency_key' => 'register:acme'], json_decode((string) $body, true));
         $this->assertStringNotContainsString(self::OPERATOR_TOKEN, (string) $body);
@@ -149,7 +149,7 @@ final class PlatformRegisterCommandTest extends TestCase
         $this->register($this->command());
 
         $this->assertSame(['auth', 'row'], $this->order);
-        $this->assertNotNull((new SecretsFile($this->dir . '/project/.env'))->get('AUTH_V2_CLIENT_SECRET'), 'the secret exists by the time the row is written');
+        $this->assertNotNull((new SecretsFile($this->dir . '/project/.env'))->get('PLATFORM_CLIENT_SECRET'), 'the secret exists by the time the row is written');
     }
 
     public function test_a_row_failure_keeps_the_saved_credential_and_a_retry_completes_without_a_new_secret(): void
@@ -162,7 +162,7 @@ final class PlatformRegisterCommandTest extends TestCase
         $this->assertSame(1, $first);
         $this->assertStringContainsString('credential was saved', $this->stderr);
         $this->assertNoSecretsPrinted();
-        $this->assertSame(self::CLIENT_SECRET, (new SecretsFile($this->dir . '/project/.env'))->get('AUTH_V2_CLIENT_SECRET'));
+        $this->assertSame(self::CLIENT_SECRET, (new SecretsFile($this->dir . '/project/.env'))->get('PLATFORM_CLIENT_SECRET'));
 
         // The retry: auth returns the same platform and, as promised, no second secret.
         $this->rowFailure = null;
@@ -170,7 +170,7 @@ final class PlatformRegisterCommandTest extends TestCase
         $retry = $this->register($this->command([200, json_encode(['platform_id' => self::PLATFORM_ID, 'client_id' => 'client-7'])]));
 
         $this->assertSame(0, $retry);
-        $this->assertSame(self::CLIENT_SECRET, (new SecretsFile($this->dir . '/project/.env'))->get('AUTH_V2_CLIENT_SECRET'), 'the stored secret is untouched');
+        $this->assertSame(self::CLIENT_SECRET, (new SecretsFile($this->dir . '/project/.env'))->get('PLATFORM_CLIENT_SECRET'), 'the stored secret is untouched');
         $this->assertCount(1, $this->rowWrites);
     }
 
@@ -189,14 +189,14 @@ final class PlatformRegisterCommandTest extends TestCase
     {
         $this->operatorFile();
         $env = $this->dir . '/project/.env';
-        file_put_contents($env, "# app\nAPP_NAME=shop\nEXTERNAL_AUTH_CLIENT_SECRET=live-14x-secret\nAUTH_V2_CLIENT_SECRET=old\nDB_X=1\n");
+        file_put_contents($env, "# app\nAPP_NAME=shop\nEXTERNAL_AUTH_CLIENT_SECRET=live-14x-secret\nPLATFORM_CLIENT_SECRET=old\nDB_X=1\n");
         chmod($env, 0640);
 
         $this->register($this->command());
 
         $content = (string) file_get_contents($env);
-        $this->assertStringContainsString("# app\nAPP_NAME=shop\nEXTERNAL_AUTH_CLIENT_SECRET=live-14x-secret\nAUTH_V2_CLIENT_SECRET=" . self::CLIENT_SECRET . "\nDB_X=1\n", $content);
-        $this->assertSame(1, substr_count($content, 'AUTH_V2_CLIENT_SECRET='));
+        $this->assertStringContainsString("# app\nAPP_NAME=shop\nEXTERNAL_AUTH_CLIENT_SECRET=live-14x-secret\nPLATFORM_CLIENT_SECRET=" . self::CLIENT_SECRET . "\nDB_X=1\n", $content);
+        $this->assertSame(1, substr_count($content, 'PLATFORM_CLIENT_SECRET='));
         $this->assertSame(0640, fileperms($env) & 0777);
     }
 
@@ -351,7 +351,7 @@ final class PlatformRegisterCommandTest extends TestCase
 
         foreach (["a\nB=1", 'a b', 'a"b', 'a#b', '', 'a$b'] as $unsafe) {
             try {
-                $file->upsert(['AUTH_V2_CLIENT_SECRET' => $unsafe]);
+                $file->upsert(['PLATFORM_CLIENT_SECRET' => $unsafe]);
                 $this->fail('unsafe value accepted: ' . json_encode($unsafe));
             } catch (\InvalidArgumentException) {
             }

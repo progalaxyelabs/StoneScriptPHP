@@ -57,7 +57,7 @@ class AuthenticatedUser
         public readonly ?string $identity_id = null,
 
         /**
-         * Every role the token carries (tenancy v2 tokens carry ALL the user's known roles in the tenant and no
+         * Every role the token carries (current-flow tokens carry ALL the user's known roles in the tenant and no
          * single role_id). Empty for tokens that carry only a role_id. Check with {@see hasRole()}.
          *
          * @var list<string>
@@ -116,7 +116,7 @@ class AuthenticatedUser
 
         $user_role = $role_id
             ?? $payload['user_role']
-            // Legacy platform tokens only. An API token ('card') that carries roles[] (tenancy v2) has no
+            // Legacy platform tokens only. An API token ('card') that carries roles[] (current tenancy flow) has no
             // primary role: use roles / hasRole() instead of role_id.
             ?? ((is_array($payload['roles'] ?? null) && ($payload['token_type'] ?? null) !== 'card') ? ($payload['roles'][0] ?? null) : null)
             ?? null;
@@ -151,7 +151,7 @@ class AuthenticatedUser
             identity_id: (isset($payload['identity_id']) && (is_string($payload['identity_id']) || is_int($payload['identity_id'])) && (string) $payload['identity_id'] !== '')
                 ? (string) $payload['identity_id']
                 : null,
-            // roles[] is read ONLY from a tenancy v2 API token: token_type 'card' with no role_id. Any other
+            // roles[] is read ONLY from a current-flow API token: token_type 'card' with no role_id. Any other
             // token keeps its legacy meaning (a legacy platform token's roles[0] is its user_role, above).
             roles: (is_array($payload['roles'] ?? null) && ($payload['token_type'] ?? null) === 'card' && !isset($payload['role_id']))
                 ? array_values(array_filter(array_map('strval', $payload['roles']), static fn (string $r): bool => $r !== ''))
@@ -199,7 +199,7 @@ class AuthenticatedUser
     }
 
     /**
-     * Check if the token carries the given role: as its role_id (or legacy user_role alias), or, for a tenancy v2
+     * Check if the token carries the given role: as its role_id (or legacy user_role alias), or, for a current-flow
      * token that carries all the user's roles, anywhere in roles[].
      *
      * @param string $role Role name to check

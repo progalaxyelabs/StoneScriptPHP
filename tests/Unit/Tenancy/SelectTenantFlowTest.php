@@ -22,12 +22,12 @@ require_once __DIR__ . '/TenancyFakes.php';
 /** Only the two protected seams a platform or test may set: the flag and the authority. Everything else is real. */
 final class RealSelectTenantRoute extends SelectTenantRoute
 {
-    public bool $v2 = true;
+    public bool $legacy = false;
     public ?MembershipAuthority $authority = null;
 
-    protected function tenancyV2Enabled(): bool
+    protected function legacyTenancy(): bool
     {
-        return $this->v2;
+        return $this->legacy;
     }
 
     protected function membershipAuthority(): MembershipAuthority
@@ -37,7 +37,7 @@ final class RealSelectTenantRoute extends SelectTenantRoute
 }
 
 /**
- * select-tenant under TENANCY_V2: the REAL tenant-DB role read (TenantRoleResolver + DatabaseTenantRoleStore
+ * select-tenant under LEGACY_TENANCY=false: the REAL tenant-DB role read (TenantRoleResolver + DatabaseTenantRoleStore
  * over Database::fake(), the framework's gateway test double) and the REAL RS256 signing. The token carries
  * ALL known roles and no primary role; privileges are the union of the roles' privileges.
  *
@@ -47,7 +47,7 @@ final class RealSelectTenantRoute extends SelectTenantRoute
  * @covers \StoneScriptPHP\Auth\Middleware\RequireRoleMiddleware
  * @covers \StoneScriptPHP\Tenancy\Provisioning\TenantDbScope
  */
-final class SelectTenantV2Test extends TestCase
+final class SelectTenantFlowTest extends TestCase
 {
     private const IDENTITY = '11111111-1111-4111-8111-111111111111';
     private const TENANT = '22222222-2222-4222-8222-222222222222';
@@ -246,12 +246,12 @@ final class SelectTenantV2Test extends TestCase
         $this->assertSame(500, $res->httpStatusCode);
     }
 
-    public function test_selection_token_is_optional_under_v2_and_still_required_in_14x(): void
+    public function test_selection_token_is_optional_in_the_current_flow_and_still_required_in_legacy(): void
     {
         $route = $this->route();
-        $route->v2 = true;
+        $route->legacy = false;
         $this->assertStringContainsString('optional', $route->validation_rules()['selection_token']);
-        $route->v2 = false;
+        $route->legacy = true;
         $this->assertStringContainsString('required', $route->validation_rules()['selection_token']);
     }
 }

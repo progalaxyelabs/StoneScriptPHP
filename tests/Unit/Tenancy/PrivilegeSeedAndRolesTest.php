@@ -14,7 +14,7 @@ use StoneScriptPHP\Tenancy\Provisioning\TenantPrivilegeSeed;
 
 /**
  * The platform privilege seed (validation, loading, the SQL boundary), the strict role resolver, and the token
- * shapes (roles[] only on a v2 'card' token without role_id; legacy tokens unchanged).
+ * shapes (roles[] only on a 'card' token without role_id; legacy tokens unchanged).
  *
  * @covers \StoneScriptPHP\Tenancy\Provisioning\TenantPrivilegeSeed
  * @covers \StoneScriptPHP\Tenancy\Provisioning\DatabaseTenantDbSeeder
@@ -164,14 +164,14 @@ final class PrivilegeSeedAndRolesTest extends TestCase
 
     // ---- W6: token shapes ----
 
-    public function test_roles_are_read_only_from_a_v2_card_token_without_role_id(): void
+    public function test_roles_are_read_only_from_a_card_token_without_role_id(): void
     {
-        $v2 = AuthenticatedUser::fromPayload(['sub' => self::IDENTITY, 'token_type' => 'card', 'roles' => ['owner', 'cashier']]);
-        $this->assertSame(['owner', 'cashier'], $v2->roles);
-        $this->assertNull($v2->role_id, 'a v2 token has no primary role');
-        $this->assertTrue($v2->hasRole('cashier'));
-        $this->assertTrue($v2->hasAnyRole(['admin', 'owner']));
-        $this->assertFalse($v2->hasAnyRole(['admin']));
+        $cardUser = AuthenticatedUser::fromPayload(['sub' => self::IDENTITY, 'token_type' => 'card', 'roles' => ['owner', 'cashier']]);
+        $this->assertSame(['owner', 'cashier'], $cardUser->roles);
+        $this->assertNull($cardUser->role_id, 'a roles[] token has no primary role');
+        $this->assertTrue($cardUser->hasRole('cashier'));
+        $this->assertTrue($cardUser->hasAnyRole(['admin', 'owner']));
+        $this->assertFalse($cardUser->hasAnyRole(['admin']));
 
         // A card token that also carries role_id keeps the single-role meaning.
         $single = AuthenticatedUser::fromPayload(['sub' => self::IDENTITY, 'token_type' => 'card', 'role_id' => 'owner', 'roles' => ['x', 'y']]);
@@ -191,7 +191,7 @@ final class PrivilegeSeedAndRolesTest extends TestCase
         $this->assertSame('admin', $bare->user_role);
     }
 
-    public function test_the_role_middleware_uses_roles_only_for_v2_card_tokens(): void
+    public function test_the_role_middleware_uses_roles_only_for_card_tokens(): void
     {
         $next = static fn (array $r) => null;
         $admits = static fn (array $claims, array $allowed): bool => (new RequireRoleMiddleware($allowed))->handle(['jwt_claims' => $claims], $next) === null;

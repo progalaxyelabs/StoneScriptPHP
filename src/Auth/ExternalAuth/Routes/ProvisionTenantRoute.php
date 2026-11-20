@@ -190,10 +190,10 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // manual guard, consistent with how this route already worked.
         $resolvedName = $this->tenant_name;
 
-        // Tenancy v2 (15.0.0, TENANCY_V2=true): the framework's default sequence runs instead of the
-        // 14.x flow below. Platforms switch one at a time; the flag defaults to false.
-        if ($this->tenancyV2Enabled()) {
-            return $this->processTenancyV2($identityId, $user, $resolvedName);
+        // Current tenancy flow (LEGACY_TENANCY=false): the framework's default sequence runs instead of the
+        // legacy 14.x flow below. Platforms switch one at a time; LEGACY_TENANCY defaults to true.
+        if (!$this->legacyTenancy()) {
+            return $this->processTenancy($identityId, $user, $resolvedName);
         }
 
         // the auth contract/S9 — existing-tenant guard (2026-08-12 fix for a real,
@@ -480,7 +480,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
     }
 
     /**
-     * The v2 sequence for this request. Protected: a platform overrides this to pass its own hooks
+     * The provisioning sequence for this request. Protected: a platform overrides this to pass its own hooks
      * (business columns, tenant seed data) or stores, never to change the order of the steps.
      */
     protected function buildTenancySequence(): TenantProvisioningSequence
@@ -518,7 +518,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         return TenantPrivilegeSeed::fromFile(rtrim((string) ROOT_PATH, '/\\') . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'tenant-privileges.php');
     }
 
-    private function processTenancyV2(string $identityId, object $user, string $tenantName): ApiResponse
+    private function processTenancy(string $identityId, object $user, string $tenantName): ApiResponse
     {
         $displayName = $this->display_name ?: (string) ($user->display_name ?? '');
         $email = $this->email ?: (string) ($user->email ?? '');
@@ -533,7 +533,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
             if ($this->membershipAuthority() instanceof BuiltinMembershipAuthority) {
                 return new ApiResponse('error', 'OAuth sign-up is not available on a standalone platform', ['error' => 'oauth_not_supported'], 400);
             }
-            $promoted = $this->promoteOAuthForV2((string) $bearer);
+            $promoted = $this->promoteOAuth((string) $bearer);
             if ($promoted instanceof ApiResponse) {
                 return $promoted;
             }
@@ -545,7 +545,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // unless allow_additional_tenant is set. A failed lookup never blocks: the idempotency key still prevents
         // a duplicate, and only provisioned tenants are listed (a half-built one resumes through the key).
         if (!$this->allow_additional_tenant) {
-            $ownedTenants = $this->findOwnedTenantsV2($identityId, $bearer);
+            $ownedTenants = $this->findOwnedTenants($identityId, $bearer);
             if ($ownedTenants !== []) {
                 // Replay ANY owned tenant whose name matches; 409 only when none does.
                 foreach ($ownedTenants as $owned) {
@@ -608,7 +608,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      *
      * @return array{0:string,1:string}|ApiResponse
      */
-    private function promoteOAuthForV2(string $pendingToken): array|ApiResponse
+    private function promoteOAuth(string $pendingToken): array|ApiResponse
     {
         try {
             $r = $this->client->promoteOAuthConnection($this->oauth_state, $pendingToken);
@@ -668,7 +668,7 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
      *
      * @return list<array{membership_id:string,tenant_id:string,tenant_name:string,tenant_slug:?string,tenant_db_name:string,is_tenant_owner:bool}>
      */
-    private function findOwnedTenantsV2(string $identityId, ?string $bearer): array
+    private function findOwnedTenants(string $identityId, ?string $bearer): array
     {
         $owned = [];
         try {

@@ -3,7 +3,7 @@
 /**
  * php stone tenancy:preflight
  *
- * MANDATORY before TENANCY_V2 is switched on: fails if any provisioned tenant has a role that users hold but that
+ * MANDATORY before LEGACY_TENANCY is set to false: fails if any provisioned tenant has a role that users hold but that
  * has zero privileges. Read-only. Thin wiring around StoneScriptPHP\Tenancy\Maintenance\TenancyFleetCommands.
  */
 

@@ -17,7 +17,7 @@ require_once __DIR__ . '/helpers/cli-env.php';
 
 use StoneScriptPHP\Tenancy\Platform\OperatorTokenSource;
 use StoneScriptPHP\Tenancy\Platform\PlatformRotateCredentialCommand;
-use StoneScriptPHP\Tenancy\Provisioning\AuthV2Client;
+use StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient;
 
 $args = array_slice($_SERVER['argv'], 1);
 
@@ -28,7 +28,7 @@ $projectAuthUrl = in_array(true, array_map(static fn ($a) => str_starts_with((st
 $command = new PlatformRotateCredentialCommand(
     static function (string $text): void { fwrite(STDOUT, $text); },
     static function (string $text): void { fwrite(STDERR, $text); },
-    static fn (string $baseUrl): AuthV2Client => new AuthV2Client($baseUrl),
+    static fn (string $baseUrl): AuthTenancyClient => new AuthTenancyClient($baseUrl),
 );
 
 // The operator token is read from the PROCESS environment of this one command, never through Env (which would

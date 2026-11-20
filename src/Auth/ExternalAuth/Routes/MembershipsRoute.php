@@ -37,14 +37,14 @@ class MembershipsRoute extends BaseExternalAuthRoute
             return $denial;
         }
 
-        // Tenancy v2 (TENANCY_V2=true): the authority's list (auth v2 or the local main database):
+        // Current tenancy flow (LEGACY_TENANCY=false): the authority's list (auth or the local main database):
         // active memberships of provisioned tenants of THIS platform; slug may be null.
-        if ($this->tenancyV2Enabled()) {
+        if (!$this->legacyTenancy()) {
             $identityId = (string) (auth()?->user_id ?? '');
             try {
                 $rows = $this->membershipAuthority()->listMemberships($identityId, $this->getBearerToken());
             } catch (\Throwable $e) {
-                log_error('MembershipsRoute: v2 membership list failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                log_error('MembershipsRoute: membership list failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
                 return res_error('Authentication service unavailable', 502);
             }
             $memberships = array_map(static fn (array $r): array => [

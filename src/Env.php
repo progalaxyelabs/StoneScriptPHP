@@ -161,17 +161,17 @@ class Env
     public string $PLATFORM_CODE = '';
     public ?string $EXTERNAL_AUTH_CLIENT_SECRET = null;
 
-    // Tenancy v2 (15.0.0). AUTH_V2_CLIENT_ID / AUTH_V2_CLIENT_SECRET are the platform credential written
-    // by `php stone platform:register` (and AUTH_V2_CLIENT_ID_NEXT / AUTH_V2_CLIENT_SECRET_NEXT by
-    // `platform:rotate-credential`). They are NEW variables on purpose: EXTERNAL_AUTH_CLIENT_SECRET is the
-    // live 14.x X-Platform-Secret and is never written or replaced by the framework. PLATFORM_UUID is the registered platform's
-    // uuid (the audience identity tokens must carry); it is NOT the legacy PLATFORM_ID, which is the
-    // platform slug. TENANCY_V2 stays false until a platform switches to the v2 sequence; false keeps
-    // the 14.x provisioning flow unchanged.
-    public ?string $AUTH_V2_CLIENT_ID = null;
-    public ?string $AUTH_V2_CLIENT_SECRET = null;
+    // Tenancy. PLATFORM_CLIENT_ID / PLATFORM_CLIENT_SECRET are the platform credential written by
+    // `php stone platform:register` (and PLATFORM_CLIENT_ID_NEXT / PLATFORM_CLIENT_SECRET_NEXT by
+    // `platform:rotate-credential`). They are separate variables on purpose: EXTERNAL_AUTH_CLIENT_SECRET is the
+    // legacy (14.x) X-Platform-Secret and is never written or replaced by the framework. PLATFORM_UUID is the
+    // registered platform's uuid (the audience identity tokens must carry); it is NOT the legacy PLATFORM_ID, which
+    // is the platform slug. LEGACY_TENANCY stays true (the legacy 14.x provisioning flow, unchanged) until a
+    // platform is switched to the current flow by setting it to false.
+    public ?string $PLATFORM_CLIENT_ID = null;
+    public ?string $PLATFORM_CLIENT_SECRET = null;
     public string $PLATFORM_UUID = '';
-    public bool $TENANCY_V2 = false;
+    public bool $LEGACY_TENANCY = true;
 
     public string $AUTH_COOKIE_DOMAIN = '';
     public ?bool $AUTH_COOKIE_SECURE = null;

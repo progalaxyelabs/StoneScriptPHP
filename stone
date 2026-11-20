@@ -179,7 +179,7 @@ $commands = [
         'file' => 'cli/platform-register.php',
     ],
     'platform:rotate-credential' => [
-        'description' => 'Add a next auth credential for this platform (operator token from ~/.stone/operator.env); written to AUTH_V2_*_NEXT',
+        'description' => 'Add a next auth credential for this platform (operator token from ~/.stone/operator.env); written to PLATFORM_CLIENT_*_NEXT',
         'file' => 'cli/platform-rotate-credential.php',
     ],
     'tenancy:seed-privileges' => [
@@ -187,7 +187,7 @@ $commands = [
         'file' => 'cli/tenancy-seed-privileges.php',
     ],
     'tenancy:preflight' => [
-        'description' => 'MANDATORY before TENANCY_V2=true: fails if a provisioned tenant has a role with users but zero privileges',
+        'description' => 'MANDATORY before LEGACY_TENANCY=false: fails if a provisioned tenant has a role with users but zero privileges',
         'file' => 'cli/tenancy-preflight.php',
     ],
     'gateway:list-schemas' => [
@@ -280,7 +280,7 @@ if ($command === 'help' || $command === '--help' || $command === '-h') {
     echo "  php stone generate client               # Generate TypeScript client\n";
     echo "  php stone generate invitations          # Scaffold a platform-owned invitation system\n";
     echo "  php stone generate tenant-governance    # Scaffold platform-owned tenant membership + governance\n";
-    echo "  php stone generate tenancy [--builtin]  # Scaffold platform/tenants/memberships + tenant users/roles/privileges (tenancy v2)\n";
+    echo "  php stone generate tenancy [--builtin]  # Scaffold platform/tenants/memberships + tenant users/roles/privileges\n";
     echo "  php stone platform:register --name N --slug S  # Register the platform with auth (operator token from ~/.stone/operator.env)\n";
     echo "  php stone generate audit                # Scaffold immutable append-only audit log + capture trigger\n";
     echo "  php stone generate soft-delete          # Scaffold soft-delete columns + 7-day purge + read filters\n";

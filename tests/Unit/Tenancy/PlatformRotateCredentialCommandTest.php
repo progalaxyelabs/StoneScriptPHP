@@ -7,7 +7,7 @@ namespace StoneScriptPHP\Tests\Unit\Tenancy;
 use PHPUnit\Framework\TestCase;
 use StoneScriptPHP\Tenancy\Platform\PlatformRotateCredentialCommand;
 use StoneScriptPHP\Tenancy\Platform\SecretsFile;
-use StoneScriptPHP\Tenancy\Provisioning\AuthV2Client;
+use StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient;
 
 /**
  * @covers \StoneScriptPHP\Tenancy\Platform\PlatformRotateCredentialCommand
@@ -31,7 +31,7 @@ final class PlatformRotateCredentialCommandTest extends TestCase
         mkdir($this->dir . '/project', 0700, true);
         file_put_contents($this->dir . '/.stone/operator.env', 'STONE_OPERATOR_TOKEN=' . self::OPERATOR . "\n");
         chmod($this->dir . '/.stone/operator.env', 0600);
-        file_put_contents($this->dir . '/project/.env', "PLATFORM_UUID=" . self::PLATFORM . "\nEXTERNAL_AUTH_CLIENT_SECRET=live-14x\nAUTH_V2_CLIENT_ID=current-id\nAUTH_V2_CLIENT_SECRET=current-secret\n");
+        file_put_contents($this->dir . '/project/.env', "PLATFORM_UUID=" . self::PLATFORM . "\nEXTERNAL_AUTH_CLIENT_SECRET=live-14x\nPLATFORM_CLIENT_ID=current-id\nPLATFORM_CLIENT_SECRET=current-secret\n");
     }
 
     protected function tearDown(): void
@@ -48,7 +48,7 @@ final class PlatformRotateCredentialCommandTest extends TestCase
         return new PlatformRotateCredentialCommand(
             function (string $t): void { $this->stdout .= $t; },
             function (string $t): void { $this->stderr .= $t; },
-            fn (string $url): AuthV2Client => new AuthV2Client($url, null, null, function (string $m, string $u, array $h, ?string $b) use ($status, $body): array {
+            fn (string $url): AuthTenancyClient => new AuthTenancyClient($url, null, null, function (string $m, string $u, array $h, ?string $b) use ($status, $body): array {
                 $this->requests[] = [$m, $u, $h, $b];
                 return [$status, json_encode($body)];
             }),
@@ -67,15 +67,15 @@ final class PlatformRotateCredentialCommandTest extends TestCase
         $this->assertSame(0, $status, $this->stderr);
         [$method, $url, $headers, $body] = $this->requests[0];
         $this->assertSame('POST', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/operator/platforms/' . self::PLATFORM . '/credentials/rotate', $url);
+        $this->assertSame('https://auth.example.test/api/internal/operator/platforms/' . self::PLATFORM . '/credentials/rotate', $url);
         $this->assertContains('X-Operator-Token: ' . self::OPERATOR, $headers);
         $this->assertSame(['idempotency_key' => 'rotate:' . self::PLATFORM . ':20261121'], json_decode((string) $body, true));
 
         $file = new SecretsFile($this->dir . '/project/.env');
-        $this->assertSame('next-id', $file->get('AUTH_V2_CLIENT_ID_NEXT'));
-        $this->assertSame(self::NEXT_SECRET, $file->get('AUTH_V2_CLIENT_SECRET_NEXT'));
-        $this->assertSame('current-id', $file->get('AUTH_V2_CLIENT_ID'), 'the credential in use is not touched');
-        $this->assertSame('current-secret', $file->get('AUTH_V2_CLIENT_SECRET'));
+        $this->assertSame('next-id', $file->get('PLATFORM_CLIENT_ID_NEXT'));
+        $this->assertSame(self::NEXT_SECRET, $file->get('PLATFORM_CLIENT_SECRET_NEXT'));
+        $this->assertSame('current-id', $file->get('PLATFORM_CLIENT_ID'), 'the credential in use is not touched');
+        $this->assertSame('current-secret', $file->get('PLATFORM_CLIENT_SECRET'));
         $this->assertSame('live-14x', $file->get('EXTERNAL_AUTH_CLIENT_SECRET'), 'the 14.x secret is not touched');
         foreach ([self::OPERATOR, self::NEXT_SECRET] as $secret) {
             $this->assertStringNotContainsString($secret, $this->stdout . $this->stderr);
@@ -88,7 +88,7 @@ final class PlatformRotateCredentialCommandTest extends TestCase
 
         $this->assertSame(1, $status);
         $this->assertStringContainsString('shown once', $this->stderr);
-        $this->assertNull((new SecretsFile($this->dir . '/project/.env'))->get('AUTH_V2_CLIENT_ID_NEXT'));
+        $this->assertNull((new SecretsFile($this->dir . '/project/.env'))->get('PLATFORM_CLIENT_ID_NEXT'));
     }
 
     public function test_auth_errors_and_a_missing_platform_id_stop_early(): void
@@ -97,7 +97,7 @@ final class PlatformRotateCredentialCommandTest extends TestCase
         $this->assertStringContainsString('next_credential_exists', $this->stderr);
 
         $this->stderr = '';
-        file_put_contents($this->dir . '/project/.env', "AUTH_V2_CLIENT_ID=x\n");
+        file_put_contents($this->dir . '/project/.env', "PLATFORM_CLIENT_ID=x\n");
         $this->requests = [];
         $this->assertSame(1, $this->go($this->command(201, [])));
         $this->assertStringContainsString('platform-id', $this->stderr);

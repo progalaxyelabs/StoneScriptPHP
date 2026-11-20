@@ -136,17 +136,20 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
         return BearerToken::strip($headerValue);
     }
 
-    /** TENANCY_V2 switch (default false). Protected so a platform or a test can decide it differently. */
-    protected function tenancyV2Enabled(): bool
+    /**
+     * LEGACY_TENANCY switch (default TRUE: the legacy 14.x flow). False selects the current flow. Protected so a platform
+     * or a test can decide it differently.
+     */
+    protected function legacyTenancy(): bool
     {
         try {
-            return \StoneScriptPHP\Tenancy\Provisioning\TenancyMode::v2Enabled();
+            return \StoneScriptPHP\Tenancy\Provisioning\TenancyMode::legacy();
         } catch (\Throwable) {
-            return false; // no resolvable environment: keep the 14.x flow
+            return true; // no resolvable environment: keep the legacy flow
         }
     }
 
-    /** The MembershipAuthority for tenancy v2 (AUTH_MODE decides which). Protected: tests and platforms override it. */
+    /** The MembershipAuthority for the current tenancy flow (AUTH_MODE decides which). Protected: tests and platforms override it. */
     protected function membershipAuthority(): \StoneScriptPHP\Tenancy\Provisioning\MembershipAuthority
     {
         return \StoneScriptPHP\Tenancy\Provisioning\TenancyMode::authority(
@@ -156,8 +159,8 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
     }
 
     /**
-     * Every known role of the identity in the tenant database, and the union of those roles' privileges (tenancy
-     * v2). STRICT: a failed tenant-database read throws (the caller answers 502); it is never turned into "no
+     * Every known role of the identity in the tenant database, and the union of those roles' privileges (current
+     * tenancy flow). STRICT: a failed tenant-database read throws (the caller answers 502); it is never turned into "no
      * roles". Protected: platforms and tests may override.
      *
      * @return array{roles:list<string>,privileges:list<string>}
@@ -172,7 +175,7 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
 
     /**
      * Platform API token for a tenant carrying ALL the user's known roles (roles[], no role_id) and bound to this
-     * platform (platform_code). Same shape for provision-tenant, select-tenant and exchange under tenancy v2.
+     * platform (platform_code). Same shape for provision-tenant, select-tenant and exchange in the current tenancy flow.
      *
      * @param list<string> $roles
      */
@@ -203,7 +206,7 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
     }
 
     /**
-     * The one response every tenancy v2 entry point (provision-tenant, select-tenant, exchange) gives once a
+     * The one response every current-flow entry point (provision-tenant, select-tenant, exchange) gives once a
      * membership is established: roles read STRICTLY from the tenant database, all known roles on the token,
      * and the privilege union in the body. A failed role read is a 502 (never mistaken for "no role"); no known
      * role is a 403 `no_tenant_role` and no token; a token that cannot be signed is a 500.

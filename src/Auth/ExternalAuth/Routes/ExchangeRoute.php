@@ -173,13 +173,13 @@ class ExchangeRoute extends BaseExternalAuthRoute
             return $denial;
         }
 
-        // Tenancy v2 (TENANCY_V2=true): membership from the authority, roles STRICTLY from the tenant database,
-        // a token carrying all known roles. The platform's tenants_resolver / roles_resolver are never consulted.
-        if ($this->tenancyV2Enabled()) {
+        // Current tenancy flow (LEGACY_TENANCY=false): membership from the authority, roles STRICTLY from the tenant
+        // database, a token carrying all known roles. The platform's tenants_resolver / roles_resolver are never consulted.
+        if (!$this->legacyTenancy()) {
             try {
                 $membership = $this->membershipAuthority()->verifyMembership((string) $identityId, $authToken, $this->tenant_id);
             } catch (\Throwable $e) {
-                log_error('ExchangeRoute: v2 membership check failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                log_error('ExchangeRoute: membership check failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
                 return res_error('Authentication service unavailable', 502);
             }
             if ($membership === null) {

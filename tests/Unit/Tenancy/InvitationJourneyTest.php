@@ -21,14 +21,14 @@ require_once __DIR__ . '/TenancyFakes.php';
 require_once __DIR__ . '/InMemoryTenantDbs.php';
 
 /**
- * accept-invite under TENANCY_V2: the invitation's role is written to the tenant database through TenantStaffInvite,
+ * accept-invite under LEGACY_TENANCY=false: the invitation's role is written to the tenant database through TenantStaffInvite,
  * the member is added at the authority, and the token carries the member's roles. An unknown role refuses the invite
  * before anything is written. Whole journey over the shared fakes with real RS256 signing.
  *
  * @covers \StoneScriptPHP\Auth\Invitations\InvitationCompletionService
  * @covers \StoneScriptPHP\Tenancy\Provisioning\TenantStaffInvite
  */
-final class InvitationV2JourneyTest extends TestCase
+final class InvitationJourneyTest extends TestCase
 {
     private const TENANT = '22222222-2222-4222-8222-222222222222';
     private const OWNER = '11111111-1111-4111-8111-111111111111';
@@ -104,7 +104,7 @@ final class InvitationV2JourneyTest extends TestCase
             },
             ['jwks_url' => 'https://auth.example.test/jwks', 'issuer' => 'https://auth.example.test'],
             $config + [
-                'platform_code' => 'acme', 'tenancy_v2' => true, 'tenant_privileges' => self::GRANTS,
+                'platform_code' => 'acme', 'legacy_tenancy' => false, 'tenant_privileges' => self::GRANTS,
                 'signing_private_key_path' => $this->keyDir . '/private.pem', 'signing_issuer' => 'https://api.acme.test', 'ttl' => 600,
             ]
         );

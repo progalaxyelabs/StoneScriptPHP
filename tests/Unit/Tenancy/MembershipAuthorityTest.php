@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Tests\Unit\Tenancy;
 
 use PHPUnit\Framework\TestCase;
-use StoneScriptPHP\Tenancy\Provisioning\AuthV2Client;
+use StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient;
 use StoneScriptPHP\Tenancy\Provisioning\BuiltinMembershipAuthority;
 use StoneScriptPHP\Tenancy\Provisioning\ExternalMembershipAuthority;
 use StoneScriptPHP\Tenancy\Provisioning\MainTenantStore;
@@ -15,11 +15,11 @@ use StoneScriptPHP\Tenancy\Provisioning\TenantStaffInvite;
 require_once __DIR__ . '/TenancyFakes.php';
 
 /**
- * Both MembershipAuthority implementations: External (auth v2 over a fake transport) and Builtin (local
+ * Both MembershipAuthority implementations: External (auth over a fake transport) and Builtin (local
  * main database over in-memory stores), plus the staff invite that runs on top of either.
  *
  * @covers \StoneScriptPHP\Tenancy\Provisioning\ExternalMembershipAuthority
- * @covers \StoneScriptPHP\Tenancy\Provisioning\AuthV2Client
+ * @covers \StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient
  * @covers \StoneScriptPHP\Tenancy\Provisioning\BuiltinMembershipAuthority
  * @covers \StoneScriptPHP\Tenancy\Provisioning\TenantStaffInvite
  */
@@ -42,12 +42,12 @@ final class MembershipAuthorityTest extends TestCase
             $this->requests[] = [$method, $url, $headers, $body];
             return $response;
         };
-        return new ExternalMembershipAuthority(new AuthV2Client('https://auth.example.test/', 'client-1', self::SECRET, $transport));
+        return new ExternalMembershipAuthority(new AuthTenancyClient('https://auth.example.test/', 'client-1', self::SECRET, $transport));
     }
 
     // ---- External ----
 
-    public function test_external_reserve_posts_to_v2_tenants_with_credential_and_user_token(): void
+    public function test_external_reserve_posts_to_tenants_with_credential_and_user_token(): void
     {
         $authority = $this->external([201, json_encode(['platform_tenant_id' => self::TENANT, 'tenant_db_name' => 'acme_tenant_x', 'platform_tenant_membership_id' => self::MEMBERSHIP])]);
 
@@ -55,7 +55,7 @@ final class MembershipAuthorityTest extends TestCase
 
         [$method, $url, $headers, $body] = $this->requests[0];
         $this->assertSame('POST', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/tenants', $url);
+        $this->assertSame('https://auth.example.test/api/internal/tenants', $url);
         $this->assertContains('X-Platform-Client-Id: client-1', $headers);
         $this->assertContains('X-Platform-Client-Secret: ' . self::SECRET, $headers);
         $this->assertContains('Authorization: Bearer ' . self::USER_TOKEN, $headers);
@@ -110,7 +110,7 @@ final class MembershipAuthorityTest extends TestCase
             }
         }
 
-        $throwing = new ExternalMembershipAuthority(new AuthV2Client('https://auth.example.test', 'c', self::SECRET, function (): array {
+        $throwing = new ExternalMembershipAuthority(new AuthTenancyClient('https://auth.example.test', 'c', self::SECRET, function (): array {
             throw new \RuntimeException('connect failed to https://auth.example.test with ' . self::SECRET);
         }));
         try {
@@ -129,10 +129,10 @@ final class MembershipAuthorityTest extends TestCase
         $authority->markProvisioningFailed(self::TENANT, 'step:create_database');
         $id = $authority->addMember(self::TENANT, self::IDENTITY, 'invite-1');
 
-        $this->assertSame('https://auth.example.test/api/internal/v2/tenants/' . self::TENANT . '/provisioned', $this->requests[0][1]);
-        $this->assertSame('https://auth.example.test/api/internal/v2/tenants/' . self::TENANT . '/provisioning-failed', $this->requests[1][1]);
+        $this->assertSame('https://auth.example.test/api/internal/tenants/' . self::TENANT . '/provisioned', $this->requests[0][1]);
+        $this->assertSame('https://auth.example.test/api/internal/tenants/' . self::TENANT . '/provisioning-failed', $this->requests[1][1]);
         $this->assertNull($this->requests[1][3], 'the auth endpoint takes no body');
-        $this->assertSame('https://auth.example.test/api/internal/v2/tenants/' . self::TENANT . '/memberships', $this->requests[2][1]);
+        $this->assertSame('https://auth.example.test/api/internal/tenants/' . self::TENANT . '/memberships', $this->requests[2][1]);
         $this->assertSame(['identity_id' => self::IDENTITY, 'idempotency_key' => 'invite-1'], json_decode((string) $this->requests[2][3], true));
         $this->assertSame(self::MEMBERSHIP, $id);
     }
@@ -159,7 +159,7 @@ final class MembershipAuthorityTest extends TestCase
 
         [$method, $url, $headers, $body] = $this->requests[0];
         $this->assertSame('PUT', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/memberships/' . self::MEMBERSHIP . '/status', $url);
+        $this->assertSame('https://auth.example.test/api/internal/memberships/' . self::MEMBERSHIP . '/status', $url);
         $this->assertContains('X-Platform-Client-Id: client-1', $headers);
         $this->assertSame(['status' => 'suspended'], json_decode((string) $body, true));
 
@@ -177,7 +177,7 @@ final class MembershipAuthorityTest extends TestCase
     {
         $log = new CallLog();
         $main = new FakeMainStore($log);
-        $client = new AuthV2Client('https://auth.example.test', 'client-1', self::SECRET, function (string $m, string $u) use ($log): array {
+        $client = new AuthTenancyClient('https://auth.example.test', 'client-1', self::SECRET, function (string $m, string $u) use ($log): array {
             $log->add('auth.' . $m);
             return [200, json_encode(['id' => self::MEMBERSHIP, 'status' => 'suspended'])];
         });
@@ -193,7 +193,7 @@ final class MembershipAuthorityTest extends TestCase
     {
         $log = new CallLog();
         $main = new FakeMainStore($log);
-        $refusing = new ExternalMembershipAuthority(new AuthV2Client('https://auth.example.test', 'c', self::SECRET, fn (): array => [409, json_encode(['error' => 'cannot_suspend_tenant_owner'])]), $main);
+        $refusing = new ExternalMembershipAuthority(new AuthTenancyClient('https://auth.example.test', 'c', self::SECRET, fn (): array => [409, json_encode(['error' => 'cannot_suspend_tenant_owner'])]), $main);
         try {
             $refusing->setMembershipStatus(self::MEMBERSHIP, 'suspended');
             $this->fail('expected a ProvisioningException');
@@ -208,7 +208,7 @@ final class MembershipAuthorityTest extends TestCase
         $main = new FakeMainStore($log);
         // The local rule would throw (setMembershipStatus), the mirror must not use it.
         $main->failStatusChange = true;
-        $authority = new ExternalMembershipAuthority(new AuthV2Client('https://auth.example.test', 'c', self::SECRET, fn (): array => [200, json_encode(['id' => self::MEMBERSHIP, 'status' => 'suspended'])]), $main);
+        $authority = new ExternalMembershipAuthority(new AuthTenancyClient('https://auth.example.test', 'c', self::SECRET, fn (): array => [200, json_encode(['id' => self::MEMBERSHIP, 'status' => 'suspended'])]), $main);
 
         $authority->setMembershipStatus(self::MEMBERSHIP, 'suspended');
 
@@ -221,7 +221,7 @@ final class MembershipAuthorityTest extends TestCase
         $log = new CallLog();
         $main = new FakeMainStore($log);
         $main->failMirror = true;
-        $authority = new ExternalMembershipAuthority(new AuthV2Client('https://auth.example.test', 'c', self::SECRET, fn (): array => [200, json_encode(['id' => self::MEMBERSHIP, 'status' => 'removed'])]), $main);
+        $authority = new ExternalMembershipAuthority(new AuthTenancyClient('https://auth.example.test', 'c', self::SECRET, fn (): array => [200, json_encode(['id' => self::MEMBERSHIP, 'status' => 'removed'])]), $main);
 
         $authority->setMembershipStatus(self::MEMBERSHIP, 'removed'); // no exception: auth is the source of truth
 
@@ -233,7 +233,7 @@ final class MembershipAuthorityTest extends TestCase
         $main = new FakeMainStore(new CallLog());
         $main->failMirror = true;
         $main->failDriftRecord = true;
-        $authority = new ExternalMembershipAuthority(new AuthV2Client('https://auth.example.test', 'c', self::SECRET, fn (): array => [200, json_encode(['id' => self::MEMBERSHIP, 'status' => 'removed'])]), $main);
+        $authority = new ExternalMembershipAuthority(new AuthTenancyClient('https://auth.example.test', 'c', self::SECRET, fn (): array => [200, json_encode(['id' => self::MEMBERSHIP, 'status' => 'removed'])]), $main);
 
         $authority->setMembershipStatus(self::MEMBERSHIP, 'removed');
 
@@ -318,7 +318,7 @@ final class MembershipAuthorityTest extends TestCase
 
     public function test_external_calls_without_a_configured_credential_are_refused(): void
     {
-        $client = new AuthV2Client('https://auth.example.test', null, null, function (): array {
+        $client = new AuthTenancyClient('https://auth.example.test', null, null, function (): array {
             $this->fail('no request may be sent without a credential');
         });
 

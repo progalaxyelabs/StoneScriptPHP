@@ -7,7 +7,7 @@ namespace StoneScriptPHP\Tenancy\Provisioning;
 /**
  * The source of truth for tenant ids and memberships.
  *
- * External mode: progalaxyelabs auth (v2 endpoints) generates every id and the platform stores the
+ * External mode: progalaxyelabs auth (its tenancy endpoints) generates every id and the platform stores the
  * same ids. Builtin mode: the platform's own main database does the same job (standalone
  * deployments with local identities). The provisioning sequence is identical in both; only this
  * authority differs. Neither ever holds a role: roles and privileges live in the tenant database.

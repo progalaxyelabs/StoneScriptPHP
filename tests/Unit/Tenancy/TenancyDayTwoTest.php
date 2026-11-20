@@ -53,9 +53,9 @@ final class DayTwoProvisionRoute extends ProvisionTenantRoute
     /** @var array<string,list<string>> */
     public array $grants = [];
 
-    protected function tenancyV2Enabled(): bool
+    protected function legacyTenancy(): bool
     {
-        return true;
+        return false;
     }
 
     protected function membershipAuthority(): MembershipAuthority
@@ -92,9 +92,9 @@ final class DayTwoSelectRoute extends SelectTenantRoute
 {
     public ?MembershipAuthority $authority = null;
 
-    protected function tenancyV2Enabled(): bool
+    protected function legacyTenancy(): bool
     {
-        return true;
+        return false;
     }
 
     protected function membershipAuthority(): MembershipAuthority
@@ -107,9 +107,9 @@ final class DayTwoExchangeRoute extends ExchangeRoute
 {
     public ?MembershipAuthority $authority = null;
 
-    protected function tenancyV2Enabled(): bool
+    protected function legacyTenancy(): bool
     {
-        return true;
+        return false;
     }
 
     protected function membershipAuthority(): MembershipAuthority
@@ -129,7 +129,7 @@ final class DayTwoExchangeRoute extends ExchangeRoute
 }
 
 /**
- * The whole tenancy v2 journey over shared in-memory state, with the REAL route code, the REAL tenant-DB role read
+ * The whole tenancy journey over shared in-memory state, with the REAL route code, the REAL tenant-DB role read
  * (Database::fake) and the REAL RS256 signing: provision (incl. Google sign-up), then come back and select-tenant /
  * exchange. Nothing between "provisioned today" and "logs in tomorrow" is stubbed.
  *
@@ -306,7 +306,7 @@ final class TenancyDayTwoTest extends TestCase
         $this->assertSame(['tenant.manage'], $res->data['privileges']);
     }
 
-    // ---- C3: Google sign-up under TENANCY_V2 ----
+    // ---- C3: Google sign-up under LEGACY_TENANCY=false ----
 
     public function test_google_signup_promotes_first_then_provisions_with_the_promoted_token_and_identity(): void
     {
@@ -502,7 +502,7 @@ final class TenancyDayTwoTest extends TestCase
         $this->assertArrayNotHasKey('access_token', (array) $res->data);
     }
 
-    public function test_exchange_under_v2_uses_the_authority_and_the_tenant_database_never_the_platform_resolvers(): void
+    public function test_exchange_in_the_current_flow_uses_the_authority_and_the_tenant_database_never_the_platform_resolvers(): void
     {
         $today = $this->provisionRoute()->process();
         $tenant = $today->data['active_tenant'];
@@ -521,7 +521,7 @@ final class TenancyDayTwoTest extends TestCase
         $res = $route->process();
 
         $this->assertSame('ok', $res->status, json_encode($res->data));
-        $this->assertSame(0, $resolverCalls, 'roles_resolver / tenants_resolver are never consulted under v2');
+        $this->assertSame(0, $resolverCalls, 'roles_resolver / tenants_resolver are never consulted in the current flow');
         $this->assertSame(['owner'], $res->data['roles']);
         $this->assertSame(['owner'], (array) $this->decode($res->data['access_token'])['roles']);
 

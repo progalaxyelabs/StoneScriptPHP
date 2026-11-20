@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Tenancy v2 Generator
+ * Tenancy Generator
  *
  * Scaffolds the three-layer tenancy model into the CONSUMING platform's own repo:
  *
@@ -44,7 +44,7 @@ $argc = $_SERVER['argc'] ?? $argc;
 $args = array_slice($argv, 1);
 
 if (in_array('--help', $args, true) || in_array('-h', $args, true) || in_array('help', $args, true)) {
-    echo "Tenancy v2 Generator\n";
+    echo "Tenancy Generator\n";
     echo "====================\n\n";
     echo "Scaffolds the platform / tenants / tenant_memberships main-database layer and the\n";
     echo "tenant-database users / user_roles / user_role_privileges layer into THIS project.\n\n";
@@ -173,7 +173,7 @@ function tenancyMigrationName(string $dir, string $slug): string
 }
 
 // 1. Main-database tables
-echo "Generating tenancy v2 (" . ($builtin ? 'standalone/builtin' : 'external auth') . ")...\n\n";
+echo "Generating tenancy (" . ($builtin ? 'standalone/builtin' : 'external auth') . ")...\n\n";
 echo "Main database tables\n";
 $guidance = [];
 $tenancyRefused = 0;
@@ -215,7 +215,7 @@ foreach (['tenants', 'tenant_memberships'] as $table) {
         ? 'Add the core columns to your own tenants declaration: uuid, name, slug, tenant_db_name (UNIQUE), tenant_provisioning_status, created_by_identity_id, created_at, updated_at, provisioned_at (see the generated template for the exact definitions). Platform business columns must be nullable or defaulted. The generated migration expands the live table.'
         : 'Reshape your tenant_memberships declaration to: id, identity_id, tenant_id (FK tenants(uuid) ON DELETE NO ACTION), is_tenant_owner, status, invited_by_identity_id, created_at, updated_at, UNIQUE (identity_id, tenant_id). The role column moves to the tenant database; leave it in place until the drop-column wrapper retires it.';
     if ($table === 'tenant_memberships' && str_contains((string) file_get_contents($defining), 'is_tenant_admin')) {
-        $guidance[] = 'Your tenant_memberships is the tenant-governance ledger (creator/owner/admin flags). Tenancy v2 moves governance tiers to tenant-database roles; migrate them to user_roles before retiring the old columns.';
+        $guidance[] = 'Your tenant_memberships is the tenant-governance ledger (creator/owner/admin flags). The current tenancy flow moves governance tiers to tenant-database roles; migrate them to user_roles before retiring the old columns.';
     }
 }
 
@@ -240,8 +240,8 @@ foreach ($mainFns as $fn) {
 
 // 3. Main-database migration (forward-only, idempotent)
 echo "\nMain database migration\n";
-$migrationName = tenancyMigrationName($mainMigrations, 'tenancy_v2_core');
-tenancyCopy($templatesPath . 'main/migrations/tenancy_v2_core.pgsql.template', $mainMigrations . DIRECTORY_SEPARATOR . $migrationName);
+$migrationName = tenancyMigrationName($mainMigrations, 'tenancy_core');
+tenancyCopy($templatesPath . 'main/migrations/tenancy_core.pgsql.template', $mainMigrations . DIRECTORY_SEPARATOR . $migrationName);
 
 // 4. Tenant database
 echo "\nTenant database tables and functions\n";
@@ -276,7 +276,7 @@ if (!is_dir($configDir) && !mkdir($configDir, 0755, true)) {
 }
 tenancyCopy($templatesPath . 'config/tenant-privileges.php.template', $configDir . DIRECTORY_SEPARATOR . 'tenant-privileges.php');
 
-echo "\nTenancy v2 scaffolding complete.\n\n";
+echo "\nTenancy scaffolding complete.\n\n";
 if ($guidance !== []) {
     echo "Do these by hand:\n";
     foreach ($guidance as $i => $line) {
@@ -295,7 +295,7 @@ if ($builtin) {
     echo "  4. php stone platform:register --name \"<name>\" --slug <slug>   (reads the operator token from ~/.stone/operator.env)\n";
 }
 echo "  5. MANDATORY before the flip: php stone tenancy:preflight must pass (no role with users and zero privileges).\n";
-echo "  6. Set TENANCY_V2=true when this platform switches to the v2 provisioning sequence.\n";
+echo "  6. Set LEGACY_TENANCY=false when this platform switches from the legacy flow to the tenancy provisioning sequence.\n";
 
 // A table the project already defines was refused: tell scripts and CI (exit 2) after all the guidance above.
 if ($tenancyRefused > 0) {

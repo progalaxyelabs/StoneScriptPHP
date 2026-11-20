@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Tenancy\Provisioning;
 
-/** MembershipAuthority backed by the external auth service (v2 endpoints). AUTH_MODE=external|hybrid. */
+/** MembershipAuthority backed by the external auth service (its tenancy endpoints). AUTH_MODE=external|hybrid. */
 final class ExternalMembershipAuthority implements MembershipAuthority
 {
     /**
      * @param MainTenantStore|null $main when given, a status change confirmed by auth is mirrored into the platform's
      *        own tenant_memberships row (the two must not disagree)
      */
-    public function __construct(private readonly AuthV2Client $client, private readonly ?MainTenantStore $main = null)
+    public function __construct(private readonly AuthTenancyClient $client, private readonly ?MainTenantStore $main = null)
     {
     }
 

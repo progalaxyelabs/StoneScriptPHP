@@ -187,7 +187,7 @@ class TokenExchangeService
     }
 
     /**
-     * API token that carries ALL of the user's roles in the tenant (tenancy v2): a `roles` array and no
+     * API token that carries ALL of the user's roles in the tenant (current tenancy flow): a `roles` array and no
      * single `role_id`, so no role is the "active" or "primary" one. Same typed claims as
      * {@see exchangeApiToken()} (token class 'card', purpose=authorization, type). What the roles allow is
      * the union of their privileges, resolved from the tenant database.

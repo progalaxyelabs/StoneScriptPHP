@@ -7,7 +7,7 @@ namespace StoneScriptPHP\Tenancy\Provisioning;
 use StoneScriptPHP\Tenancy\TenantIdRule;
 
 /**
- * The framework's default tenant provisioning order (tenancy v2). Platforms override only business
+ * The framework's default tenant provisioning order. Platforms override only business
  * columns and seed data (the two hooks), never the order:
  *
  *   1. authority reserves tenant + owner membership      (auth tenant + owner membership FIRST)

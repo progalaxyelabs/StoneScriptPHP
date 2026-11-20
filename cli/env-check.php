@@ -68,8 +68,8 @@ if ($platformCodeFailure !== null) {
     exit(1);
 }
 
-if ($env->TENANCY_V2) {
-    echo "NOTE: TENANCY_V2 is on. Before the first deploy with it, run: php stone tenancy:preflight (must pass).\n";
+if (!$env->LEGACY_TENANCY) {
+    echo "NOTE: LEGACY_TENANCY is false (current tenancy flow). Before the first deploy with it, run: php stone tenancy:preflight (must pass).\n";
 }
 
 // Checks that depend on application config (Application::run's $config) cannot be decided here. Show what they

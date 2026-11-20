@@ -15,7 +15,7 @@ use StoneScriptPHP\Tenancy\Provisioning\Uuid;
  *       run goes on; the exit status is 1 if any tenant failed.
  *
  *   php stone tenancy:preflight
- *       MANDATORY before TENANCY_V2 is switched on for a platform: exits 1 if (a) any provisioned tenant has a role that
+ *       MANDATORY before LEGACY_TENANCY is set to false for a platform: exits 1 if (a) any provisioned tenant has a role that
  *       users hold but that has ZERO privileges, (b) any ACTIVE membership has no active tenant-DB user holding a role
  *       with privileges (such a user would be refused at select-tenant; this also catches an empty user_roles before a
  *       platform's one-off role move), or (c) a membership status confirmed by auth was never mirrored (drift).
@@ -157,7 +157,7 @@ final class TenancyFleetCommands
         }
 
         if ($problems > 0) {
-            ($this->stderr)("\nPre-flight FAILED ($problems problem(s) in " . count($tenants) . " tenant(s)). Do not set TENANCY_V2=true. Fix with: php stone tenancy:seed-privileges\n");
+            ($this->stderr)("\nPre-flight FAILED ($problems problem(s) in " . count($tenants) . " tenant(s)). Do not set LEGACY_TENANCY=false. Fix with: php stone tenancy:seed-privileges\n");
             return 1;
         }
         $this->out('Pre-flight passed: ' . count($tenants) . ' provisioned tenant(s), every held role has privileges.');

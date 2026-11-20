@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Tenancy\Platform;
 
-use StoneScriptPHP\Tenancy\Provisioning\AuthV2Client;
+use StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient;
 use StoneScriptPHP\Tenancy\Provisioning\ProvisioningException;
 use StoneScriptPHP\Tenancy\Provisioning\Uuid;
 
@@ -12,9 +12,9 @@ use StoneScriptPHP\Tenancy\Provisioning\Uuid;
  * `php stone platform:rotate-credential [--platform-id <uuid>]`
  *
  * Asks auth to add a `next` credential for this platform (auth keeps two live credentials so a secret can be
- * replaced without downtime). The new client id and secret are written to AUTH_V2_CLIENT_ID_NEXT and
- * AUTH_V2_CLIENT_SECRET_NEXT in the runtime secrets file; the credential in use (AUTH_V2_CLIENT_*) is not touched.
- * To finish the rotation: deploy with the NEXT values moved into AUTH_V2_CLIENT_ID / AUTH_V2_CLIENT_SECRET, then
+ * replaced without downtime). The new client id and secret are written to PLATFORM_CLIENT_ID_NEXT and
+ * PLATFORM_CLIENT_SECRET_NEXT in the runtime secrets file; the credential in use (PLATFORM_CLIENT_*) is not touched.
+ * To finish the rotation: deploy with the NEXT values moved into PLATFORM_CLIENT_ID / PLATFORM_CLIENT_SECRET, then
  * the operator revokes the old client id at auth (revoking the current credential promotes the next one).
  *
  * Same operator-token rules as platform:register (separate operator env, https, never printed). The secret is
@@ -27,13 +27,13 @@ final class PlatformRotateCredentialCommand
     private $stdout;
     /** @var callable(string):void */
     private $stderr;
-    /** @var callable(string):AuthV2Client */
+    /** @var callable(string):AuthTenancyClient */
     private $clientFactory;
 
     /**
      * @param callable(string):void $stdout
      * @param callable(string):void $stderr
-     * @param callable(string):AuthV2Client $clientFactory
+     * @param callable(string):AuthTenancyClient $clientFactory
      */
     public function __construct(callable $stdout, callable $stderr, callable $clientFactory)
     {
@@ -91,12 +91,12 @@ final class PlatformRotateCredentialCommand
         }
 
         try {
-            $secrets->upsert(['AUTH_V2_CLIENT_ID_NEXT' => $r['client_id'], 'AUTH_V2_CLIENT_SECRET_NEXT' => $r['client_secret']]);
+            $secrets->upsert(['PLATFORM_CLIENT_ID_NEXT' => $r['client_id'], 'PLATFORM_CLIENT_SECRET_NEXT' => $r['client_secret']]);
         } catch (\Throwable) {
             return $this->fail('The new credential was issued but could not be written to the secrets file. Rotate again with a new --idempotency-key.');
         }
 
-        ($this->stdout)("platform_id: $platformId\nnext credential saved as AUTH_V2_CLIENT_ID_NEXT / AUTH_V2_CLIENT_SECRET_NEXT\n");
+        ($this->stdout)("platform_id: $platformId\nnext credential saved as PLATFORM_CLIENT_ID_NEXT / PLATFORM_CLIENT_SECRET_NEXT\n");
         return 0;
     }
 

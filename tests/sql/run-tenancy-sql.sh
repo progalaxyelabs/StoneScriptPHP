@@ -89,9 +89,9 @@ expect "B2: nothing was tightened" "0" "$(val tenant_dups "SELECT count(*) FROM 
 # ---------------------------------------------------------------- C. main, fresh
 mkdb main_fresh
 for f in platform_get platform_upsert tenancy_get_tenant_status tenancy_upsert_tenant tenancy_set_tenant_status tenancy_create_membership tenancy_get_identity_memberships tenancy_find_membership tenancy_set_membership_status tenancy_find_request tenancy_save_request tenancy_list_tenants tenancy_mirror_membership_status tenancy_mirror_drift tenancy_list_active_member_identities; do load main_fresh "$MF/$f.pgsql.template"; done
-load main_fresh "$T/main/migrations/tenancy_v2_core.pgsql.template"
+load main_fresh "$T/main/migrations/tenancy_core.pgsql.template"
 for t in platform tenants tenant_memberships identities tenant_provision_requests tenancy_mirror_drift; do load main_fresh "$T/main/tables/$t.pgsql.template"; done
-load main_fresh "$T/main/migrations/tenancy_v2_core.pgsql.template"
+load main_fresh "$T/main/migrations/tenancy_core.pgsql.template"
 TN="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"; M1="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"; M2="cccccccc-cccc-4ccc-8ccc-cccccccccccc"; M3="dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 expect "C: a new tenant starts provisioning" "provisioning" "$(val main_fresh "SELECT o_status FROM tenancy_upsert_tenant('$TN', 'Acme', NULL, 'acme_tenant_x', '$I1')")"
 expect_error "C: a different tenant_db_name for the same tenant is refused" main_fresh "SELECT * FROM tenancy_upsert_tenant('$TN', 'Acme', NULL, 'other_db', '$I1')" "tenant_db_name_mismatch"
@@ -146,7 +146,7 @@ INSERT INTO tenant_memberships VALUES
  ('10000000-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', '00000000-0000-4000-8000-000000000001', 'owner'),
  ('10000000-0000-4000-8000-000000000002', '22222222-2222-4222-8222-222222222222', '00000000-0000-4000-8000-000000000001', 'cashier');
 SQL
-CORE="$T/main/migrations/tenancy_v2_core.pgsql.template"
+CORE="$T/main/migrations/tenancy_core.pgsql.template"
 load main_legacy "$CORE"
 st() { val main_legacy "SELECT tenant_provisioning_status FROM tenants WHERE uuid='00000000-0000-4000-8000-00000000000$1'"; }
 expect "D: active -> provisioned" "provisioned" "$(st 1)"
@@ -163,7 +163,7 @@ expect "D: owner flag carried over from the old role column" "true|false" "$(val
 expect "D: the old role column is kept" "owner" "$(val main_legacy "SELECT role FROM tenant_memberships WHERE id='10000000-0000-4000-8000-000000000001'")"
 expect "D: the tenant FK exists (not validated)" "f" "$(val main_legacy "SELECT convalidated FROM pg_constraint WHERE conname='tenant_memberships_tenant_fk'")"
 expect "D: business columns are untouched" "address" "$(val main_legacy "SELECT column_name FROM information_schema.columns WHERE table_name='tenants' AND column_name='address'")"
-expect "D: the v2 membership list works on the old tables" "1" "$(val main_legacy "SELECT count(*) FROM tenancy_get_identity_memberships('11111111-1111-4111-8111-111111111111')")"
+expect "D: the membership list works on the old tables" "1" "$(val main_legacy "SELECT count(*) FROM tenancy_get_identity_memberships('11111111-1111-4111-8111-111111111111')")"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL TENANCY SQL CHECKS PASSED"; exit 0; fi

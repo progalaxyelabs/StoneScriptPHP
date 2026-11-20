@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace StoneScriptPHP\Tenancy\Platform;
 
-use StoneScriptPHP\Tenancy\Provisioning\AuthV2Client;
+use StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient;
 use StoneScriptPHP\Tenancy\Provisioning\ProvisioningException;
 
 /**
@@ -30,13 +30,13 @@ final class PlatformRegisterCommand
     private $stdout;
     /** @var callable(string):void */
     private $stderr;
-    /** @var callable(string):AuthV2Client */
+    /** @var callable(string):AuthTenancyClient */
     private $clientFactory;
 
     /**
      * @param callable(string):void $stdout
      * @param callable(string):void $stderr
-     * @param callable(string):AuthV2Client $clientFactory builds the client for an auth base URL
+     * @param callable(string):AuthTenancyClient $clientFactory builds the client for an auth base URL
      */
     public function __construct(callable $stdout, callable $stderr, callable $clientFactory, private readonly PlatformRowStore $rows)
     {
@@ -70,8 +70,8 @@ final class PlatformRegisterCommand
         if ($name === '' || strlen($name) > 255 || preg_match('/[\x00-\x1f]/', $name) === 1) {
             return $this->fail('--name is required (at most 255 characters, no control characters)');
         }
-        if (!AuthV2Client::isValidSlug($slug)) {
-            return $this->fail('--slug must be lower-case a-z0-9 words joined by single underscores, at most ' . AuthV2Client::MAX_SLUG_LENGTH . ' characters (so {slug}_tenant_{uuid} fits a 63-byte database name)');
+        if (!AuthTenancyClient::isValidSlug($slug)) {
+            return $this->fail('--slug must be lower-case a-z0-9 words joined by single underscores, at most ' . AuthTenancyClient::MAX_SLUG_LENGTH . ' characters (so {slug}_tenant_{uuid} fits a 63-byte database name)');
         }
 
         $authUrl = (string) ($opts['auth-url'] ?? $projectAuthUrl ?? '');
@@ -97,12 +97,12 @@ final class PlatformRegisterCommand
 
         $secrets = new SecretsFile($secretsPath);
         try {
-            // The v2 credential goes to its OWN variables. EXTERNAL_AUTH_CLIENT_SECRET is the live 14.x
+            // The platform credential goes to its OWN variables. EXTERNAL_AUTH_CLIENT_SECRET is the legacy 14.x
             // X-Platform-Secret and is never written or replaced here.
-            $values = ['AUTH_V2_CLIENT_ID' => $registration['client_id'], 'PLATFORM_UUID' => $registration['platform_id']];
+            $values = ['PLATFORM_CLIENT_ID' => $registration['client_id'], 'PLATFORM_UUID' => $registration['platform_id']];
             if ($registration['client_secret'] !== null) {
-                $values['AUTH_V2_CLIENT_SECRET'] = $registration['client_secret'];
-            } elseif ($secrets->get('AUTH_V2_CLIENT_ID') !== $registration['client_id'] || $secrets->get('AUTH_V2_CLIENT_SECRET') === null) {
+                $values['PLATFORM_CLIENT_SECRET'] = $registration['client_secret'];
+            } elseif ($secrets->get('PLATFORM_CLIENT_ID') !== $registration['client_id'] || $secrets->get('PLATFORM_CLIENT_SECRET') === null) {
                 // Auth never shows a secret twice and none for this client is stored: say so, do not guess.
                 return $this->fail('Auth did not return a client secret (it was issued earlier) and none for this client is stored in the secrets file. Rotate the platform credential, then run this command again.');
             }

@@ -7,36 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [16.0.0]
+
+MAJOR, rename-only. See `UPGRADING-16.0.md` for every old -> new name. No behaviour changes except one: the tenancy flag
+is now `LEGACY_TENANCY` and its default is `true` (the legacy 14.x flow); `false` selects the new flow, so every check
+that read the old flag is inverted. Also renamed: the platform credential variables (`PLATFORM_CLIENT_ID` /
+`PLATFORM_CLIENT_SECRET`), the auth client class (`AuthTenancyClient`), the auth routes it calls (now under
+`/api/internal/...`), the route and service methods and the invitation config key that carried the old flag name, the
+generated main-database migration (`tenancy_core`), the migration error prefix (`tenancy:`), and the test classes.
+
 ## [15.0.0]
 
-MAJOR. See `UPGRADING-15.0.md`. Tenancy v2: a platform, its tenants and their memberships have one source of
+MAJOR. See `UPGRADING-15.0.md`. Tenancy: a platform, its tenants and their memberships have one source of
 truth for ids, roles live only in the tenant database, and provisioning has one order that can be retried.
-A platform that upgrades to 15.0.0 keeps the 14.x provisioning flow until it sets `TENANCY_V2=true`.
+A platform that upgrades keeps the 14.x provisioning flow until it sets `LEGACY_TENANCY=false` (names in this section
+are the 16.0.0 names).
 
 ### Added
 - `php stone platform:register --name "<name>" --slug <slug>`: registers the platform with the auth service. The
   operator token is read only from `~/.stone/operator.env` (or `--operator-env=<file>`), or from the
   `STONE_OPERATOR_TOKEN` variable of that one command; never from the application `.env`; https only (http for
-  localhost). The client credential is written to `AUTH_V2_CLIENT_ID` / `AUTH_V2_CLIENT_SECRET` in the runtime secrets
-  file (default `<project>/.env`; never `EXTERNAL_AUTH_CLIENT_SECRET`, the live 14.x secret) before the `platform` row is
+  localhost). The client credential is written to `PLATFORM_CLIENT_ID` / `PLATFORM_CLIENT_SECRET` in the runtime secrets
+  file (default `<project>/.env`; never `EXTERNAL_AUTH_CLIENT_SECRET`, the legacy 14.x secret) before the `platform` row is
   updated, so an interrupted run can be repeated. Only `platform_id` and the slug are printed. Idempotent.
-- `php stone platform:rotate-credential`: adds a `next` credential, written to `AUTH_V2_CLIENT_ID_NEXT` / `AUTH_V2_CLIENT_SECRET_NEXT`.
+- `php stone platform:rotate-credential`: adds a `next` credential, written to `PLATFORM_CLIENT_ID_NEXT` / `PLATFORM_CLIENT_SECRET_NEXT`.
 - Platform-wide privilege seed (`config/tenant-privileges.php`, stub written by `generate tenancy`) written into every tenant
   database at provisioning; provisioning fails when the owner role has no privileges. `tenant_seed_privileges` tenant function.
-- `MembershipAuthority::setMembershipStatus()` (auth v2 `PUT /memberships/{id}/status`; local equivalent keeps the
+- `MembershipAuthority::setMembershipStatus()` (auth `PUT /memberships/{id}/status`; local equivalent keeps the
   last-active-owner rule). A re-invite of a suspended or removed member is refused with its status.
-- Existing-tenant guard on v2 provision-tenant (same-name replay, 409, `allow_additional_tenant`); Google sign-up promotes the
-  OAuth connection first and continues with the promoted token. `exchange` under v2 uses the authority and the tenant database.
+- Existing-tenant guard on provision-tenant in the new flow (same-name replay, 409, `allow_additional_tenant`); Google sign-up promotes the
+  OAuth connection first and continues with the promoted token. `exchange` in the new flow uses the authority and the tenant database.
 - `generate tenancy` parses `CREATE TABLE` names (not file names) and refuses to write a duplicate table; a forward-only
   `users_expand_identity` tenant migration for an existing `users` table.
 - `php stone tenancy:seed-privileges [--tenant=<uuid>] [--dry-run]` (applies `config/tenant-privileges.php` to every provisioned
-  tenant database, idempotent, per-tenant report) and `php stone tenancy:preflight` (mandatory before `TENANCY_V2=true`: fails
+  tenant database, idempotent, per-tenant report) and `php stone tenancy:preflight` (mandatory before `LEGACY_TENANCY=false`: fails
   if a provisioned tenant has a role with users and zero privileges).
 - `tenancy:preflight` also fails when an active membership has no active tenant user with a privileged role, and reports mirror
   drift (`tenancy_mirror_drift`); the external status mirror applies no local last-owner rule and never fails the call.
-- accept-invite under v2 falls back to the routed tenant when the invitation has none, and refuses an invitation without an
+- accept-invite in the new flow falls back to the routed tenant when the invitation has none, and refuses an invitation without an
   inviter (422 `invite_missing_inviter`).
-- accept-invite under tenancy v2 adds the member through `TenantStaffInvite` with the invitation's role; an unknown role refuses
+- accept-invite in the new flow adds the member through `TenantStaffInvite` with the invitation's role; an unknown role refuses
   the invite before anything is written (`invite_invalid_role`).
 - `generate tenancy` exits 2 when it refused an existing table. The platform code for the boot check may come from
   `auth.platform.code` or `PLATFORM_CODE`. `tenant_user_upsert` works on a users table whose id is the identity.
@@ -49,8 +59,8 @@ A platform that upgrades to 15.0.0 keeps the 14.x provisioning flow until it set
   idempotency ledger. Existing files are never overwritten.
 - `tenant_provisioning_status` vocabulary: `provisioning`, `provisioned`, `provisioning_failed`,
   `deprovisioning`, `deprovisioned`. It changes only through provisioning and removal.
-- `StoneScriptPHP\Tenancy\Provisioning\MembershipAuthority` with `ExternalMembershipAuthority` (auth v2 endpoints,
-  all HTTP in `AuthV2Client`) and `BuiltinMembershipAuthority` (local main database), chosen by `AUTH_MODE`
+- `StoneScriptPHP\Tenancy\Provisioning\MembershipAuthority` with `ExternalMembershipAuthority` (auth tenancy endpoints,
+  all HTTP in `AuthTenancyClient`) and `BuiltinMembershipAuthority` (local main database), chosen by `AUTH_MODE`
   (`external`/`hybrid` or `builtin`).
 - `TenantProvisioningSequence`: auth tenant and owner membership first, then the main `tenants` row, the gateway
   database (its returned `database_name` must equal the reserved `tenant_db_name`), the owner `users` and
@@ -60,12 +70,12 @@ A platform that upgrades to 15.0.0 keeps the 14.x provisioning flow until it set
 - `TenantStaffInvite`: authority membership, then tenant-DB user and role, then the main membership row.
 - `TenantRoleResolver` / `TenantRoleStore`: roles and privileges read from the tenant database. An unknown role
   grants nothing and there is no fallback role.
-- With `TENANCY_V2=true`, `GET {prefix}/memberships` and `POST {prefix}/select-tenant` use the authority's list and
-  verify (auth v2), and select-tenant reads roles from the tenant database and mints a token carrying ALL the user's
+- With `LEGACY_TENANCY=false`, `GET {prefix}/memberships` and `POST {prefix}/select-tenant` use the authority's list and
+  verify (auth), and select-tenant reads roles from the tenant database and mints a token carrying ALL the user's
   known roles (`roles[]`, no `role_id`). New: `TokenExchangeService::exchangeApiTokenWithRoles()`,
   `AuthenticatedUser::$roles` / `hasRole()`; `RequireRoleMiddleware` accepts any held role from `roles[]`.
 - Platform slugs are at most 19 characters (enforced by `platform:register`, `generate tenancy` and the `platform` table).
-- Env: `TENANCY_V2` (default false), `AUTH_V2_CLIENT_ID`, `AUTH_V2_CLIENT_SECRET`, `PLATFORM_UUID`.
+- Env: `LEGACY_TENANCY` (default true), `PLATFORM_CLIENT_ID`, `PLATFORM_CLIENT_SECRET`, `PLATFORM_UUID`.
 
 ### Changed
 - BREAKING: `PlatformCodeGuard` fails CLOSED. A server with no `PLATFORM_CODE` configured now refuses every token
@@ -73,7 +83,7 @@ A platform that upgrades to 15.0.0 keeps the 14.x provisioning flow until it set
   a warning, and a missing or blank `PLATFORM_CODE` with `AUTH_MODE=external|hybrid` is a hard boot error
   (`Application::run()` and `php stone env:check`). Set `PLATFORM_CODE` (== the registered slug == `DB_GATEWAY_PLATFORM`)
   before upgrading.
-- `AuthenticatedUser::$roles` is filled only from a tenancy v2 token (`token_type` `card`, no `role_id`); legacy tokens unchanged.
+- `AuthenticatedUser::$roles` is filled only from a current-flow token (`token_type` `card`, no `role_id`); legacy tokens unchanged.
 - The generated invitations config reads `PLATFORM_CODE` through `Env` (it used `getenv()`).
 - Gateway database creation also reads a database name given as `database`.
 

@@ -5,17 +5,17 @@ declare(strict_types=1);
 namespace StoneScriptPHP\Tests\Unit\Tenancy;
 
 use PHPUnit\Framework\TestCase;
-use StoneScriptPHP\Tenancy\Provisioning\AuthV2Client;
+use StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient;
 use StoneScriptPHP\Tenancy\Provisioning\ProvisioningException;
 
 /**
- * Pins every request and response shape of the auth service's v2 handlers (paths, headers, bodies,
+ * Pins every request and response shape of the auth service's tenancy handlers (paths, headers, bodies,
  * fields, error codes) as implemented by the auth side. If the auth handlers change, this file is what
- * must be changed together with AuthV2Client.
+ * must be changed together with AuthTenancyClient.
  *
- * @covers \StoneScriptPHP\Tenancy\Provisioning\AuthV2Client
+ * @covers \StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient
  */
-final class AuthV2ClientContractTest extends TestCase
+final class AuthTenancyClientContractTest extends TestCase
 {
     private const PLATFORM = '12121212-1212-4212-8212-121212121212';
     private const TENANT = '22222222-2222-4222-8222-222222222222';
@@ -25,9 +25,9 @@ final class AuthV2ClientContractTest extends TestCase
     /** @var list<array{string,string,list<string>,?string}> */
     private array $seen = [];
 
-    private function client(int $status, array $body, ?string $id = 'pc_0123456789abcdef', ?string $secret = 'S3cretS3cretS3cretS3cretS3cretS3cret'): AuthV2Client
+    private function client(int $status, array $body, ?string $id = 'pc_0123456789abcdef', ?string $secret = 'S3cretS3cretS3cretS3cretS3cretS3cret'): AuthTenancyClient
     {
-        return new AuthV2Client('https://auth.example.test', $id, $secret, function (string $m, string $u, array $h, ?string $b) use ($status, $body): array {
+        return new AuthTenancyClient('https://auth.example.test', $id, $secret, function (string $m, string $u, array $h, ?string $b) use ($status, $body): array {
             $this->seen[] = [$m, $u, $h, $b];
             return [$status, json_encode($body)];
         });
@@ -49,7 +49,7 @@ final class AuthV2ClientContractTest extends TestCase
 
         [$method, $url, $headers, $body] = $this->seen[0];
         $this->assertSame('POST', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/operator/platforms', $url);
+        $this->assertSame('https://auth.example.test/api/internal/operator/platforms', $url);
         $this->assertContains('X-Operator-Token: op-token', $headers);
         $this->assertSame(['name' => 'Acme', 'slug' => 'acme', 'idempotency_key' => 'register:acme'], json_decode((string) $body, true));
         $this->assertSame(['platform_id' => self::PLATFORM, 'client_id' => 'pc_0123456789abcdef', 'client_secret' => 'sec'], $r);
@@ -72,7 +72,7 @@ final class AuthV2ClientContractTest extends TestCase
 
         [$method, $url, $headers, $body] = $this->seen[0];
         $this->assertSame('POST', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/tenants', $url);
+        $this->assertSame('https://auth.example.test/api/internal/tenants', $url);
         $this->assertContains('X-Platform-Client-Id: pc_0123456789abcdef', $headers);
         $this->assertContains('X-Platform-Client-Secret: S3cretS3cretS3cretS3cretS3cretS3cret', $headers);
         $this->assertContains('Authorization: Bearer user.jwt', $headers);
@@ -88,7 +88,7 @@ final class AuthV2ClientContractTest extends TestCase
 
         [$method, $url, $headers, $body] = $this->seen[0];
         $this->assertSame('PUT', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/memberships/' . self::MEMBERSHIP . '/status', $url);
+        $this->assertSame('https://auth.example.test/api/internal/memberships/' . self::MEMBERSHIP . '/status', $url);
         $this->assertContains('X-Platform-Client-Id: pc_0123456789abcdef', $headers);
         $this->assertSame(['status' => 'removed'], json_decode((string) $body, true));
 
@@ -103,7 +103,7 @@ final class AuthV2ClientContractTest extends TestCase
 
         [$method, $url, $headers, $body] = $this->seen[0];
         $this->assertSame('POST', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/operator/platforms/' . self::PLATFORM . '/credentials/rotate', $url);
+        $this->assertSame('https://auth.example.test/api/internal/operator/platforms/' . self::PLATFORM . '/credentials/rotate', $url);
         $this->assertContains('X-Operator-Token: op-token', $headers);
         $this->assertSame(['idempotency_key' => 'rot-1'], json_decode((string) $body, true));
         $this->assertSame(['platform_id' => self::PLATFORM, 'client_id' => 'pc_next0123456789', 'client_secret' => 'sec'], $r);
@@ -115,8 +115,8 @@ final class AuthV2ClientContractTest extends TestCase
     public function test_operator_calls_refuse_plain_http_except_localhost(): void
     {
         $sent = [];
-        $make = function (string $url) use (&$sent): AuthV2Client {
-            return new AuthV2Client($url, null, null, function () use (&$sent): array {
+        $make = function (string $url) use (&$sent): AuthTenancyClient {
+            return new AuthTenancyClient($url, null, null, function () use (&$sent): array {
                 $sent[] = 1;
                 return [201, json_encode(['platform_id' => self::PLATFORM, 'client_id' => 'pc_0123456789abcdef'])];
             });
@@ -157,8 +157,8 @@ final class AuthV2ClientContractTest extends TestCase
         $client->markProvisioned(self::TENANT);
         $client->markProvisioningFailed(self::TENANT);
 
-        $this->assertSame('https://auth.example.test/api/internal/v2/tenants/' . self::TENANT . '/provisioned', $this->seen[0][1]);
-        $this->assertSame('https://auth.example.test/api/internal/v2/tenants/' . self::TENANT . '/provisioning-failed', $this->seen[1][1]);
+        $this->assertSame('https://auth.example.test/api/internal/tenants/' . self::TENANT . '/provisioned', $this->seen[0][1]);
+        $this->assertSame('https://auth.example.test/api/internal/tenants/' . self::TENANT . '/provisioning-failed', $this->seen[1][1]);
         $this->assertNull($this->seen[0][3]);
         $this->assertNull($this->seen[1][3]);
         $this->assertNotContains('authorization', $this->headerNames(), 'these calls need only the platform credential');
@@ -174,7 +174,7 @@ final class AuthV2ClientContractTest extends TestCase
         $this->assertSame(['id' => self::MEMBERSHIP, 'status' => 'active'], $id);
         $this->assertSame(['identity_id' => self::IDENTITY, 'idempotency_key' => 'inv-1', 'invited_by_identity_id' => '44444444-4444-4444-8444-444444444444'], json_decode((string) $this->seen[0][3], true));
         $this->assertSame(['identity_id' => self::IDENTITY, 'idempotency_key' => 'inv-2'], json_decode((string) $this->seen[1][3], true));
-        $this->assertSame('https://auth.example.test/api/internal/v2/tenants/' . self::TENANT . '/memberships', $this->seen[0][1]);
+        $this->assertSame('https://auth.example.test/api/internal/tenants/' . self::TENANT . '/memberships', $this->seen[0][1]);
     }
 
     public function test_list_memberships_shape(): void
@@ -186,7 +186,7 @@ final class AuthV2ClientContractTest extends TestCase
 
         [$method, $url, $headers, $body] = $this->seen[0];
         $this->assertSame('GET', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/memberships', $url);
+        $this->assertSame('https://auth.example.test/api/internal/memberships', $url);
         $this->assertNull($body);
         $this->assertContains('Authorization: Bearer user.jwt', $headers);
         $this->assertContains('X-Platform-Client-Id: pc_0123456789abcdef', $headers);
@@ -232,7 +232,7 @@ final class AuthV2ClientContractTest extends TestCase
 
         [$method, $url, , $body] = $this->seen[0];
         $this->assertSame('POST', $method);
-        $this->assertSame('https://auth.example.test/api/internal/v2/memberships/verify', $url);
+        $this->assertSame('https://auth.example.test/api/internal/memberships/verify', $url);
         $this->assertSame(['tenant_id' => self::TENANT], json_decode((string) $body, true));
         $this->assertSame(self::MEMBERSHIP, $row['membership_id']);
 
@@ -260,12 +260,12 @@ final class AuthV2ClientContractTest extends TestCase
 
     public function test_slug_rule_is_at_most_19_characters(): void
     {
-        $this->assertTrue(AuthV2Client::isValidSlug('acme'));
-        $this->assertTrue(AuthV2Client::isValidSlug('acme_shop_2'));
-        $this->assertTrue(AuthV2Client::isValidSlug(str_repeat('a', 19)));
-        $this->assertFalse(AuthV2Client::isValidSlug(str_repeat('a', 20)));
+        $this->assertTrue(AuthTenancyClient::isValidSlug('acme'));
+        $this->assertTrue(AuthTenancyClient::isValidSlug('acme_shop_2'));
+        $this->assertTrue(AuthTenancyClient::isValidSlug(str_repeat('a', 19)));
+        $this->assertFalse(AuthTenancyClient::isValidSlug(str_repeat('a', 20)));
         foreach (['', 'Acme', 'acme-shop', 'acme__shop', '_acme', 'acme_', 'acme shop'] as $bad) {
-            $this->assertFalse(AuthV2Client::isValidSlug($bad), $bad);
+            $this->assertFalse(AuthTenancyClient::isValidSlug($bad), $bad);
         }
         // {slug}_tenant_{uuid with underscores} must fit a 63-byte database name.
         $this->assertLessThanOrEqual(63, strlen(str_repeat('a', 19) . '_tenant_' . str_replace('-', '_', '22222222-2222-4222-8222-222222222222')));

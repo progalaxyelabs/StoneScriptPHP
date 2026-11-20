@@ -45,8 +45,8 @@ use StoneScriptPHP\Tenancy\Provisioning\Uuid;
 class InvitationCompletionService
 {
     /**
-     * @param TenantStaffInvite|null $staffInvite tenancy v2 only: the writer that adds the member (authority membership,
-     *        tenant-DB user + role, main membership row). Built from the environment when TENANCY_V2 is on and none is given.
+     * @param TenantStaffInvite|null $staffInvite current tenancy flow only: the writer that adds the member (authority membership,
+     *        tenant-DB user + role, main membership row). Built from the environment when LEGACY_TENANCY is false and none is given.
      */
     public function __construct(
         private readonly TokenExchangeService $tokenExchangeService,
@@ -55,27 +55,27 @@ class InvitationCompletionService
     ) {
     }
 
-    /** Is this accept running under tenancy v2? `$platformConfig['tenancy_v2']` decides when present, else TENANCY_V2. */
-    private function tenancyV2(array $platformConfig): bool
+    /** Is this accept on the legacy flow? `$platformConfig['legacy_tenancy']` decides when present, else LEGACY_TENANCY (default true). */
+    private function legacyTenancy(array $platformConfig): bool
     {
-        if (array_key_exists('tenancy_v2', $platformConfig)) {
-            return (bool) $platformConfig['tenancy_v2'];
+        if (array_key_exists('legacy_tenancy', $platformConfig)) {
+            return (bool) $platformConfig['legacy_tenancy'];
         }
         try {
-            return TenancyMode::v2Enabled();
+            return TenancyMode::legacy();
         } catch (\Throwable) {
-            return false;
+            return true;
         }
     }
 
     /**
-     * Tenancy v2 accept: the member is added through the MembershipAuthority (auth v2 add member), the tenant database
+     * Current-flow accept: the member is added through the MembershipAuthority (auth add member), the tenant database
      * (`users` + `user_roles` with the invitation's role) and the main `tenant_memberships` table. The invitation's
      * role must be one the platform's privilege seed knows (it has privileges): an unknown or missing role refuses
      * the invite BEFORE anything is written. markAccepted() still runs last, so a failed accept is retryable.
      * `membership_writer` is not called (the framework writes the membership); the invitation must carry its tenant id.
      */
-    private function completeTenancyV2(
+    private function completeTenancy(
         InvitationRecord $invitation,
         InvitationRepositoryInterface $repository,
         string $authToken,
@@ -363,10 +363,10 @@ class InvitationCompletionService
         // Step 5: role decision — platform-owned, never this service.
         $role = $roleResolver($invitation);
 
-        // Tenancy v2: the framework adds the member (authority + tenant DB + main row) with this role; see
-        // completeTenancyV2(). An unknown role is refused there before anything is written.
-        if ($this->tenancyV2($platformConfig)) {
-            return $this->completeTenancyV2($invitation, $repository, $authToken, $authClaims, $identityId, (string) $role, $platformConfig);
+        // Current tenancy flow: the framework adds the member (authority + tenant DB + main row) with this role; see
+        // completeTenancy(). An unknown role is refused there before anything is written.
+        if (!$this->legacyTenancy($platformConfig)) {
+            return $this->completeTenancy($invitation, $repository, $authToken, $authClaims, $identityId, (string) $role, $platformConfig);
         }
 
         // Step 6: platform's own tenant-membership write — also

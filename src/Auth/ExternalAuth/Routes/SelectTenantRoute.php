@@ -11,8 +11,8 @@ use StoneScriptPHP\ApiResponse;
  *
  * 14.x flow: proxies tenant selection to the auth service (selection_token + tenant_id).
  *
- * Tenancy v2 (TENANCY_V2=true): the caller's identity token is enough. The membership is verified
- * through the MembershipAuthority (auth v2 `memberships/verify`, or the local main database), the
+ * Current tenancy flow (LEGACY_TENANCY=false): the caller's identity token is enough. The membership is verified
+ * through the MembershipAuthority (auth `memberships/verify`, or the local main database), the
  * user's roles are read STRICTLY from the TENANT database (an unknown role grants nothing: no known role is a
  * 403 and no token; a failed read is a 502), and a platform API token carrying ALL those roles (roles[], no
  * single or primary role) is minted; what the roles allow is the union of their privileges.
@@ -31,7 +31,7 @@ class SelectTenantRoute extends BaseExternalAuthRoute
     public function validation_rules(): array
     {
         return [
-            'selection_token' => $this->tenancyV2Enabled() ? 'optional|string' : 'required|string',
+            'selection_token' => $this->legacyTenancy() ? 'required|string' : 'optional|string',
             'tenant_id' => 'required|string',
         ];
     }
@@ -49,8 +49,8 @@ class SelectTenantRoute extends BaseExternalAuthRoute
             return $denial;
         }
 
-        if ($this->tenancyV2Enabled()) {
-            return $this->processTenancyV2();
+        if (!$this->legacyTenancy()) {
+            return $this->processTenancy();
         }
 
         $input = [
@@ -69,7 +69,7 @@ class SelectTenantRoute extends BaseExternalAuthRoute
         );
     }
 
-    private function processTenancyV2(): ApiResponse
+    private function processTenancy(): ApiResponse
     {
         $user = auth();
         $identityId = (string) ($user?->user_id ?? '');
@@ -80,7 +80,7 @@ class SelectTenantRoute extends BaseExternalAuthRoute
         try {
             $membership = $this->membershipAuthority()->verifyMembership($identityId, $this->getBearerToken(), $this->tenant_id);
         } catch (\Throwable $e) {
-            log_error('SelectTenantRoute: v2 membership check failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            log_error('SelectTenantRoute: membership check failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
             return res_error('Authentication service unavailable', 502);
         }
         if ($membership === null) {

@@ -49,7 +49,7 @@ class RequireRoleMiddleware implements MiddlewareInterface
         // see class docblock.
         $activeRole = $claims['role_id'] ?? $claims['user_role'] ?? null;
 
-        // Tenancy v2 API tokens (token_type 'card') carry ALL the user's roles in `roles[]` and no role_id: allowed
+        // Current-flow API tokens (token_type 'card') carry ALL the user's roles in `roles[]` and no role_id: allowed
         // when ANY held role is on the allowed list. Any other token shape keeps the legacy behaviour below.
         if ($activeRole === null && ($claims['token_type'] ?? null) === 'card' && is_array($claims['roles'] ?? null) && $claims['roles'] !== []) {
             foreach ($claims['roles'] as $held) {

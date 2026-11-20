@@ -18,7 +18,7 @@ require_once __DIR__ . '/helpers/cli-env.php';
 
 use StoneScriptPHP\Tenancy\Platform\DatabasePlatformRowStore;
 use StoneScriptPHP\Tenancy\Platform\PlatformRegisterCommand;
-use StoneScriptPHP\Tenancy\Provisioning\AuthV2Client;
+use StoneScriptPHP\Tenancy\Provisioning\AuthTenancyClient;
 
 $argv = $_SERVER['argv'];
 $args = array_slice($argv, 1);
@@ -36,7 +36,7 @@ if ($needsEnv) {
 $command = new PlatformRegisterCommand(
     static function (string $text): void { fwrite(STDOUT, $text); },
     static function (string $text): void { fwrite(STDERR, $text); },
-    static fn (string $baseUrl): AuthV2Client => new AuthV2Client($baseUrl),
+    static fn (string $baseUrl): AuthTenancyClient => new AuthTenancyClient($baseUrl),
     new DatabasePlatformRowStore(),
 );
 

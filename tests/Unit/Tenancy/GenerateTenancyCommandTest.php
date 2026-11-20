@@ -61,7 +61,7 @@ final class GenerateTenancyCommandTest extends TestCase
         $this->assertFileExists("$tenant/functions/tenant_missing_privileges.pgsql");
         $this->assertFileExists("$tenant/functions/tenant_role_privilege_counts.pgsql");
         $this->assertFileExists($this->project->dir . '/config/tenant-privileges.php', 'the platform-wide privilege seed stub');
-        $this->assertNotEmpty(glob("$main/migrations/*tenancy_v2_core.*"));
+        $this->assertNotEmpty(glob("$main/migrations/*tenancy_core.*"));
         $this->assertFileDoesNotExist("$main/tables/identities.pgsql", 'identities is only for --builtin');
         $this->assertFileDoesNotExist("$main/functions/tenancy_find_request.pgsql");
     }
@@ -91,7 +91,7 @@ final class GenerateTenancyCommandTest extends TestCase
         $this->assertStringContainsString("Refused: table 'tenants' is already defined", $first);
         $this->assertStringContainsString('core columns', $first);
         $this->assertStringContainsString("-- my own tenants table", (string) file_get_contents("$tables/tenants.pgsql"));
-        $this->assertFileExists($this->project->dir . '/src/postgresql/main/postgresql/migrations/008_tenancy_v2_core.pgsql', 'continues the existing numbering');
+        $this->assertFileExists($this->project->dir . '/src/postgresql/main/postgresql/migrations/008_tenancy_core.pgsql', 'continues the existing numbering');
 
         $before = $this->snapshot();
         [$status, $second] = $this->project->stone(['generate', 'tenancy']);
@@ -148,7 +148,7 @@ final class GenerateTenancyCommandTest extends TestCase
 
     public function test_the_core_migration_maps_db_status_and_rederives_on_every_run(): void
     {
-        $sql = (string) file_get_contents(self::TEMPLATES . '/main/migrations/tenancy_v2_core.pgsql.template');
+        $sql = (string) file_get_contents(self::TEMPLATES . '/main/migrations/tenancy_core.pgsql.template');
         $flat = preg_replace('/\s+/', ' ', $sql) ?? '';
 
         foreach (["WHEN 'creating' THEN 'provisioning'", "WHEN 'active' THEN 'provisioned'", "WHEN 'error' THEN 'provisioning_failed'", "WHEN 'suspended' THEN 'provisioned'", "WHEN 'deleted' THEN 'deprovisioned'"] as $mapping) {
@@ -283,7 +283,7 @@ final class GenerateTenancyCommandTest extends TestCase
         foreach (['main/tables/tenants', 'main/functions/tenancy_set_tenant_status'] as $name) {
             $this->assertStringContainsString($vocabulary, (string) file_get_contents(self::TEMPLATES . "/$name.pgsql.template"), $name);
         }
-        $migration = (string) file_get_contents(self::TEMPLATES . '/main/migrations/tenancy_v2_core.pgsql.template');
+        $migration = (string) file_get_contents(self::TEMPLATES . '/main/migrations/tenancy_core.pgsql.template');
         $this->assertStringContainsString("'provisioning', 'provisioned', 'provisioning_failed', 'deprovisioning', 'deprovisioned'", preg_replace('/\s+/', ' ', $migration) ?? '');
         foreach ($this->templates() as $file) {
             $this->assertDoesNotMatchRegularExpression('/provisioning-failed|\bactivate\b/i', (string) file_get_contents($file), basename($file) . ': the words never mix');
@@ -297,14 +297,14 @@ final class GenerateTenancyCommandTest extends TestCase
         $this->assertStringContainsString('ON DELETE NO ACTION', $table);
         $this->assertStringNotContainsString('CASCADE', $table);
 
-        $migration = (string) file_get_contents(self::TEMPLATES . '/main/migrations/tenancy_v2_core.pgsql.template');
+        $migration = (string) file_get_contents(self::TEMPLATES . '/main/migrations/tenancy_core.pgsql.template');
         $this->assertStringContainsString('NOT VALID', $migration, 'existing orphans must not block the FK');
         $this->assertStringContainsString('ON DELETE NO ACTION', $migration);
     }
 
     public function test_migration_checks_the_data_before_it_tightens_a_constraint(): void
     {
-        $migration = (string) file_get_contents(self::TEMPLATES . '/main/migrations/tenancy_v2_core.pgsql.template');
+        $migration = (string) file_get_contents(self::TEMPLATES . '/main/migrations/tenancy_core.pgsql.template');
 
         $this->assertMatchesRegularExpression('/RAISE EXCEPTION[^;]*duplicate tenants\.tenant_db_name/', $migration);
         $this->assertMatchesRegularExpression('/RAISE EXCEPTION[^;]*duplicate tenant_memberships/', $migration);

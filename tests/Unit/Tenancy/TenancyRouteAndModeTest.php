@@ -20,14 +20,14 @@ use StoneScriptPHP\Tenancy\Provisioning\TenantProvisioningSequence;
 require_once __DIR__ . '/TenancyFakes.php';
 
 /** Route that lets the test choose the flag and the sequence (the two protected seams a platform also uses). */
-final class V2ProvisionRoute extends ProvisionTenantRoute
+final class SwitchableProvisionRoute extends ProvisionTenantRoute
 {
-    public bool $v2 = true;
+    public bool $legacy = false;
     public ?TenantProvisioningSequence $sequence = null;
 
-    protected function tenancyV2Enabled(): bool
+    protected function legacyTenancy(): bool
     {
-        return $this->v2;
+        return $this->legacy;
     }
 
     protected function buildTenancySequence(): TenantProvisioningSequence
@@ -36,14 +36,14 @@ final class V2ProvisionRoute extends ProvisionTenantRoute
     }
 }
 
-final class V2MembershipsRoute extends \StoneScriptPHP\Auth\ExternalAuth\Routes\MembershipsRoute
+final class SwitchableMembershipsRoute extends \StoneScriptPHP\Auth\ExternalAuth\Routes\MembershipsRoute
 {
-    public bool $v2 = true;
+    public bool $legacy = false;
     public ?\StoneScriptPHP\Tenancy\Provisioning\MembershipAuthority $authority = null;
 
-    protected function tenancyV2Enabled(): bool
+    protected function legacyTenancy(): bool
     {
-        return $this->v2;
+        return $this->legacy;
     }
 
     protected function membershipAuthority(): \StoneScriptPHP\Tenancy\Provisioning\MembershipAuthority
@@ -53,8 +53,8 @@ final class V2MembershipsRoute extends \StoneScriptPHP\Auth\ExternalAuth\Routes\
 }
 
 /**
- * TENANCY_V2 switch, AUTH_MODE authority selection, and the provision-tenant route running the v2
- * sequence (success, failure step reported, 14.x flow untouched when the flag is off).
+ * LEGACY_TENANCY switch, AUTH_MODE authority selection, and the provision-tenant route running the
+ * provisioning sequence (success, failure step reported, legacy 14.x flow untouched while the flag is true).
  *
  * @covers \StoneScriptPHP\Tenancy\Provisioning\TenancyMode
  * @covers \StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute
@@ -104,19 +104,19 @@ final class TenancyRouteAndModeTest extends TestCase
         (new \ReflectionProperty(Env::class, '_instance'))->setValue(null, null);
     }
 
-    public function test_tenancy_v2_is_off_by_default_and_on_only_when_set(): void
+    public function test_legacy_tenancy_is_on_by_default_and_off_only_when_set_false(): void
     {
-        $this->unsetEnv('TENANCY_V2');
+        $this->unsetEnv('LEGACY_TENANCY');
         $this->resetEnv();
-        $this->assertFalse(TenancyMode::v2Enabled(Env::get_instance()), 'platforms upgrading to 15.0.0 keep the old flow until they switch');
+        $this->assertTrue(TenancyMode::legacy(Env::get_instance()), 'platforms keep the legacy flow until they switch');
 
-        $this->setEnv('TENANCY_V2', 'true');
+        $this->setEnv('LEGACY_TENANCY', 'false');
         $this->resetEnv();
-        $this->assertTrue(TenancyMode::v2Enabled(Env::get_instance()));
+        $this->assertFalse(TenancyMode::legacy(Env::get_instance()));
 
-        $this->setEnv('TENANCY_V2', 'false');
+        $this->setEnv('LEGACY_TENANCY', 'true');
         $this->resetEnv();
-        $this->assertFalse(TenancyMode::v2Enabled(Env::get_instance()));
+        $this->assertTrue(TenancyMode::legacy(Env::get_instance()));
     }
 
     public function test_auth_mode_selects_the_authority(): void
@@ -124,8 +124,8 @@ final class TenancyRouteAndModeTest extends TestCase
         $store = new DatabaseMainTenantStore(fn (): array => []);
 
         $this->setEnv('AUTH_MODE', 'external');
-        $this->setEnv('AUTH_V2_CLIENT_ID', 'client-1');
-        $this->setEnv('AUTH_V2_CLIENT_SECRET', 'secret-1');
+        $this->setEnv('PLATFORM_CLIENT_ID', 'client-1');
+        $this->setEnv('PLATFORM_CLIENT_SECRET', 'secret-1');
         $this->resetEnv();
         $this->assertInstanceOf(ExternalMembershipAuthority::class, TenancyMode::authority(Env::get_instance(), $store));
 
@@ -138,31 +138,31 @@ final class TenancyRouteAndModeTest extends TestCase
         $this->assertInstanceOf(BuiltinMembershipAuthority::class, TenancyMode::authority(Env::get_instance(), $store));
     }
 
-    private function route(bool $v2, ?TenantProvisioningSequence $sequence): V2ProvisionRoute
+    private function route(bool $legacy, ?TenantProvisioningSequence $sequence): SwitchableProvisionRoute
     {
         AuthContext::setUser(new AuthenticatedUser(user_id: '11111111-1111-4111-8111-111111111111', email: 'owner@example.com', platform_code: 'acme'));
         $config = new ExternalAuthConfig(['provision_tenant' => true, 'platform_secret' => 'unused', 'platform_code' => 'acme']);
-        $route = new V2ProvisionRoute(new ExternalAuthServiceClient('http://auth.invalid:3139', 'acme'), $config->hooks, $config, null);
-        $route->v2 = $v2;
+        $route = new SwitchableProvisionRoute(new ExternalAuthServiceClient('http://auth.invalid:3139', 'acme'), $config->hooks, $config, null);
+        $route->legacy = $legacy;
         $route->sequence = $sequence;
         $route->tenant_name = 'Acme Shop';
         $route->idempotency_key = 'idem-1';
         return $route;
     }
 
-    // ---- 4.4: memberships list and select-tenant read the v2 authority ----
+    // ---- 4.4: memberships list and select-tenant read the membership authority ----
 
-    private function listRoute(FakeAuthority $authority, bool $v2 = true): V2MembershipsRoute
+    private function listRoute(FakeAuthority $authority, bool $legacy = false): SwitchableMembershipsRoute
     {
         AuthContext::setUser(new AuthenticatedUser(user_id: '11111111-1111-4111-8111-111111111111', email: 'o@example.com', platform_code: 'acme'));
         $config = new ExternalAuthConfig(['platform_secret' => 'unused', 'platform_code' => 'acme']);
-        $route = new V2MembershipsRoute(new ExternalAuthServiceClient('http://auth.invalid:3139', 'acme'), $config->hooks, $config);
-        $route->v2 = $v2;
+        $route = new SwitchableMembershipsRoute(new ExternalAuthServiceClient('http://auth.invalid:3139', 'acme'), $config->hooks, $config);
+        $route->legacy = $legacy;
         $route->authority = $authority;
         return $route;
     }
 
-    public function test_memberships_list_uses_the_authority_when_v2_is_on_and_slug_may_be_null(): void
+    public function test_memberships_list_uses_the_authority_when_legacy_is_off_and_slug_may_be_null(): void
     {
         $authority = new class (new CallLog()) extends FakeAuthority {
             public function listMemberships(string $identityId, ?string $userToken): array
@@ -195,16 +195,16 @@ final class TenancyRouteAndModeTest extends TestCase
         $this->assertSame(502, $res->httpStatusCode);
     }
 
-    public function test_provision_tenant_does_not_touch_the_v2_sequence_when_the_flag_is_off(): void
+    public function test_provision_tenant_does_not_touch_the_sequence_while_legacy_tenancy_is_on(): void
     {
-        // buildTenancySequence() would throw LogicException if it were used: with the flag off the 14.x flow
+        // buildTenancySequence() would throw LogicException if it were used: with LEGACY_TENANCY on the 14.x flow
         // runs instead (here it stops at the missing platform secret / provisioner, not in the sequence).
-        $route = $this->route(false, null);
+        $route = $this->route(true, null);
 
         try {
             $route->process();
         } catch (\LogicException $e) {
-            $this->fail('the v2 sequence must not be built when TENANCY_V2 is off');
+            $this->fail('the sequence must not be built while LEGACY_TENANCY is true');
         } catch (\Throwable) {
             // any other outcome of the legacy flow is fine for this assertion
         }
