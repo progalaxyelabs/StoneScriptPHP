@@ -144,17 +144,7 @@ class ExternalAuthServiceClient extends AuthServiceClient
         return $this->get('/api/auth/jwks');
     }
 
-    /**
-     * Check if a tenant slug is available
-     *
-     * @param string $slug Tenant slug to check
-     * @return array Auth service response
-     * @throws AuthServiceException
-     */
-    public function checkTenantSlug(string $slug): array
-    {
-        return $this->get('/api/auth/check-tenant-slug/' . urlencode($slug));
-    }
+    // checkTenantSlug() REMOVED in 15.0.0: the auth service has no check-tenant-slug endpoint.
 
     /**
      * Get onboarding status for an identity
@@ -234,30 +224,8 @@ class ExternalAuthServiceClient extends AuthServiceClient
         ]);
     }
 
-    /**
-     * Accept a membership invitation
-     *
-     * @deprecated `POST /api/auth/accept-invite` no longer
-     *   exists on the auth service — the invitation system moved fully
-     *   platform-side. Calling this method will always fail with a 404/connection
-     *   error. Use `php stone generate invitations` +
-     *   {@see \StoneScriptPHP\Auth\Invitations\InvitationCompletionService}
-     *   instead. Kept (not deleted) only for SemVer compatibility with any
-     *   external caller that references this method directly.
-     *
-     * @param string $token Invitation token
-     * @param string|null $password Password (for new users)
-     * @return array Auth service response
-     * @throws AuthServiceException
-     */
-    public function acceptInvite(string $token, ?string $password = null): array
-    {
-        $data = ['token' => $token];
-        if ($password !== null) {
-            $data['password'] = $password;
-        }
-        return $this->post('/api/auth/accept-invite', $data);
-    }
+    // acceptInvite() REMOVED in 15.0.0 (it always failed: the invitation system is platform-side). Use
+    // `php stone generate invitations` + StoneScriptPHP\Auth\Invitations\InvitationCompletionService.
 
     /**
      * Initiate OAuth flow

@@ -8,6 +8,16 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthServiceClient;
 use StoneScriptPHP\Auth\PlatformCodeGuard;
 use StoneScriptPHP\Auth\TokenExchangeException;
 use StoneScriptPHP\Auth\TokenExchangeService;
+use StoneScriptPHP\Auth\TenantRoles\DatabaseTenantRoleStore;
+use StoneScriptPHP\Auth\TenantRoles\TenantRoleResolver;
+use StoneScriptPHP\Tenancy\Provisioning\DatabaseMainTenantStore;
+use StoneScriptPHP\Tenancy\Provisioning\DatabaseTenantDbSeeder;
+use StoneScriptPHP\Tenancy\Provisioning\ProvisioningException;
+use StoneScriptPHP\Tenancy\Provisioning\TenancyMode;
+use StoneScriptPHP\Tenancy\Provisioning\TenantDbScope;
+use StoneScriptPHP\Tenancy\Provisioning\TenantPrivilegeSeed;
+use StoneScriptPHP\Tenancy\Provisioning\TenantStaffInvite;
+use StoneScriptPHP\Tenancy\Provisioning\Uuid;
 
 /**
  * InvitationCompletionService
@@ -34,10 +44,163 @@ use StoneScriptPHP\Auth\TokenExchangeService;
  */
 class InvitationCompletionService
 {
+    /**
+     * @param TenantStaffInvite|null $staffInvite tenancy v2 only: the writer that adds the member (authority membership,
+     *        tenant-DB user + role, main membership row). Built from the environment when TENANCY_V2 is on and none is given.
+     */
     public function __construct(
         private readonly TokenExchangeService $tokenExchangeService,
         private readonly ExternalAuthServiceClient $authClient,
+        private readonly ?TenantStaffInvite $staffInvite = null,
     ) {
+    }
+
+    /** Is this accept running under tenancy v2? `$platformConfig['tenancy_v2']` decides when present, else TENANCY_V2. */
+    private function tenancyV2(array $platformConfig): bool
+    {
+        if (array_key_exists('tenancy_v2', $platformConfig)) {
+            return (bool) $platformConfig['tenancy_v2'];
+        }
+        try {
+            return TenancyMode::v2Enabled();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Tenancy v2 accept: the member is added through the MembershipAuthority (auth v2 add member), the tenant database
+     * (`users` + `user_roles` with the invitation's role) and the main `tenant_memberships` table. The invitation's
+     * role must be one the platform's privilege seed knows (it has privileges): an unknown or missing role refuses
+     * the invite BEFORE anything is written. markAccepted() still runs last, so a failed accept is retryable.
+     * `membership_writer` is not called (the framework writes the membership); the invitation must carry its tenant id.
+     */
+    private function completeTenancyV2(
+        InvitationRecord $invitation,
+        InvitationRepositoryInterface $repository,
+        string $authToken,
+        array $authClaims,
+        string $identityId,
+        string $role,
+        array $platformConfig
+    ): array {
+        try {
+            $grants = $platformConfig['tenant_privileges']
+                ?? TenantPrivilegeSeed::fromFile(rtrim((string) ROOT_PATH, '/\\') . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'tenant-privileges.php');
+        } catch (\Throwable $e) {
+            throw new InvitationException('The privilege seed could not be read', InvitationException::CONFIG_ERROR, 500, $e);
+        }
+        if ($role === '' || empty($grants[$role] ?? [])) {
+            throw new InvitationException('The invitation names a role this platform does not know', InvitationException::INVALID_ROLE, 422);
+        }
+        // The tenant: the invitation's own, else the tenant this request is routed to (the invite is accepted inside
+        // that tenant's context). Refused only when neither exists.
+        $tenantId = (string) ($invitation->tenantId ?? '');
+        if ($tenantId === '') {
+            $tenantId = (string) ($this->routedTenantId() ?? '');
+        }
+        if (!Uuid::isValid($tenantId)) {
+            throw new InvitationException('The invitation carries no tenant and the request is not routed to one', InvitationException::CONFIG_ERROR, 500);
+        }
+        // Every role assignment records who made it: an invitation without an inviter is refused before any write.
+        if ($invitation->invitedBy === null || trim($invitation->invitedBy) === '') {
+            throw new InvitationException('The invitation records no inviter', InvitationException::MISSING_INVITER, 422);
+        }
+
+        $displayName = $authClaims['display_name'] ?? $authClaims['name'] ?? null;
+        try {
+            $membershipId = ($this->staffInvite ?? $this->buildStaffInvite())->add(
+                $tenantId,
+                $identityId,
+                $role,
+                $invitation->invitedBy,
+                'invite:' . $invitation->id,
+                is_string($displayName) && $displayName !== '' ? $displayName : null
+            );
+        } catch (ProvisioningException $e) {
+            throw new InvitationException('Failed to add the member to the tenant', InvitationException::MEMBERSHIP_FAILED, 502, $e);
+        }
+
+        $repository->markAccepted($invitation->id, $identityId);
+
+        $identity = [
+            'id'           => $identityId,
+            'email'        => $authClaims['email'] ?? $invitation->email,
+            'display_name' => $displayName,
+        ];
+        $membership = ['id' => $membershipId, 'tenant_id' => $tenantId];
+
+        if (!($platformConfig['card'] ?? true)) {
+            return ['mode' => 'passthrough', 'identity_token' => $authToken, 'tenant_id' => $tenantId, 'identity' => $identity, 'membership' => $membership];
+        }
+
+        // Card mode: the token carries ALL the member's known roles in this tenant (read from the tenant database).
+        try {
+            $access = $this->tenantAccess($tenantId, $identityId);
+        } catch (\Throwable $e) {
+            throw new InvitationException('Could not read the member\'s roles', InvitationException::MEMBERSHIP_FAILED, 502, $e);
+        }
+        $token = $access['roles'] === [] ? null : $this->mintRolesToken($identityId, $tenantId, $access['roles'], $identity, $platformConfig);
+        if ($token === null) {
+            throw new InvitationException('Could not issue a platform token for the new member', InvitationException::CONFIG_ERROR, 500);
+        }
+
+        return [
+            'mode'         => 'card',
+            'access_token' => $token,
+            'token_type'   => 'Bearer',
+            'expires_in'   => $platformConfig['ttl'] ?? 3600,
+            'identity'     => $identity,
+            'membership'   => $membership,
+            'roles'        => $access['roles'],
+            'privileges'   => $access['privileges'],
+        ];
+    }
+
+    /** The tenant this request is routed to (scope or gateway client), or null. Protected: tests override. */
+    protected function routedTenantId(): ?string
+    {
+        return TenantDbScope::routedTenantId();
+    }
+
+    private function buildStaffInvite(): TenantStaffInvite
+    {
+        $env = \StoneScriptPHP\Env::get_instance();
+        $store = new DatabaseMainTenantStore();
+        return new TenantStaffInvite(TenancyMode::authority($env, $store), $store, new DatabaseTenantDbSeeder());
+    }
+
+    /** @return array{roles:list<string>,privileges:list<string>} strict read: a failed read throws */
+    protected function tenantAccess(string $tenantId, string $identityId): array
+    {
+        return TenantDbScope::run($tenantId, static fn (): array => (new TenantRoleResolver(new DatabaseTenantRoleStore()))->strictAccess($identityId));
+    }
+
+    /** @param list<string> $roles @param array{id:string,email:?string,display_name:?string} $identity */
+    private function mintRolesToken(string $identityId, string $tenantId, array $roles, array $identity, array $platformConfig): ?string
+    {
+        $privateKeyPath = $platformConfig['signing_private_key_path'] ?? null;
+        if (empty($privateKeyPath)) {
+            return null;
+        }
+        try {
+            return $this->tokenExchangeService->exchangeApiTokenWithRoles([
+                'sub'          => $identityId,
+                'identity_id'  => $identityId,
+                'tenant_id'    => $tenantId,
+                'email'        => ($identity['email'] ?? null) ?: null,
+                'display_name' => ($identity['display_name'] ?? null) ?: null,
+            ], $roles, [
+                'private_key_path'       => $privateKeyPath,
+                'private_key_passphrase' => $platformConfig['signing_private_key_passphrase'] ?? null,
+                'issuer'                 => $platformConfig['signing_issuer'] ?? '',
+                'ttl'                    => $platformConfig['ttl'] ?? 3600,
+                'custom_claims'          => ['platform_code' => $platformConfig['platform_code'] ?? null],
+            ]);
+        } catch (TokenExchangeException $e) {
+            log_error('InvitationCompletionService: API token minting failed: ' . $e->getMessage());
+            return null;
+        }
     }
 
     /**
@@ -151,10 +314,15 @@ class InvitationCompletionService
         $configuredPlatformCode = $platformConfig['platform_code'] ?? null;
         $guardReason = PlatformCodeGuard::check($authClaims['platform_code'] ?? null, $configuredPlatformCode);
         if ($guardReason === PlatformCodeGuard::UNCONFIGURED) {
-            log_warning(
-                'InvitationCompletionService: platform_code guard skipped — no platform_code was ' .
-                'passed in $platformConfig, so an auth token minted for ANY platform on the shared ' .
-                'auth issuer is accepted here. Pass platform_code to close this gap.'
+            // FAIL CLOSED (15.0.0): without a platform_code nothing proves the token is for this platform.
+            log_error(
+                'InvitationCompletionService: refusing accept-invite — no platform_code was passed in ' .
+                '$platformConfig, so the token cannot be tied to this platform. Pass platform_code.'
+            );
+            throw new InvitationException(
+                'This platform is not configured to accept invitations',
+                InvitationException::CONFIG_ERROR,
+                500
             );
         } elseif (PlatformCodeGuard::isRejection($guardReason)) {
             log_warning(
@@ -194,6 +362,12 @@ class InvitationCompletionService
 
         // Step 5: role decision — platform-owned, never this service.
         $role = $roleResolver($invitation);
+
+        // Tenancy v2: the framework adds the member (authority + tenant DB + main row) with this role; see
+        // completeTenancyV2(). An unknown role is refused there before anything is written.
+        if ($this->tenancyV2($platformConfig)) {
+            return $this->completeTenancyV2($invitation, $repository, $authToken, $authClaims, $identityId, (string) $role, $platformConfig);
+        }
 
         // Step 6: platform's own tenant-membership write — also
         // platform-owned. Must return at least ['tenant_id' => string].

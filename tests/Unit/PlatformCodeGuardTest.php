@@ -45,11 +45,11 @@ final class PlatformCodeGuardTest extends TestCase
         $this->assertSame(PlatformCodeGuard::UNCONFIGURED, PlatformCodeGuard::check(null, ''));
     }
 
-    public function test_isRejection_true_only_for_missing_claim_and_mismatch(): void
+    public function test_isRejection_true_for_every_reason_including_unconfigured_fail_closed(): void
     {
         $this->assertTrue(PlatformCodeGuard::isRejection(PlatformCodeGuard::MISMATCH));
         $this->assertTrue(PlatformCodeGuard::isRejection(PlatformCodeGuard::MISSING_CLAIM));
-        $this->assertFalse(PlatformCodeGuard::isRejection(PlatformCodeGuard::UNCONFIGURED));
+        $this->assertTrue(PlatformCodeGuard::isRejection(PlatformCodeGuard::UNCONFIGURED), 'unconfigured must fail closed');
         $this->assertFalse(PlatformCodeGuard::isRejection(PlatformCodeGuard::OK));
         $this->assertFalse(PlatformCodeGuard::isRejection(null));
     }

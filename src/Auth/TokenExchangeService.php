@@ -187,6 +187,38 @@ class TokenExchangeService
     }
 
     /**
+     * API token that carries ALL of the user's roles in the tenant (tenancy v2): a `roles` array and no
+     * single `role_id`, so no role is the "active" or "primary" one. Same typed claims as
+     * {@see exchangeApiToken()} (token class 'card', purpose=authorization, type). What the roles allow is
+     * the union of their privileges, resolved from the tenant database.
+     *
+     * @param list<string> $roles every known role the user holds in the tenant (must not be empty)
+     * @throws TokenExchangeException If token generation fails or no role is given
+     */
+    public function exchangeApiTokenWithRoles(
+        array $identityClaimsWithTenant,
+        array $roles,
+        array $config,
+        string $tokenType = TokenClaims::TYPE_ACCESS
+    ): string {
+        $roles = array_values(array_unique(array_map('strval', $roles)));
+        if ($roles === []) {
+            throw new TokenExchangeException('A token needs at least one role', 'NO_ROLES');
+        }
+        return $this->mintToken(
+            $identityClaimsWithTenant,
+            $config,
+            static function (array $base) use ($roles, $tokenType): array {
+                $base['token_type']                = 'card';
+                $base['roles']                     = $roles;
+                $base[TokenClaims::CLAIM_PURPOSE]   = TokenClaims::PURPOSE_AUTHORIZATION;
+                $base[TokenClaims::CLAIM_TYPE]      = $tokenType;
+                return $base;
+            }
+        );
+    }
+
+    /**
      * Exchange identity claims for a platform token with a roles array.
      *
      * @deprecated Use exchangeApiToken() for the auth-token/API-token tenancy model.

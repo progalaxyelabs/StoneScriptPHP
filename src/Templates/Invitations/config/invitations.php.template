@@ -68,7 +68,9 @@ return [
     // minting config.
     'platform' => [
         'platform_secret' => getenv('EXTERNAL_AUTH_CLIENT_SECRET') ?: null,
-        'platform_code'   => getenv('PLATFORM_CODE') ?: '',
+        // Through Env, not getenv(): values that live in `.env` are not in the process environment, and an empty
+        // platform code makes the (fail-closed) cross-platform token guard refuse every invitation.
+        'platform_code'   => \StoneScriptPHP\Env::get_instance()->PLATFORM_CODE,
 
         // T2 (API-token-model) platforms: leave true to mint a local API token on
         // accept, same pattern as ProvisionTenantRoute::mintProvisionApiToken().

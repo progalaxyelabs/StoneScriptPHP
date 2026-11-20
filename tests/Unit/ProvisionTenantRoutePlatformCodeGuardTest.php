@@ -159,11 +159,10 @@ final class ProvisionTenantRoutePlatformCodeGuardTest extends TestCase
         $this->assertNull($client->lastCreateMembershipData, 'no server-to-server membership call on a rejected cross-platform token');
     }
 
-    public function test_unconfigured_platform_code_admits_any_token_platform_code(): void
+    public function test_unconfigured_platform_code_refuses_every_token_fail_closed(): void
     {
-        // This server has NOT set PLATFORM_CODE — deliberate backward-compat
-        // fail-open (see PlatformCodeGuard's class docblock): a deployment
-        // that never opted into platform-scoped tokens must not be bricked.
+        // This server has NOT set PLATFORM_CODE: since 15.0.0 it admits no token
+        // (see PlatformCodeGuard's class docblock).
         $this->authenticatedUser('some-other-platform');
         $provisioner = new SpyProvisioner();
         $route = $this->route($this->config(''), null, $provisioner);
@@ -172,8 +171,8 @@ final class ProvisionTenantRoutePlatformCodeGuardTest extends TestCase
 
         $res = $route->process();
 
-        $this->assertSame('ok', $res->status, 'unconfigured PLATFORM_CODE must fail OPEN');
-        $this->assertTrue($provisioner->provisionCalled);
+        $this->assertSame('error', $res->status, 'unconfigured PLATFORM_CODE must fail CLOSED');
+        $this->assertFalse($provisioner->provisionCalled, 'nothing may be provisioned for an unconfigured platform');
     }
 }
 

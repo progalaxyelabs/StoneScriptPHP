@@ -8,9 +8,7 @@ use StoneScriptPHP\Routing\Router;
 use StoneScriptPHP\Routing\RouteAccess;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\SelectTenantRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\ProvisionTenantRoute;
-use StoneScriptPHP\Auth\ExternalAuth\Routes\UpdateMembershipRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Routes\MembershipsRoute;
-use StoneScriptPHP\Auth\ExternalAuth\Routes\CheckTenantSlugRoute;
 use StoneScriptPHP\Auth\ExternalAuth\Dto\LoginResponseDto;
 use StoneScriptPHP\Auth\ExternalAuth\Dto\ProvisionTenantResponseDto;
 use StoneScriptPHP\Auth\ExternalAuth\Dto\MembershipsResponseDto;
@@ -56,27 +54,8 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         mixed $rolesResolver,
         mixed $tenantsResolver
     ): void {
-        // Public (no-auth) tenant routes.
-        //
-        // KNOWN BUG (found during v9.6.0 typing pass, not fixed here — out of
-        // scope for a typing change): CheckTenantSlugRoute proxies to
-        // ExternalAuthServiceClient::checkTenantSlug(), which GETs
-        // `/api/auth/check-tenant-slug/{slug}` — a live audit found this path
-        // does not exist on the configured external auth service. Any
-        // platform with check_slug enabled is calling a 404. No `response:`
-        // DTO — see ExternalAuthRoutes::registerForPrefix()'s matching notes
-        // for the other endpoints this same audit found dead.
-        if ($config->isEnabled('check_slug')) {
-            $router->get(
-                "$prefix/check-tenant-slug/{slug}",
-                new CheckTenantSlugRoute($client, $config->hooks, $config),
-                middleware: [],
-                isPublic: true,
-                group: 'auth',
-            );
-            log_debug("DefaultTenantRouteProvider: Registered GET $prefix/check-tenant-slug/{slug}");
-        }
-
+        // check-tenant-slug REMOVED in 15.0.0: the auth service has no such endpoint (slug is optional
+        // and unique per platform; auth validates it when a tenant is reserved).
         // accept-invite REMOVED 2026-07-21 — see class docblock.
 
         // Protected (tier-2) tenant routes. These are IDENTITY routes: the caller
@@ -132,39 +111,16 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
                 response: MembershipsResponseDto::class,
                 access: RouteAccess::AUTHENTICATION
             );
-            // KNOWN BUG (found during v9.6.0 typing pass, not fixed here — out
-            // of scope for a typing change): UpdateMembershipRoute::process()
-            // calls `$this->client->updateMembership(...)`, a method that no
-            // longer exists on ExternalAuthServiceClient (removed — see that
-            // client class's docblock, "inviteMember() and updateMembership()
-            // were REMOVED"). Calling this route as registered below would be
-            // a PHP fatal error (undefined method call). It is not exposed
-            // through any `getRouteDefinitions()`/feature-toggle path a
-            // platform would discover by following the documented config
-            // surface, so it appears unreachable in practice — but the class
-            // is dead code that will fatal if ever wired up. No `response:`
-            // DTO — inventing one for a route that cannot successfully run
-            // would misrepresent it as working.
-            $router->addRoute(
-                'PUT',
-                "$prefix/memberships/{id}",
-                new UpdateMembershipRoute($client, $config->hooks, $config),
-                access: RouteAccess::AUTHENTICATION
-            );
-            log_debug("DefaultTenantRouteProvider: Registered GET $prefix/memberships, PUT $prefix/memberships/{id} (protected, authentication)");
+            // PUT memberships/{id} (UpdateMembershipRoute) REMOVED in 15.0.0: it called a client method that
+            // no longer existed and the auth service has no such endpoint.
+            log_debug("DefaultTenantRouteProvider: Registered GET $prefix/memberships (protected, authentication)");
         }
     }
 
     public function publicPaths(string $prefix, ExternalAuthConfig $config): array
     {
-        $paths = [];
-
-        if ($config->isEnabled('check_slug')) {
-            $paths[] = "$prefix/check-tenant-slug";
-        }
-        // accept-invite REMOVED 2026-07-21 — see class docblock.
-
-        return $paths;
+        // check-tenant-slug (15.0.0) and accept-invite (2026-07-21) were removed: no public tenant paths remain.
+        return [];
     }
 
     public function protectedPaths(string $prefix, ExternalAuthConfig $config): array
@@ -192,11 +148,7 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
 
         // v9.6.0: full array-config format — mirrors register()'s runtime
         // wiring. See ExternalAuthRoutes::getRouteDefinitions() for the
-        // rationale and the KNOWN BUG notes for check_slug/updateMembership.
-        // accept-invite REMOVED 2026-07-21 — see class docblock.
-        if ($isEnabled('check_slug')) {
-            $routes['GET']["$prefix/check-tenant-slug/{slug}"] = ['handler' => CheckTenantSlugRoute::class, 'group' => 'auth', 'is_public' => true];
-        }
+        // rationale. check-tenant-slug (15.0.0) and accept-invite (2026-07-21) were removed.
         if ($isEnabled('select_tenant')) {
             $routes['POST']["$prefix/select-tenant"] = ['handler' => SelectTenantRoute::class, 'group' => 'auth', 'access' => 'authentication', 'response' => LoginResponseDto::class];
         }
@@ -206,8 +158,6 @@ class DefaultTenantRouteProvider implements TenantRouteProviderInterface
         // invite-member REMOVED 2026-07-21 — see class docblock.
         if ($isEnabled('memberships')) {
             $routes['GET']["$prefix/memberships"] = ['handler' => MembershipsRoute::class, 'group' => 'auth', 'access' => 'authentication', 'response' => MembershipsResponseDto::class];
-            // UpdateMembershipRoute — no response DTO, see register()'s KNOWN BUG note.
-            $routes['PUT']["$prefix/memberships/{id}"] = ['handler' => UpdateMembershipRoute::class, 'group' => 'auth', 'access' => 'authentication'];
         }
 
         return $routes;

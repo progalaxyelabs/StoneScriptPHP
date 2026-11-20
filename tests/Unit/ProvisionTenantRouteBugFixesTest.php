@@ -86,6 +86,7 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         return new ExternalAuthConfig([
             'provision_tenant' => true,
             'platform_secret'  => 'test-secret',
+            'platform_code'    => 'testapp', // the guard fails closed without a platform code (15.0.0)
         ]);
     }
 
@@ -103,6 +104,7 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
         $config = new ExternalAuthConfig([
             'provision_tenant' => true,
             'platform_secret'  => 'test-secret',
+            'platform_code'    => 'testapp',
             'before_provision'  => $beforeProvision,
         ]);
         return new ProvisionTenantRoute($client, $config->hooks, $config, $provisioner);
@@ -110,7 +112,7 @@ final class ProvisionTenantRouteBugFixesTest extends TestCase
 
     private function authenticatedUser(): void
     {
-        AuthContext::setUser(new AuthenticatedUser(user_id: 'identity-1', email: 'owner@example.com'));
+        AuthContext::setUser(new AuthenticatedUser(user_id: 'identity-1', email: 'owner@example.com', platform_code: 'testapp'));
     }
 
     // ── #3 tenant_name ───────────────────────────────────────────────────

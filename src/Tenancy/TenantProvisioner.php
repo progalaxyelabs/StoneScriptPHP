@@ -95,41 +95,8 @@ abstract class TenantProvisioner
         return $data;
     }
 
-    /**
-     * Notify auth service of updated business profile details.
-     * Call from platform API whenever user updates Settings > Business.
-     */
-    public function syncBusinessDetails(string $tenantId, array $details): void
-    {
-        $authUrl = rtrim($this->authServiceUrl ?: ($_SERVER['AUTH_SERVICE_URL'] ?? ''), '/');
-        $secret  = $this->platformSecret ?: ($_SERVER['EXTERNAL_AUTH_CLIENT_SECRET'] ?? '');
-
-        if (!$authUrl || !$secret) {
-            log_error('TenantProvisioner::syncBusinessDetails: AUTH_SERVICE_URL or secret missing — skipping sync');
-            return;
-        }
-
-        $payload = json_encode(array_merge(['tenant_id' => $tenantId], $details));
-
-        $ch = curl_init("$authUrl/api/internal/sync-tenant");
-        curl_setopt_array($ch, [
-            CURLOPT_CUSTOMREQUEST   => 'PUT',
-            CURLOPT_POSTFIELDS      => $payload,
-            CURLOPT_RETURNTRANSFER  => true,
-            CURLOPT_HTTPHEADER      => [
-                'Content-Type: application/json',
-                'X-Platform-Secret: ' . $secret,
-            ],
-            CURLOPT_TIMEOUT         => 10,
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-        if ($httpCode < 200 || $httpCode >= 300) {
-            log_error("TenantProvisioner::syncBusinessDetails: HTTP $httpCode (response body not logged)");
-        }
-    }
+    // syncBusinessDetails() REMOVED in 15.0.0: it called /api/internal/sync-tenant, which the auth service
+    // does not have. Business details live in the platform's own tenants table.
 
     /**
      * Provision the tenant database via the gateway admin endpoint.

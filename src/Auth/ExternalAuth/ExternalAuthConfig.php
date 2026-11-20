@@ -99,8 +99,7 @@ class ExternalAuthConfig
 
     /**
      * @var TenantRouteProviderInterface Registers the tenant-specific route
-     * subset (select-tenant, provision-tenant, invite, memberships,
-     * check-tenant-slug, accept-invite) and computes their public/protected
+     * subset (select-tenant, provision-tenant, memberships) and computes their public/protected
      * path lists. Defaults to `DefaultTenantRouteProvider` — the framework's
      * built-in behavior, unchanged from pre-Phase-1 StoneScriptPHP. Override
      * with `tenant_route_provider` in options (Phase 2 extraction seam — see
@@ -304,7 +303,6 @@ class ExternalAuthConfig
             'refresh' => $options['refresh'] ?? true,
             'select_tenant' => $options['select_tenant'] ?? true,
             'memberships' => $options['memberships'] ?? true,
-            'check_slug' => $options['check_slug'] ?? true,
             'onboarding_status' => $options['onboarding_status'] ?? true,
             'password_reset' => $options['password_reset'] ?? true,
             'change_password' => $options['change_password'] ?? true,

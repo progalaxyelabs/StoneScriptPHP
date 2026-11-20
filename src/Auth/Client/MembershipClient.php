@@ -63,66 +63,9 @@ class MembershipClient extends AuthServiceClient
         return $response['membership'];
     }
 
-    /**
-     * Update a membership
-     *
-     * @param string $membershipId The membership ID
-     * @param array $changes Changes to apply (e.g., ['role' => 'admin', 'status' => 'active'])
-     * @param string|null $authToken JWT bearer token (requires admin+ role)
-     * @return array Updated membership data
-     * @throws AuthServiceException
-     */
-    public function updateMembership(
-        string $membershipId,
-        array $changes,
-        ?string $authToken = null
-    ): array {
-        $endpoint = '/memberships/' . urlencode($membershipId);
-        $response = $this->put($endpoint, $changes, $this->buildAuthHeader($authToken));
-
-        if (!isset($response['id'])) {
-            throw new AuthServiceException('Invalid response: missing membership data');
-        }
-
-        return $response;
-    }
-
-    /**
-     * Suspend a membership
-     *
-     * @param string $membershipId The membership ID
-     * @param string $reason Reason for suspension
-     * @param string|null $authToken JWT bearer token (requires admin+ role)
-     * @return array Updated membership data
-     * @throws AuthServiceException
-     */
-    public function suspendMembership(
-        string $membershipId,
-        string $reason,
-        ?string $authToken = null
-    ): array {
-        return $this->updateMembership($membershipId, [
-            'status' => 'suspended',
-            'suspension_reason' => $reason
-        ], $authToken);
-    }
-
-    /**
-     * Reactivate a suspended membership
-     *
-     * @param string $membershipId The membership ID
-     * @param string|null $authToken JWT bearer token (requires admin+ role)
-     * @return array Updated membership data
-     * @throws AuthServiceException
-     */
-    public function reactivateMembership(
-        string $membershipId,
-        ?string $authToken = null
-    ): array {
-        return $this->updateMembership($membershipId, [
-            'status' => 'active'
-        ], $authToken);
-    }
+    // updateMembership(), suspendMembership() and reactivateMembership() REMOVED in 15.0.0: they called
+    // PUT /memberships/{id}, which the auth service does not have. A membership's status changes through
+    // ExternalAuthServiceClient::setMembershipStatus() (14.x flow) or the tenancy v2 authority.
 
     /**
      * Create a new membership

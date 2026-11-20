@@ -128,6 +128,7 @@ class ApplicationResolverThreadingTest extends TestCase
 
         $config = new ExternalAuthConfig([
             'auth_issuer'      => 'http://localhost:3139',
+            'platform_code'    => 'testapp', // the guard fails closed without a platform code (15.0.0)
             'tenants_resolver' => $tenantsResolver,
         ]);
         $client = new ExternalAuthServiceClient('http://localhost:3139', 'testapp');
@@ -142,7 +143,7 @@ class ApplicationResolverThreadingTest extends TestCase
             tenantsResolver: $tenantsResolver
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-1'];
+        $route->stubClaims = ['sub' => 'id-1', 'platform_code' => 'testapp'];
         $route->stubCard   = 'card.signed';
         $route->tenant_id  = 't-1';
 
@@ -161,6 +162,7 @@ class ApplicationResolverThreadingTest extends TestCase
     {
         $config = new ExternalAuthConfig([
             'auth_issuer' => 'http://localhost:3139',
+            'platform_code' => 'testapp', // the guard fails closed without a platform code (15.0.0)
             // No tenants_resolver — simulates pre-fix buildAuthRouteOptions() output
         ]);
         $client = new ExternalAuthServiceClient('http://localhost:3139', 'testapp');
@@ -173,7 +175,7 @@ class ApplicationResolverThreadingTest extends TestCase
             tenantsResolver: null   // pre-fix: not threaded
         );
         $route->stubToken  = 'passport.jwt';
-        $route->stubClaims = ['sub' => 'id-1'];
+        $route->stubClaims = ['sub' => 'id-1', 'platform_code' => 'testapp'];
         $route->tenant_id  = 't-1';
 
         $response = $route->process();

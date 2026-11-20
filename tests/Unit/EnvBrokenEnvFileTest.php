@@ -322,6 +322,8 @@ final class EnvBrokenEnvFileTest extends TestCase
             'no schema'      => ['DB_GATEWAY_URL' => 'http://g:9000', 'DB_GATEWAY_PLATFORM' => 'p'],
             'blank schema'   => ['DB_GATEWAY_URL' => 'http://g:9000', 'DB_GATEWAY_PLATFORM' => 'p', 'DB_GATEWAY_SCHEMA_NAME' => '  '],
             'bad db mode'    => self::GW + ['DB_MODE' => 'typo'],
+            'external auth without a platform code' => self::GW + ['AUTH_MODE' => 'external', 'AUTH_SERVICE_URL' => 'http://a:3139', 'AUTH_ISSUER' => 'http://a:3139'],
+            'blank platform code' => self::GW + ['AUTH_MODE' => 'external', 'AUTH_SERVICE_URL' => 'http://a:3139', 'AUTH_ISSUER' => 'http://a:3139', 'PLATFORM_CODE' => '  '],
             'good'           => self::GW,
         ];
         foreach ($cases as $name => $vars) {
@@ -334,7 +336,7 @@ final class EnvBrokenEnvFileTest extends TestCase
 
     public function test_env_check_warns_but_passes_when_only_app_config_dependent_checks_would_fail(): void
     {
-        [$out, $code] = $this->envCheck(self::GW + ['AUTH_MODE' => 'external']);
+        [$out, $code] = $this->envCheck(self::GW + ['AUTH_MODE' => 'external', 'PLATFORM_CODE' => 'acme']);
         $this->assertSame(0, $code, $out);
         $this->assertStringContainsString('WARN: typed_auth wiring', $out);
         $this->assertStringContainsString('WARN: Tenancy is in use but', $out);

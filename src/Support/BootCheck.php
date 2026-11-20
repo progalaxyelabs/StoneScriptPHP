@@ -31,6 +31,31 @@ final class BootCheck
     }
 
     /**
+     * 15.0.0: with an external auth service the platform must say which platform it is. Without a platform code
+     * the cross-platform token guard refuses every token, so a missing value is caught here, at deploy, not by
+     * users. The code is resolved EXACTLY as Application::buildAuthRouteOptions() does: the app's auth config
+     * (`auth.platform.code`) first, else Env PLATFORM_CODE. It must equal the slug registered with the auth service
+     * and DB_GATEWAY_PLATFORM.
+     *
+     * @param array<string,mixed> $authConfig the `auth` section of Application::run()'s config ([] when none)
+     * @param string|null $mode auth mode; null = `auth.mode`, else AUTH_MODE
+     */
+    public static function platformCode(Env $env, array $authConfig, ?string $mode = null): ?string
+    {
+        $mode = strtolower((string) ($mode ?? $authConfig['mode'] ?? $env->AUTH_MODE));
+        if ($mode !== 'external' && $mode !== 'hybrid') {
+            return null;
+        }
+        $code = $authConfig['platform']['code'] ?? $env->PLATFORM_CODE ?? '';
+        if (!is_string($code) || trim($code) === '') {
+            return "Required configuration 'PLATFORM_CODE' is missing or empty (AUTH_MODE=$mode). Set PLATFORM_CODE, or auth.platform.code in the auth config, "
+                . "to this platform's slug: the same value as the slug registered with the auth service and as DB_GATEWAY_PLATFORM. "
+                . 'Without it every token is refused.';
+        }
+        return null;
+    }
+
+    /**
      * Does the configuration route requests to per-tenant databases? Based on the options that actually do
      * (`require_api_token`, `store_access`, `tenant_url_match`) and on a strategy that declares it does.
      * A custom strategy that does not implement {@see DeclaresTenantRouting} does not count.

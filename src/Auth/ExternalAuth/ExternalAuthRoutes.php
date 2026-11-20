@@ -539,7 +539,6 @@ class ExternalAuthRoutes
             'refresh' => $options['refresh'] ?? true,
             'select_tenant' => $options['select_tenant'] ?? true,
             'memberships' => $options['memberships'] ?? true,
-            'check_slug' => $options['check_slug'] ?? true,
             'onboarding_status' => $options['onboarding_status'] ?? true,
             'password_reset' => $options['password_reset'] ?? true,
             'change_password' => $options['change_password'] ?? true,

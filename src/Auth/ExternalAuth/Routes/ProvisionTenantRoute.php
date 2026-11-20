@@ -10,6 +10,14 @@ use StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig;
 use StoneScriptPHP\Auth\TokenExchangeService;
 use StoneScriptPHP\Auth\TokenExchangeException;
 use StoneScriptPHP\Tenancy\TenantProvisioner;
+use StoneScriptPHP\Tenancy\Provisioning\BuiltinMembershipAuthority;
+use StoneScriptPHP\Tenancy\Provisioning\DatabaseMainTenantStore;
+use StoneScriptPHP\Tenancy\Provisioning\DatabaseTenantDbSeeder;
+use StoneScriptPHP\Tenancy\Provisioning\GatewayTenantDatabaseCreator;
+use StoneScriptPHP\Tenancy\Provisioning\ProvisionRequest;
+use StoneScriptPHP\Tenancy\Provisioning\ProvisioningException;
+use StoneScriptPHP\Tenancy\Provisioning\TenantPrivilegeSeed;
+use StoneScriptPHP\Tenancy\Provisioning\TenantProvisioningSequence;
 use StoneScriptPHP\Exceptions\ValidationException;
 use StoneScriptPHP\Exceptions\FrameworkException;
 
@@ -181,6 +189,12 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
         // path. Same enforcement pattern as idempotency_key — no redundant
         // manual guard, consistent with how this route already worked.
         $resolvedName = $this->tenant_name;
+
+        // Tenancy v2 (15.0.0, TENANCY_V2=true): the framework's default sequence runs instead of the
+        // 14.x flow below. Platforms switch one at a time; the flag defaults to false.
+        if ($this->tenancyV2Enabled()) {
+            return $this->processTenancyV2($identityId, $user, $resolvedName);
+        }
 
         // the auth contract/S9 — existing-tenant guard (2026-08-12 fix for a real,
         // confirmed bug, not a hypothetical): generateUuid() +
@@ -463,6 +477,210 @@ class ProvisionTenantRoute extends BaseExternalAuthRoute
                 'role'      => $activeRole,
             ],
         ], $statusCode);
+    }
+
+    /**
+     * The v2 sequence for this request. Protected: a platform overrides this to pass its own hooks
+     * (business columns, tenant seed data) or stores, never to change the order of the steps.
+     */
+    protected function buildTenancySequence(): TenantProvisioningSequence
+    {
+        $env = \StoneScriptPHP\Env::get_instance();
+        $store = new DatabaseMainTenantStore();
+        $slug = $env->DB_GATEWAY_PLATFORM ?? '';
+        $schema = $env->DB_GATEWAY_TENANT_SCHEMA_NAME ?? 'tenant';
+        $hooks = array_filter([
+            'after_tenant_row' => $this->hooks['after_tenant_row'] ?? null,
+            'seed_tenant' => $this->hooks['seed_tenant'] ?? null,
+        ], 'is_callable');
+
+        return new TenantProvisioningSequence(
+            $this->membershipAuthority(),
+            $store,
+            new GatewayTenantDatabaseCreator($slug, $env->DB_GATEWAY_URL ?? '', (string) ($env->DB_GATEWAY_PLATFORM_TOKEN ?? ''), $schema),
+            new DatabaseTenantDbSeeder(),
+            $hooks,
+            'owner',
+            $slug !== '' ? $slug : null,
+            $schema,
+            $this->tenantPrivilegeSeed(),
+        );
+    }
+
+    /**
+     * The platform-wide privilege seed written into every new tenant database (`config/tenant-privileges.php`).
+     * Protected so a platform can supply it another way.
+     *
+     * @return array<string,list<string>>
+     */
+    protected function tenantPrivilegeSeed(): array
+    {
+        return TenantPrivilegeSeed::fromFile(rtrim((string) ROOT_PATH, '/\\') . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'tenant-privileges.php');
+    }
+
+    private function processTenancyV2(string $identityId, object $user, string $tenantName): ApiResponse
+    {
+        $displayName = $this->display_name ?: (string) ($user->display_name ?? '');
+        $email = $this->email ?: (string) ($user->email ?? '');
+        $phone = $this->phone ?: $this->phone_number;
+        $bearer = $this->getBearerToken();
+
+        // Google sign-up: the Bearer token is the short-lived oauth_pending token. Promote the connection FIRST
+        // and carry on with the access token auth returns (it is the identity token the authority needs and it
+        // names the real identity). A promote that auth refuses stops here: nothing was provisioned.
+        if ($this->oauth_state !== '') {
+            // Standalone (builtin) platforms have no external identity provider to promote a Google sign-up with.
+            if ($this->membershipAuthority() instanceof BuiltinMembershipAuthority) {
+                return new ApiResponse('error', 'OAuth sign-up is not available on a standalone platform', ['error' => 'oauth_not_supported'], 400);
+            }
+            $promoted = $this->promoteOAuthForV2((string) $bearer);
+            if ($promoted instanceof ApiResponse) {
+                return $promoted;
+            }
+            [$bearer, $identityId] = $promoted;
+        }
+
+        // Existing-tenant guard (same rules as 14.x, read through the authority): an identity that already OWNS a
+        // tenant gets that tenant back when the name matches (a retry or double click) and a 409 when it does not,
+        // unless allow_additional_tenant is set. A failed lookup never blocks: the idempotency key still prevents
+        // a duplicate, and only provisioned tenants are listed (a half-built one resumes through the key).
+        if (!$this->allow_additional_tenant) {
+            $ownedTenants = $this->findOwnedTenantsV2($identityId, $bearer);
+            if ($ownedTenants !== []) {
+                // Replay ANY owned tenant whose name matches; 409 only when none does.
+                foreach ($ownedTenants as $owned) {
+                    if (mb_strtolower(trim($owned['tenant_name'])) === mb_strtolower(trim($tenantName))) {
+                        return $this->tenantSessionResponse($identityId, $owned, ['email' => $email, 'display_name' => $displayName], 'Tenant already provisioned', 200);
+                    }
+                }
+                log_warning("ProvisionTenantRoute: identity={$identityId} already owns " . count($ownedTenants) . ' tenant(s) - denying a differently named tenant');
+                return new ApiResponse('error', 'Tenant already exists', ['error' => 'tenant_already_exists'], 409);
+            }
+        }
+
+        try {
+            $result = $this->buildTenancySequence()->provision(new ProvisionRequest(
+                $tenantName,
+                $this->idempotency_key,
+                $identityId,
+                $bearer,
+                $displayName !== '' ? $displayName : null,
+                null,
+                [
+                    'email' => $email, 'phone' => $phone, 'address' => $this->address, 'city' => $this->city,
+                    'state' => $this->state, 'pincode' => $this->pincode, 'country' => $this->country,
+                ],
+            ));
+        } catch (ProvisioningException $e) {
+            $correlationId = bin2hex(random_bytes(6));
+            log_error("Tenant provisioning stopped at step {$e->step} [correlation_id=$correlationId]: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return new ApiResponse('error', 'Tenant provisioning failed (reference ' . $correlationId . '). Retry with the same idempotency_key to resume.', [
+                'step' => $e->step,
+                'correlation_id' => $correlationId,
+            ], 500);
+        } catch (\Throwable $e) {
+            $correlationId = bin2hex(random_bytes(6));
+            log_error("Tenant provisioning failed [correlation_id=$correlationId]: " . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return res_error('Tenant provisioning failed (reference ' . $correlationId . ')');
+        }
+
+        // The tenant is provisioned: answer exactly as select-tenant does (all known roles read from the tenant
+        // database, roles[] + platform_code on the token, privilege union in the body). A replay is a 200.
+        $replay = $result->alreadyProvisioned || $result->replay;
+        $response = $this->tenantSessionResponse(
+            $identityId,
+            ['membership_id' => $result->membershipId, 'tenant_id' => $result->tenantId, 'tenant_name' => $tenantName, 'tenant_slug' => null, 'tenant_db_name' => $result->tenantDbName],
+            ['email' => $email, 'display_name' => $displayName],
+            $result->alreadyProvisioned ? 'Tenant already provisioned' : 'Tenant provisioned',
+            $replay ? 200 : 201
+        );
+        if ($response->status === 'ok' && is_array($response->data)) {
+            $response->data['identity'] = ['id' => $identityId, 'email' => $email ?: null, 'display_name' => $displayName ?: null];
+        }
+        return $response;
+    }
+
+    /**
+     * Commit the Google sign-up (oauth_pending -> oauth_connections) and return [access token, identity id], or an
+     * error response. The access token is read from auth's promote response; its identity_id claim is taken from the
+     * payload (the token comes straight from auth over the configured, authenticated channel and is verified by auth
+     * again on every later call that carries it).
+     *
+     * @return array{0:string,1:string}|ApiResponse
+     */
+    private function promoteOAuthForV2(string $pendingToken): array|ApiResponse
+    {
+        try {
+            $r = $this->client->promoteOAuthConnection($this->oauth_state, $pendingToken);
+        } catch (\StoneScriptPHP\Auth\Client\AuthServiceException $e) {
+            log_error('ProvisionTenantRoute: OAuth promote refused by auth: ' . $e->getMessage());
+            // Only auth's specific "already used" answer means the single-use pending session was consumed by an
+            // earlier attempt ("OAuth session not found or already used"). Any other 400 (expired, malformed) is a
+            // plain promote failure: sign in with Google again.
+            if ($e->getCode() === 400 && stripos($e->getMessage(), 'already used') !== false) {
+                return new ApiResponse('error', 'This Google sign-in was already completed. Sign in again, then retry with the same idempotency_key.', ['error' => 'oauth_session_used'], 409);
+            }
+            if ($e->getCode() === 400) {
+                return new ApiResponse('error', 'Google sign-in could not be completed. Please sign in with Google again.', ['error' => 'oauth_promote_failed'], 400);
+            }
+            return res_error('Failed to complete OAuth sign-in. Please try again.', 502);
+        } catch (\Throwable $e) {
+            log_error('ProvisionTenantRoute: OAuth promote failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return res_error('Failed to complete OAuth sign-in. Please try again.', 502);
+        }
+
+        $r = is_array($r['data'] ?? null) ? $r['data'] : $r;
+        $token = $r['access_token'] ?? null;
+        if (($r['success'] ?? true) === false || !is_string($token) || $token === '') {
+            log_error('ProvisionTenantRoute: OAuth promote returned no usable access token');
+            return res_error('Failed to complete OAuth sign-in. Please try again.', 502);
+        }
+        // The promoted token is verified like every other identity token (signature, expiry, issuer via the JWKS
+        // validator) before its identity is trusted.
+        try {
+            $claims = $this->validatePromotedToken($token);
+        } catch (\Throwable $e) {
+            log_error('ProvisionTenantRoute: the promoted access token did not validate: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return res_error('Failed to complete OAuth sign-in. Please try again.', 502);
+        }
+        $identity = (string) ($claims['identity_id'] ?? $claims['sub'] ?? '');
+        if ($identity === '') {
+            log_error('ProvisionTenantRoute: the promoted access token names no identity');
+            return res_error('Failed to complete OAuth sign-in. Please try again.', 502);
+        }
+        return [$token, $identity];
+    }
+
+    /**
+     * Validate the promoted access token against the auth service's JWKS (the same validator ExchangeRoute uses).
+     * Protected: tests and platforms may override.
+     *
+     * @return array<string,mixed> the verified claims
+     * @throws \Throwable when the token does not validate
+     */
+    protected function validatePromotedToken(string $token): array
+    {
+        return (new TokenExchangeService())->validateIdentityToken($token, $this->config->jwksUrl, $this->config->authIssuer);
+    }
+
+    /**
+     * The tenants this identity already OWNS on this platform (provisioned, active); empty on a lookup error.
+     *
+     * @return list<array{membership_id:string,tenant_id:string,tenant_name:string,tenant_slug:?string,tenant_db_name:string,is_tenant_owner:bool}>
+     */
+    private function findOwnedTenantsV2(string $identityId, ?string $bearer): array
+    {
+        $owned = [];
+        try {
+            foreach ($this->membershipAuthority()->listMemberships($identityId, $bearer) as $row) {
+                if ($row['is_tenant_owner']) {
+                    $owned[] = $row;
+                }
+            }
+        } catch (\Throwable $e) {
+            log_warning('ProvisionTenantRoute: existing-tenant lookup failed (continuing): ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+        }
+        return $owned;
     }
 
     /**

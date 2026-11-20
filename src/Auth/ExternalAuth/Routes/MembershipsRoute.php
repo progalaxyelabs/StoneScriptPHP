@@ -37,6 +37,28 @@ class MembershipsRoute extends BaseExternalAuthRoute
             return $denial;
         }
 
+        // Tenancy v2 (TENANCY_V2=true): the authority's list (auth v2 or the local main database):
+        // active memberships of provisioned tenants of THIS platform; slug may be null.
+        if ($this->tenancyV2Enabled()) {
+            $identityId = (string) (auth()?->user_id ?? '');
+            try {
+                $rows = $this->membershipAuthority()->listMemberships($identityId, $this->getBearerToken());
+            } catch (\Throwable $e) {
+                log_error('MembershipsRoute: v2 membership list failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                return res_error('Authentication service unavailable', 502);
+            }
+            $memberships = array_map(static fn (array $r): array => [
+                'id' => $r['membership_id'],
+                'tenant_id' => $r['tenant_id'],
+                'tenant_name' => $r['tenant_name'],
+                'tenant_slug' => $r['tenant_slug'],
+                'tenant_db_name' => $r['tenant_db_name'],
+                'is_tenant_owner' => $r['is_tenant_owner'],
+                'status' => 'active',
+            ], $rows);
+            return res_ok(['success' => true, 'memberships' => $memberships]);
+        }
+
         return $this->proxyCall(
             fn() => $this->client->getMemberships($this->getBearerToken())
         );

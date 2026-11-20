@@ -566,12 +566,12 @@ class ExchangeRouteTest extends TestCase
         $this->assertFalse($resolverCalled, 'the guard must reject before any tenant/role resolution — no side effects on a rejected cross-platform token');
     }
 
-    public function test_unconfigured_platform_code_admits_any_platform_code_claim(): void
+    public function test_unconfigured_platform_code_refuses_any_platform_code_claim(): void
     {
         // No platform_code option passed — ExternalAuthConfig::$platformCode
         // defaults to '' unless PLATFORM_CODE is set in the environment.
-        // Deliberate backward-compat fail-open: a deployment that never
-        // opted into platform-scoped tokens must not be bricked by this fix.
+        // FAIL CLOSED since 15.0.0: a server that does not know which platform
+        // it is admits no token.
         putenv('PLATFORM_CODE');
         unset($_ENV['PLATFORM_CODE']);
         $ref = new \ReflectionClass(\StoneScriptPHP\Env::class);
@@ -595,7 +595,7 @@ class ExchangeRouteTest extends TestCase
 
         $response = $route->process();
 
-        $this->assertSame('ok', $response->status, 'an unconfigured PLATFORM_CODE must fail OPEN, not brick unconfigured deployments');
+        $this->assertSame('error', $response->status, 'an unconfigured PLATFORM_CODE must fail CLOSED');
     }
 }
 

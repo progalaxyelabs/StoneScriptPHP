@@ -136,6 +136,118 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
         return BearerToken::strip($headerValue);
     }
 
+    /** TENANCY_V2 switch (default false). Protected so a platform or a test can decide it differently. */
+    protected function tenancyV2Enabled(): bool
+    {
+        try {
+            return \StoneScriptPHP\Tenancy\Provisioning\TenancyMode::v2Enabled();
+        } catch (\Throwable) {
+            return false; // no resolvable environment: keep the 14.x flow
+        }
+    }
+
+    /** The MembershipAuthority for tenancy v2 (AUTH_MODE decides which). Protected: tests and platforms override it. */
+    protected function membershipAuthority(): \StoneScriptPHP\Tenancy\Provisioning\MembershipAuthority
+    {
+        return \StoneScriptPHP\Tenancy\Provisioning\TenancyMode::authority(
+            \StoneScriptPHP\Env::get_instance(),
+            new \StoneScriptPHP\Tenancy\Provisioning\DatabaseMainTenantStore()
+        );
+    }
+
+    /**
+     * Every known role of the identity in the tenant database, and the union of those roles' privileges (tenancy
+     * v2). STRICT: a failed tenant-database read throws (the caller answers 502); it is never turned into "no
+     * roles". Protected: platforms and tests may override.
+     *
+     * @return array{roles:list<string>,privileges:list<string>}
+     * @throws \Throwable
+     */
+    protected function tenantAccess(string $tenantId, string $identityId): array
+    {
+        return \StoneScriptPHP\Tenancy\Provisioning\TenantDbScope::run($tenantId, static function () use ($identityId): array {
+            return (new \StoneScriptPHP\Auth\TenantRoles\TenantRoleResolver(new \StoneScriptPHP\Auth\TenantRoles\DatabaseTenantRoleStore()))->strictAccess($identityId);
+        });
+    }
+
+    /**
+     * Platform API token for a tenant carrying ALL the user's known roles (roles[], no role_id) and bound to this
+     * platform (platform_code). Same shape for provision-tenant, select-tenant and exchange under tenancy v2.
+     *
+     * @param list<string> $roles
+     */
+    protected function mintTenantToken(string $identityId, string $tenantId, array $roles, string $email, string $displayName): ?string
+    {
+        if (empty($this->config->signingPrivateKeyPath)) {
+            return null;
+        }
+        try {
+            return (new \StoneScriptPHP\Auth\TokenExchangeService())->exchangeApiTokenWithRoles([
+                'sub' => $identityId,
+                'identity_id' => $identityId,
+                'tenant_id' => $tenantId,
+                'email' => $email !== '' ? $email : null,
+                'display_name' => $displayName !== '' ? $displayName : null,
+            ], $roles, [
+                'private_key_path' => $this->config->signingPrivateKeyPath,
+                'private_key_passphrase' => $this->config->signingPrivateKeyPassphrase,
+                'issuer' => $this->config->signingIssuer,
+                'ttl' => $this->config->exchangeTtl,
+                // platform_code is not an identity claim the minter copies; carry it so the token is bound to this platform.
+                'custom_claims' => ['platform_code' => $this->config->platformCode],
+            ]);
+        } catch (\StoneScriptPHP\Auth\TokenExchangeException $e) {
+            log_error(static::class . ': API token minting failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The one response every tenancy v2 entry point (provision-tenant, select-tenant, exchange) gives once a
+     * membership is established: roles read STRICTLY from the tenant database, all known roles on the token,
+     * and the privilege union in the body. A failed role read is a 502 (never mistaken for "no role"); no known
+     * role is a 403 `no_tenant_role` and no token; a token that cannot be signed is a 500.
+     *
+     * @param array{membership_id:string,tenant_id:string,tenant_name:string,tenant_slug:?string,tenant_db_name:string} $membership
+     * @param array{email?:?string,display_name?:?string} $profile
+     */
+    protected function tenantSessionResponse(string $identityId, array $membership, array $profile, string $message, int $status = 200): ApiResponse
+    {
+        try {
+            $access = $this->tenantAccess($membership['tenant_id'], $identityId);
+        } catch (\Throwable $e) {
+            log_error(static::class . ': tenant role lookup failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+            return res_error('Could not read roles for this tenant', 502);
+        }
+        $roles = $access['roles'];
+        if ($roles === []) {
+            log_warning(static::class . ': member has no known role in the tenant database; refusing');
+            return new ApiResponse('error', 'No role in this tenant', ['error' => 'no_tenant_role'], 403);
+        }
+
+        $token = $this->mintTenantToken($identityId, $membership['tenant_id'], $roles, (string) ($profile['email'] ?? ''), (string) ($profile['display_name'] ?? ''));
+        if ($token === null) {
+            return res_error('Could not issue a platform token for this tenant', 500);
+        }
+
+        $activeTenant = [
+            'id' => $membership['tenant_id'],
+            'name' => $membership['tenant_name'],
+            'slug' => $membership['tenant_slug'],
+            'db_name' => $membership['tenant_db_name'],
+        ];
+        return new ApiResponse('ok', $message, [
+            'access_token' => $token,
+            'token_type' => 'Bearer',
+            'expires_in' => $this->config->exchangeTtl,
+            'active_tenant' => $activeTenant,
+            'available_tenants' => [$activeTenant],
+            'roles' => $roles,
+            'privileges' => $access['privileges'],
+            'membership' => ['id' => $membership['membership_id'], 'tenant_id' => $membership['tenant_id']],
+        ], $status);
+    }
+
     /**
      * SECURITY — cross-platform token guard. Call this at the top of
      * process() (after extracting whatever `platform_code` claim the
@@ -156,12 +268,17 @@ abstract class BaseExternalAuthRoute implements IRouteHandler
         $reason = PlatformCodeGuard::check($tokenPlatformCode, $this->config->platformCode);
 
         if ($reason === PlatformCodeGuard::UNCONFIGURED) {
-            log_warning(
-                static::class . ': platform_code guard skipped — this server has no PLATFORM_CODE ' .
-                'configured, so tokens minted for ANY platform on the shared auth issuer are accepted ' .
-                'here. Set PLATFORM_CODE to close this gap.'
+            // FAIL CLOSED (15.0.0): a server that does not know which platform it is admits no token.
+            log_error(
+                static::class . ': refusing the request — this server has no PLATFORM_CODE configured, ' .
+                'so it cannot tell whether the token was minted for this platform. Set PLATFORM_CODE.'
             );
-            return null;
+            return new ApiResponse(
+                'error',
+                'This platform is not configured to accept tokens',
+                ['error' => 'platform_not_configured'],
+                403
+            );
         }
 
         if (PlatformCodeGuard::isRejection($reason)) {

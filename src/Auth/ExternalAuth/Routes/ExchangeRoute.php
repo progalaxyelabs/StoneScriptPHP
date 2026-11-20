@@ -173,6 +173,26 @@ class ExchangeRoute extends BaseExternalAuthRoute
             return $denial;
         }
 
+        // Tenancy v2 (TENANCY_V2=true): membership from the authority, roles STRICTLY from the tenant database,
+        // a token carrying all known roles. The platform's tenants_resolver / roles_resolver are never consulted.
+        if ($this->tenancyV2Enabled()) {
+            try {
+                $membership = $this->membershipAuthority()->verifyMembership((string) $identityId, $authToken, $this->tenant_id);
+            } catch (\Throwable $e) {
+                log_error('ExchangeRoute: v2 membership check failed: ' . \StoneScriptPHP\Persistence\LogSanitizer::describe($e));
+                return res_error('Authentication service unavailable', 502);
+            }
+            if ($membership === null) {
+                return new ApiResponse('error', 'Identity does not have access to the requested tenant', ['error' => 'tenant_access_denied'], 403);
+            }
+            return $this->tenantSessionResponse(
+                (string) $identityId,
+                $membership,
+                ['email' => $authClaims['email'] ?? null, 'display_name' => $authClaims['display_name'] ?? $authClaims['name'] ?? null],
+                'API token issued'
+            );
+        }
+
         // 3. Read tenant_id from the request body (not from the token — auth tokens are tenant-less).
         $requestedTenantId = $this->tenant_id;
         $requestedRoleId   = $this->role_id !== '' ? $this->role_id : null;

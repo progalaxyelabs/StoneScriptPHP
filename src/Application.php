@@ -176,6 +176,12 @@ class Application
             'The application environment is not configured correctly. See the server error log, or run '
             . '`php stone env:check` as the PHP-FPM user.'
         );
+        // 15.0.0: no platform code (auth.platform.code or PLATFORM_CODE) with an external auth service: refuse to boot.
+        $platformCodeFailure = \StoneScriptPHP\Support\BootCheck::platformCode($env, $authConfig, (string) $authMode);
+        if ($platformCodeFailure !== null) {
+            $bootConfigError($platformCodeFailure);
+            return;
+        }
         try {
             if ($authMode === 'external' || $authMode === 'hybrid') {
                 $exchange = new \StoneScriptPHP\Auth\ExternalAuth\ExternalAuthConfig(self::buildAuthRouteOptions($authConfig, $env));

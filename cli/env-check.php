@@ -45,6 +45,33 @@ try {
     exit(1);
 }
 
+// The platform code may come from the app's auth config (auth.platform.code) as well as from PLATFORM_CODE.
+// Read the project's config/auth.php when it is a plain array-returning file; anything else is treated as "no
+// auth config" and the Env value alone decides (the error then names both sources).
+$projectAuthConfig = [];
+foreach ([rtrim((string) ROOT_PATH, '/\\') . '/config/auth.php', rtrim((string) ROOT_PATH, '/\\') . '/src/config/auth.php'] as $authFile) {
+    if (is_file($authFile)) {
+        try {
+            $loaded = (static fn (string $f): mixed => require $f)($authFile);
+            if (is_array($loaded)) {
+                $projectAuthConfig = isset($loaded['auth']) && is_array($loaded['auth']) ? $loaded['auth'] : $loaded;
+                break;
+            }
+        } catch (\Throwable) {
+            // an auth config that cannot be loaded here is not a reason to hide the Env-level answer
+        }
+    }
+}
+$platformCodeFailure = BootCheck::platformCode($env, $projectAuthConfig);
+if ($platformCodeFailure !== null) {
+    fwrite(STDERR, "\nFAIL: the application would refuse to boot.\n  $platformCodeFailure\n");
+    exit(1);
+}
+
+if ($env->TENANCY_V2) {
+    echo "NOTE: TENANCY_V2 is on. Before the first deploy with it, run: php stone tenancy:preflight (must pass).\n";
+}
+
 // Checks that depend on application config (Application::run's $config) cannot be decided here. Show what they
 // would say, as warnings: they only matter if the app uses tenancy / 'typed_auth' => true.
 $warnings = [];

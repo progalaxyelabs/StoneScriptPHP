@@ -62,6 +62,12 @@ class InvitationException extends \Exception implements \StoneScriptPHP\Exceptio
     /** The server-to-server create-membership call to auth failed. */
     public const MEMBERSHIP_FAILED = 'invite_membership_failed';
 
+    /** Tenancy v2: the invitation names a role this platform's privilege seed does not know (or none). Nothing was written. */
+    public const INVALID_ROLE = 'invite_invalid_role';
+
+    /** Tenancy v2: the invitation records no inviter, so the member's role assignment cannot be attributed. Nothing was written. */
+    public const MISSING_INVITER = 'invite_missing_inviter';
+
     /** Required platform configuration (platform_secret, etc.) is missing. */
     public const CONFIG_ERROR = 'invite_config_error';
 

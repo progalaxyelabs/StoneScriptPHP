@@ -71,6 +71,7 @@ class InvitationCompletionServiceTest extends TestCase
         return array_merge([
             'sub'   => 'identity-123',
             'email' => 'invitee@example.com',
+            'platform_code' => 'testapp',
         ], $overrides);
     }
 
@@ -132,7 +133,7 @@ class InvitationCompletionServiceTest extends TestCase
             fn(InvitationRecord $inv) => $inv->role,
             fn(InvitationRecord $inv, array $claims, string $role) => ['tenant_id' => 'tenant-1'],
             $this->authConfig(),
-            ['platform_secret' => 'secret-123', 'card' => false]
+            ['platform_secret' => 'secret-123', 'card' => false, 'platform_code' => 'testapp']
         );
 
         $this->assertSame('passthrough', $result['mode']);
@@ -170,6 +171,7 @@ class InvitationCompletionServiceTest extends TestCase
             $this->authConfig(),
             [
                 'platform_secret' => 'secret-123',
+                'platform_code' => 'testapp',
                 'card' => true,
                 'signing_private_key_path' => $this->privateKeyPath,
                 'signing_issuer' => 'https://api.testapp.in',
@@ -204,7 +206,7 @@ class InvitationCompletionServiceTest extends TestCase
             fn(InvitationRecord $inv) => $inv->role,
             fn(InvitationRecord $inv, array $claims, string $role) => ['tenant_id' => 'tenant-1'],
             $this->authConfig(),
-            ['platform_secret' => 'secret-123', 'card' => true] // no signing_private_key_path
+            ['platform_secret' => 'secret-123', 'card' => true, 'platform_code' => 'testapp'] // no signing_private_key_path
         );
 
         $this->assertSame('card', $result['mode']);
@@ -224,7 +226,7 @@ class InvitationCompletionServiceTest extends TestCase
         );
 
         try {
-            $service->complete('bad-token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('bad-token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's', 'platform_code' => 'testapp']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::NOT_FOUND, $e->getErrorCode());
@@ -243,7 +245,7 @@ class InvitationCompletionServiceTest extends TestCase
         );
 
         try {
-            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's', 'platform_code' => 'testapp']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::ALREADY_USED, $e->getErrorCode());
@@ -264,7 +266,7 @@ class InvitationCompletionServiceTest extends TestCase
         );
 
         try {
-            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's', 'platform_code' => 'testapp']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::EXPIRED, $e->getErrorCode());
@@ -284,7 +286,7 @@ class InvitationCompletionServiceTest extends TestCase
         $service = new InvitationCompletionService($tokenExchange, $this->createMock(ExternalAuthServiceClient::class));
 
         try {
-            $service->complete('token', 'bad-auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'bad-auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's', 'platform_code' => 'testapp']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::INVALID_AUTH_TOKEN, $e->getErrorCode());
@@ -308,7 +310,7 @@ class InvitationCompletionServiceTest extends TestCase
         $service = new InvitationCompletionService($tokenExchange, $this->createMock(ExternalAuthServiceClient::class));
 
         try {
-            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's', 'platform_code' => 'testapp']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::EMAIL_MISMATCH, $e->getErrorCode());
@@ -336,7 +338,7 @@ class InvitationCompletionServiceTest extends TestCase
             fn($i) => $i->role,
             fn($i, $c, $r) => ['tenant_id' => 't'],
             $this->authConfig(),
-            ['platform_secret' => 's', 'card' => false]
+            ['platform_secret' => 's', 'card' => false, 'platform_code' => 'testapp']
         );
 
         $this->assertSame('passthrough', $result['mode']);
@@ -353,7 +355,7 @@ class InvitationCompletionServiceTest extends TestCase
         $service = new InvitationCompletionService($tokenExchange, $this->createMock(ExternalAuthServiceClient::class));
 
         try {
-            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => [], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => [], $this->authConfig(), ['platform_secret' => 's', 'platform_code' => 'testapp']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::CONFIG_ERROR, $e->getErrorCode());
@@ -371,7 +373,7 @@ class InvitationCompletionServiceTest extends TestCase
         $service = new InvitationCompletionService($tokenExchange, $this->createMock(ExternalAuthServiceClient::class));
 
         try {
-            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => null]);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => null, 'platform_code' => 'testapp']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::CONFIG_ERROR, $e->getErrorCode());
@@ -408,7 +410,7 @@ class InvitationCompletionServiceTest extends TestCase
         $service = new InvitationCompletionService($tokenExchange, $authClient);
 
         try {
-            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's']);
+            $service->complete('token', 'auth-token', $repository, fn($i) => $i->role, fn($i, $c, $r) => ['tenant_id' => 't'], $this->authConfig(), ['platform_secret' => 's', 'platform_code' => 'testapp']);
             $this->fail('expected InvitationException');
         } catch (InvitationException $e) {
             $this->assertSame(InvitationException::MEMBERSHIP_FAILED, $e->getErrorCode());
@@ -495,8 +497,8 @@ class InvitationCompletionServiceTest extends TestCase
         $repository->expects($this->never())->method('markAccepted');
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
-        // authClaims() helper never includes platform_code — unprovable, must fail closed.
-        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims());
+        // A token with no platform_code claim is unprovable, must fail closed.
+        $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims(['platform_code' => null]));
 
         $authClient = $this->createMock(ExternalAuthServiceClient::class);
         $authClient->expects($this->never())->method('createMembershipForInvite');
@@ -520,31 +522,39 @@ class InvitationCompletionServiceTest extends TestCase
         }
     }
 
-    public function test_complete_admits_any_platform_code_when_platform_code_not_configured(): void
+    public function test_complete_refuses_when_platform_code_not_configured(): void
     {
-        // $platformConfig has no 'platform_code' key at all — every other test
-        // in this file relies on exactly this (backward compat / fail-open).
+        // $platformConfig has no 'platform_code' key: FAIL CLOSED since 15.0.0, nothing is granted.
         $repository = $this->createMock(InvitationRepositoryInterface::class);
         $repository->method('findByTokenHash')->willReturn($this->makeInvitation());
+        $repository->expects($this->never())->method('markAccepted');
 
         $tokenExchange = $this->createMock(TokenExchangeService::class);
         $tokenExchange->method('validateIdentityToken')->willReturn($this->authClaims(['platform_code' => 'some-other-platform']));
 
         $authClient = $this->createMock(ExternalAuthServiceClient::class);
-        $authClient->method('createMembershipForInvite')->willReturn(['membership_id' => 'mem-1', 'access_token' => 'tok']);
+        $authClient->expects($this->never())->method('createMembershipForInvite');
 
         $service = new InvitationCompletionService($tokenExchange, $authClient);
+        $writerCalled = false;
 
-        $result = $service->complete(
-            'token',
-            'auth-token',
-            $repository,
-            fn($i) => $i->role,
-            fn($i, $c, $r) => ['tenant_id' => 'tenant-1'],
-            $this->authConfig(),
-            ['platform_secret' => 's', 'card' => false] // no platform_code key
-        );
-
-        $this->assertSame('passthrough', $result['mode'], 'unconfigured platform_code must fail OPEN');
+        try {
+            $service->complete(
+                'token',
+                'auth-token',
+                $repository,
+                fn($i) => $i->role,
+                function ($i, $c, $r) use (&$writerCalled) {
+                    $writerCalled = true;
+                    return ['tenant_id' => 'tenant-1'];
+                },
+                $this->authConfig(),
+                ['platform_secret' => 's', 'card' => false] // no platform_code key
+            );
+            $this->fail('expected InvitationException');
+        } catch (InvitationException $e) {
+            $this->assertSame(InvitationException::CONFIG_ERROR, $e->getErrorCode());
+        }
+        $this->assertFalse($writerCalled, 'no membership may be written when the platform is not configured');
     }
 }

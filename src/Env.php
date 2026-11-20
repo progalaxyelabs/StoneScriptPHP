@@ -161,6 +161,18 @@ class Env
     public string $PLATFORM_CODE = '';
     public ?string $EXTERNAL_AUTH_CLIENT_SECRET = null;
 
+    // Tenancy v2 (15.0.0). AUTH_V2_CLIENT_ID / AUTH_V2_CLIENT_SECRET are the platform credential written
+    // by `php stone platform:register` (and AUTH_V2_CLIENT_ID_NEXT / AUTH_V2_CLIENT_SECRET_NEXT by
+    // `platform:rotate-credential`). They are NEW variables on purpose: EXTERNAL_AUTH_CLIENT_SECRET is the
+    // live 14.x X-Platform-Secret and is never written or replaced by the framework. PLATFORM_UUID is the registered platform's
+    // uuid (the audience identity tokens must carry); it is NOT the legacy PLATFORM_ID, which is the
+    // platform slug. TENANCY_V2 stays false until a platform switches to the v2 sequence; false keeps
+    // the 14.x provisioning flow unchanged.
+    public ?string $AUTH_V2_CLIENT_ID = null;
+    public ?string $AUTH_V2_CLIENT_SECRET = null;
+    public string $PLATFORM_UUID = '';
+    public bool $TENANCY_V2 = false;
+
     public string $AUTH_COOKIE_DOMAIN = '';
     public ?bool $AUTH_COOKIE_SECURE = null;
 

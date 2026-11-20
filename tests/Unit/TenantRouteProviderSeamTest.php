@@ -213,10 +213,9 @@ class TenantRouteProviderSeamTest extends TestCase
             \StoneScriptPHP\Auth\ExternalAuth\Routes\MembershipsRoute::class,
             $routes['GET']['/api/auth/memberships']['handler']
         );
-        $this->assertSame(
-            \StoneScriptPHP\Auth\ExternalAuth\Routes\UpdateMembershipRoute::class,
-            $routes['PUT']['/api/auth/memberships/{id}']['handler']
-        );
+        // Removed in 15.0.0: the auth service has neither endpoint.
+        $this->assertArrayNotHasKey('/api/auth/memberships/{id}', $routes['PUT']);
+        $this->assertArrayNotHasKey('/api/auth/check-tenant-slug/{slug}', $routes['GET']);
     }
 
     /**
@@ -279,7 +278,7 @@ class TenantRouteProviderSeamTest extends TestCase
         $this->assertSame('authentication', $access['POST /api/auth/provision-tenant'] ?? null);
         $this->assertArrayNotHasKey('POST /api/auth/invite-member', $access);
         $this->assertSame('authentication', $access['GET /api/auth/memberships'] ?? null);
-        $this->assertSame('authentication', $access['PUT /api/auth/memberships/{id}'] ?? null);
+        $this->assertArrayNotHasKey('PUT /api/auth/memberships/{id}', $access, 'UpdateMembershipRoute was removed in 15.0.0');
     }
 
     /**

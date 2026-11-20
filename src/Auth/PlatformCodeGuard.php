@@ -44,24 +44,19 @@ namespace StoneScriptPHP\Auth;
  *    because the auth service's Claims struct always stamps `platform_code`
  *    on every auth/API token it issues — a real token missing this claim
  *    only happens for a forged/hand-crafted token, which SHOULD be rejected.
- *  - Unconfigured platform code (`PLATFORM_CODE` never set) -> ADMIT
- *    ('unconfigured'), but every caller of this class is required to log a
- *    loud warning on that branch. This is a deliberate backward-compat
- *    choice, not an oversight: a framework consumer that has not set
- *    PLATFORM_CODE at all has not opted into platform-scoped tokens (there
- *    is no "this platform's own code" to compare against — rejecting
- *    everything would brick every such deployment outright, including
- *    single-platform / T1 setups that never needed the concept). The loud
- *    warning is what keeps this from silently re-opening the hole for a
- *    platform that DOES set PLATFORM_CODE: any accidental unset shows up in
- *    logs instead of vanishing.
+ *  - Unconfigured platform code (`PLATFORM_CODE` never set) -> REJECT
+ *    ('unconfigured'). FAIL CLOSED since 15.0.0 (it was admitted with a
+ *    warning before): a server that cannot say which platform it is cannot
+ *    prove a token was meant for it, so it admits no token. A deployment must
+ *    set PLATFORM_CODE (or the platform id it was registered with); see the
+ *    14 -> 15 upgrade notes.
  */
 final class PlatformCodeGuard
 {
     /** Configured platform code matches the token's claim. */
     public const OK = null;
 
-    /** No platform code configured on this server — check skipped (fail-open, log required). */
+    /** No platform code configured on this server: every token is refused (fail closed). */
     public const UNCONFIGURED = 'unconfigured';
 
     /** Platform code is configured but the token carries no (or an empty) platform_code claim. */
@@ -104,12 +99,11 @@ final class PlatformCodeGuard
     }
 
     /**
-     * True when {@see self::check()}'s result means the caller must actually
-     * reject the request (as opposed to admitting it, with or without a
-     * warning).
+     * True when {@see self::check()}'s result means the caller must reject
+     * the request. Every non-null reason is a rejection.
      */
     public static function isRejection(?string $reason): bool
     {
-        return $reason === self::MISSING_CLAIM || $reason === self::MISMATCH;
+        return $reason === self::UNCONFIGURED || $reason === self::MISSING_CLAIM || $reason === self::MISMATCH;
     }
 }
