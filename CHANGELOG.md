@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.4.2]
+
+### Fixed
+- The built-in Google sign-in popup page no longer calls `window.close()` right after posting the result to the
+  opener. The opener polls `popup.closed`, and a browser does not order that against the dispatch of the posted
+  message, so a successful sign-in could be reported as "Login cancelled" (#10568). The opener closes the popup on
+  receipt; the page now only closes itself as a 1.5 s fallback. Pair with `@progalaxyelabs/stonescriptphp-client-core`
+  >= 4.5.2, which also waits a short grace after seeing the popup closed.
+
 ## [14.4.1]
 
 ### Fixed

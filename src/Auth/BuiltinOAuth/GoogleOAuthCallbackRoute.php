@@ -229,7 +229,10 @@ class GoogleOAuthCallbackRoute implements IRouteHandler
   if (window.opener) {
     targets.forEach(function(o) { try { window.opener.postMessage(data, o); } catch (e) {} });
     document.body.innerText = 'Sign-in finished. You can close this window.';
-    window.close();
+    // Not an immediate close: the opener polls popup.closed, and a browser does not order that observation against
+    // the dispatch of the message just posted, so an immediate close can make a successful sign-in look cancelled.
+    // The opener closes this window itself on receipt; this is only the fallback.
+    setTimeout(function() { window.close(); }, 1500);
   } else {
     document.body.innerText = 'Sign-in finished, but this window was not opened by the site you signed in from. You can close it.';
   }

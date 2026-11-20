@@ -334,6 +334,30 @@ class GoogleOAuthBuiltinTest extends TestCase
         $this->assertStringContainsString('access_token', $response->html);
         $this->assertStringContainsString('"display_name":"Ann Lee"', $response->html);
         $this->assertStringContainsString('"name":"Ann Lee"', $response->html);
+        $this->assertPopupDoesNotCloseRightAfterPosting($response->html);
+    }
+
+    /**
+     * #10568: the bridge page must not call window.close() right after postMessage. The opener polls popup.closed
+     * and a browser does not order that against the dispatch of the posted message, so an immediate close can turn
+     * a successful sign-in into "Login cancelled". Error pages carry the same shape (an error must not read as a cancel).
+     */
+    public function testBridgePageClosesOnlyAsADelayedFallback(): void
+    {
+        $route = $this->makeCallbackRoute();
+        $route->error = 'access_denied';
+        $response = $route->process();
+        $this->assertInstanceOf(HtmlResponse::class, $response);
+        $this->assertStringContainsString('oauth_error', $response->html);
+        $this->assertPopupDoesNotCloseRightAfterPosting($response->html);
+    }
+
+    private function assertPopupDoesNotCloseRightAfterPosting(string $html): void
+    {
+        $this->assertStringContainsString('postMessage(data, o)', $html);
+        $this->assertStringContainsString('setTimeout(function() { window.close(); }, 1500);', $html);
+        $this->assertSame(1, substr_count($html, 'window.close()'), 'the only close is the delayed fallback');
+        $this->assertDoesNotMatchRegularExpression('/^\s*window\.close\(\);/m', $html, 'no bare immediate close');
     }
 
     private function makeCallbackRoute(): GoogleOAuthCallbackRoute
